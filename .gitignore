@@ -73,4 +73,5 @@ data/users/
 
 # API Keys and Secrets
 config.ini
-secrets.json 
+secrets.json orchestrator/dashboard/client/node_modules/.cache/
+orchestrator/dashboard/client/node_modules/.cache/
