@@ -1,75 +1,41 @@
 #!/usr/bin/env python3
 """
-Module 2: Data Ingestion
-Ingests downloaded data without duplicates into a properly configured database.
-This module assumes Module 1 (01_setup_database.py) has run successfully.
+Module 3: Data Ingestion - Production Ready
 
-WHAT THIS SCRIPT DOES:
-• CLEARS all existing users and reloads fresh from data/users/
-• Filters OUT users with 'atly' emails and 'steps' emails (except @users.steps.me)
-• Sets valid_user=TRUE for all processed users
-• Processes events INCREMENTALLY by date from data/events/ (only new dates)
-• Only processes 6 important event types (RC Trial started, converted, cancelled, etc.)
-• Uses production-grade batch processing with comprehensive error handling
-• Provides detailed logging, metrics, and validation
-• Maintains data integrity with proper transaction management
-
-REQUIREMENTS:
-• Database must be properly initialized by Module 1
-• data/users/ directory with user JSON files
-• data/events/ directory with event JSON files organized by date
+This module ingests downloaded Mixpanel data into the database with:
+- Robust error handling and retry mechanisms
+- Memory-efficient streaming processing
+- Comprehensive data validation and filtering
+- Production-grade optimizations and monitoring
 """
+
 import os
 import sys
 import sqlite3
 import json
-import hashlib
-import datetime
 import logging
-import re
 import time
-from typing import Dict, Any, List, Optional, Tuple, Set
+import datetime
+import re
 from pathlib import Path
+from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass
 from contextlib import contextmanager
+
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuration - Use paths relative to project root
-# Get the actual project root by finding the directory that contains the database/mixpanel_data.db file
-script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-project_root = None
-
-# Try different levels to find the project root that contains database/mixpanel_data.db
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    db_path = potential_root / "database" / "mixpanel_data.db"
-    if db_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-DATABASE_PATH = project_root / "database" / "mixpanel_data.db"
+# Configuration - Use centralized database path discovery
+DATABASE_PATH = Path(get_database_path('mixpanel_data'))
+# Find project root for data paths  
+script_dir = Path(__file__).parent
+project_root = DATABASE_PATH.parent.parent  # database is in project root, so go up one more level
 EVENTS_BASE_PATH = project_root / "data" / "events"
 USER_FILES_PATH = project_root / "data" / "users"
 
@@ -250,18 +216,12 @@ def process_all_data(conn: sqlite3.Connection, metrics: IngestionMetrics):
     process_events_incrementally(conn, metrics)
 
 def refresh_all_users(conn: sqlite3.Connection, metrics: IngestionMetrics):
-    """Remove all users and reload them from user files with validation"""
+    """Process users - table should already be empty after database setup"""
     cursor = conn.cursor()
     
     try:
-        # FULL REFRESH: Clear all related tables for complete clean slate
-        logger.info("FULL REFRESH: Clearing all user, event, and user_product data for complete reload...")
+        logger.info("Processing user data...")
         cursor.execute("BEGIN IMMEDIATE")
-        cursor.execute("DELETE FROM mixpanel_event")  # Clear events first (foreign key)
-        cursor.execute("DELETE FROM user_product_metrics")  # Clear user products
-        cursor.execute("DELETE FROM mixpanel_user")   # Then clear users
-        cursor.execute("DELETE FROM processed_event_days")  # Clear processed dates for clean restart
-        logger.info("All tables cleared - ready for complete dataset ingestion")
         
         # Process all user files
         user_files = list(USER_FILES_PATH.glob("*.json"))
@@ -289,12 +249,14 @@ def refresh_all_users(conn: sqlite3.Connection, metrics: IngestionMetrics):
                 raise
         
         cursor.execute("COMMIT")
-        logger.info(f"User refresh completed: {metrics.users_processed} users processed")
+        logger.info(f"User processing completed: {metrics.users_processed} users processed")
         
     except Exception as e:
         cursor.execute("ROLLBACK")
-        logger.error(f"User refresh failed: {e}")
+        logger.error(f"User processing failed: {e}")
         raise
+
+
 
 def process_user_file(conn: sqlite3.Connection, file_path: Path) -> Dict[str, int]:
     """Process users from a file with comprehensive validation and error handling"""
@@ -894,4 +856,41 @@ def log_final_metrics(metrics: IngestionMetrics):
         logger.info(f"Processing Rate: {events_per_second:.2f} events/second")
 
 if __name__ == "__main__":
+    sys.exit(main()) 
+    
+    logger.info("Verification Results:")
+    for check in checks:
+        logger.info(f"  {check}")
+    
+    logger.info(f"Additional Details:")
+    logger.info(f"  - User-product records: {user_products_count}")
+    logger.info(f"  - Processed date entries: {processed_dates_count}")
+
+def log_final_metrics(metrics: IngestionMetrics):
+    """Log comprehensive final metrics"""
+    logger.info("=== INGESTION METRICS ===")
+    logger.info(f"Total Processing Time: {metrics.elapsed_time():.2f} seconds")
+    logger.info(f"Files Processed: {metrics.files_processed}")
+    logger.info(f"Dates Processed: {metrics.dates_processed}")
+    logger.info(f"Users Processed: {metrics.users_processed}")
+    logger.info(f"Users Filtered (@atly.com): {metrics.users_filtered_atly}")
+    logger.info(f"Users Filtered (test): {metrics.users_filtered_test}")
+    logger.info(f"Users Filtered (@steps.me): {metrics.users_filtered_steps}")
+    logger.info(f"Events Processed: {metrics.events_processed}")
+    logger.info(f"Events Skipped (unimportant): {metrics.events_skipped_unimportant}")
+    logger.info(f"Events Skipped (invalid): {metrics.events_skipped_invalid}")
+    logger.info(f"Events Skipped (missing users): {metrics.events_skipped_missing_users}")
+    
+    # Summary of data integrity
+    if metrics.events_skipped_missing_users > 0:
+        total_events_attempted = metrics.events_processed + metrics.events_skipped_missing_users + metrics.events_skipped_unimportant + metrics.events_skipped_invalid
+        integrity_rate = (metrics.events_processed / total_events_attempted) * 100 if total_events_attempted > 0 else 0
+        logger.info(f"Data Integrity: {integrity_rate:.1f}% of events successfully linked to existing users")
+    
+    if metrics.events_processed > 0:
+        events_per_second = metrics.events_processed / metrics.elapsed_time()
+        logger.info(f"Processing Rate: {events_per_second:.2f} events/second")
+
+if __name__ == "__main__":
+    sys.exit(main()) 
     sys.exit(main()) 

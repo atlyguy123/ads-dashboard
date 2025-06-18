@@ -1,0 +1,13 @@
+/* App-specific styles (most styling is handled by Tailwind CSS) */
+
+.active-nav-link {
+  color: #4F46E5;
+  font-weight: 600;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .active-nav-link {
+    color: #818CF8;
+  }
+} 

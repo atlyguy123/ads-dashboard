@@ -25,37 +25,14 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-
-def _find_database_path() -> str:
-    """Find the database path robustly across different directory structures"""
-    script_dir = Path(__file__).parent  # pipelines/pre_processing_pipeline/
-    
-    # Try different levels to find the project root that contains database/mixpanel_data.db
-    potential_roots = [
-        script_dir.parent.parent,  # Go up from pipelines/pre_processing_pipeline/ to project root
-        script_dir.parent.parent.parent,  # In case we're nested deeper
-        Path.cwd().parent,  # Parent of current working directory
-        Path.cwd().parent.parent,  # Grandparent of current working directory
-    ]
-
-    for potential_root in potential_roots:
-        db_path = potential_root / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            return str(db_path)
-
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            return str(db_path)
-        current = current.parent
-    
-    raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
 
 
 def main():
@@ -100,7 +77,7 @@ class ValueEstimator:
         """
         # Auto-detect database path if not provided
         if db_path is None:
-            db_path = _find_database_path()
+            db_path = get_database_path('mixpanel_data')
         self.db_path = db_path
         self.pricing_rules = None
         self._load_pricing_rules()

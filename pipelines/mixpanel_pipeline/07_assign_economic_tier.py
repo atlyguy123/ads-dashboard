@@ -2,50 +2,30 @@
 """
 Module 7: Assign Economic Tier
 
-Assigns economic_tier values to users in the database based on their country
-using a comprehensive economic tier mapping system.
+This module assigns economic tier classifications to users based on their country.
+Economic tiers reflect purchasing power and economic development levels to enable
+targeted pricing and analysis strategies.
 
-This module is completely self-contained and includes all business logic
-for country-to-tier mapping and database operations.
+Key Features:
+- Comprehensive country-to-tier mapping based on economic indicators
+- Robust validation and verification of assignments
+- Efficient batch processing with proper indexing
+- Detailed statistics and reporting
 """
-import sys
+
 import sqlite3
-from typing import Dict, List, Tuple, Optional
+import logging
+from typing import Dict, List, Any, Optional
 from pathlib import Path
+import sys
 
-# Configuration - find database path robustly
-script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-project_root = None
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
-# Try different levels to find the project root that contains database/mixpanel_data.db
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    db_path = potential_root / "database" / "mixpanel_data.db"
-    if db_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-DATABASE_PATH = project_root / "database" / "mixpanel_data.db"
-
+# Configuration - Use centralized database path discovery
+DATABASE_PATH = get_database_path('mixpanel_data')
 
 # Economic Tier Mappings
 # Based on discretionary income and purchasing power of average citizens

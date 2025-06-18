@@ -2,6 +2,16 @@
 """
 Module 6: Validate Event Lifecycle
 
+This module validates that user-product lifecycle events follow valid business patterns.
+It analyzes event sequences for each user-product combination to identify valid vs invalid
+lifecycle patterns according to subscription business rules.
+
+Key Features:
+- Comprehensive lifecycle pattern validation
+- Detailed statistics on invalid patterns
+- Efficient batch processing with proper indexing
+- Clear categorization of lifecycle violations
+
 VALIDATION RULES SUMMARY:
 ========================
 
@@ -39,48 +49,25 @@ BUSINESS RULES:
 - No trial events after subscription events
 - Events must be in chronological order
 """
+
 import os
 import sys
 import sqlite3
+import logging
 import json
 import time
-import logging
 from datetime import datetime, timedelta
-from collections import defaultdict, namedtuple
+from collections import namedtuple, defaultdict
+from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
 
-# Configuration - find database path robustly
-script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-project_root = None
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
-# Try different levels to find the project root that contains database/mixpanel_data.db
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    db_path = potential_root / "database" / "mixpanel_data.db"
-    if db_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-DATABASE_PATH = project_root / "database" / "mixpanel_data.db"
+# Configuration - Use centralized database path discovery
+DATABASE_PATH = get_database_path('mixpanel_data')
 
 # Configure logging for detailed invalid lifecycle tracking
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -259,6 +246,31 @@ def setup_and_validate_lifecycles(conn):
         INVALID_LIFECYCLE_STATS[key] = 0
     print("   → Reset invalid lifecycle statistics")
     
+    # PRESERVE ATTRIBUTION DATA: Backup before clearing
+    print("   → Preserving existing attribution data before clearing relationships...")
+    
+    # First, backup existing attribution data
+    cursor.execute("""
+        CREATE TEMP TABLE temp_attribution_backup_setup AS
+        SELECT 
+            distinct_id,
+            product_id,
+            abi_ad_id,
+            abi_campaign_id,
+            abi_ad_set_id,
+            country,
+            region,
+            device,
+            store
+        FROM user_product_metrics
+        WHERE abi_ad_id IS NOT NULL 
+           OR abi_campaign_id IS NOT NULL 
+           OR abi_ad_set_id IS NOT NULL
+    """)
+    
+    attribution_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup_setup").fetchone()[0]
+    print(f"   → Backed up attribution data for {attribution_backup_count:,} records")
+    
     # Clear existing relationships and validation data
     print("   → Clearing existing user-product relationships...")
     cursor.execute("DELETE FROM user_product_metrics WHERE 1=1")
@@ -314,28 +326,68 @@ def setup_and_validate_lifecycles(conn):
             else:
                 valid_count += 1
             
-            # Create the relationship record
+            # Create the relationship record with attribution data if available
+            # Check if we have attribution data backed up for this user-product combination
             cursor.execute("""
-                INSERT INTO user_product_metrics 
-                (distinct_id, product_id, credited_date, current_status, current_value, 
-                 value_status, last_updated_ts, valid_lifecycle)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                distinct_id, 
-                product_id,
-                'PLACEHOLDER_DATE',
-                'PLACEHOLDER_STATUS',
-                -999.99,
-                'PLACEHOLDER_VALUE_STATUS',
-                datetime.now(),
-                1 if is_valid else 0
-            ))
+                SELECT abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store
+                FROM temp_attribution_backup_setup
+                WHERE distinct_id = ? AND product_id = ?
+            """, (distinct_id, product_id))
+            
+            attribution_data = cursor.fetchone()
+            
+            if attribution_data:
+                # Restore with attribution data
+                abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store = attribution_data
+                cursor.execute("""
+                    INSERT INTO user_product_metrics 
+                    (distinct_id, product_id, credited_date, current_status, current_value, 
+                     value_status, last_updated_ts, valid_lifecycle, abi_ad_id, abi_campaign_id, 
+                     abi_ad_set_id, country, region, device, store)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    distinct_id, 
+                    product_id,
+                    'PLACEHOLDER_DATE',
+                    'PLACEHOLDER_STATUS',
+                    -999.99,
+                    'PLACEHOLDER_VALUE_STATUS',
+                    datetime.now(),
+                    1 if is_valid else 0,
+                    abi_ad_id,              # PRESERVED attribution data
+                    abi_campaign_id,        # PRESERVED attribution data
+                    abi_ad_set_id,          # PRESERVED attribution data
+                    country,                # PRESERVED geographic data
+                    region,                 # PRESERVED geographic data
+                    device,                 # PRESERVED device data
+                    store                   # PRESERVED store data
+                ))
+            else:
+                # Create without attribution data (new relationship)
+                cursor.execute("""
+                    INSERT INTO user_product_metrics 
+                    (distinct_id, product_id, credited_date, current_status, current_value, 
+                     value_status, last_updated_ts, valid_lifecycle)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    distinct_id, 
+                    product_id,
+                    'PLACEHOLDER_DATE',
+                    'PLACEHOLDER_STATUS',
+                    -999.99,
+                    'PLACEHOLDER_VALUE_STATUS',
+                    datetime.now(),
+                    1 if is_valid else 0
+                ))
             
             total_count += 1
                 
         except Exception as e:
             print(f"   → Error processing {distinct_id}, {product_id}: {e}")
             increment_invalid_stat('datetime_parse_error')
+    
+    # Clean up temporary table
+    cursor.execute("DROP TABLE temp_attribution_backup_setup")
     
     conn.commit()
     
@@ -344,6 +396,19 @@ def setup_and_validate_lifecycles(conn):
     print(f"   → Created {total_count:,} user-product relationships")
     print(f"   → Valid lifecycles: {valid_count:,} ({valid_count/total_count*100:.1f}%)")
     print(f"   → Invalid lifecycles: {total_count-valid_count:,} ({(total_count-valid_count)/total_count*100:.1f}%)")
+    
+    # Verify attribution preservation
+    cursor.execute("""
+        SELECT COUNT(*) FROM user_product_metrics 
+        WHERE abi_ad_id IS NOT NULL OR abi_campaign_id IS NOT NULL OR abi_ad_set_id IS NOT NULL
+    """)
+    preserved_count = cursor.fetchone()[0]
+    print(f"   → ✅ Preserved attribution data for {preserved_count:,} relationships ({preserved_count/total_count*100:.1f}%)")
+    
+    if preserved_count == 0:
+        print("   → ⚠️  WARNING: No attribution data preserved! Check if Module 4 ran successfully.")
+    elif preserved_count < attribution_backup_count:
+        print(f"   → ⚠️  WARNING: Lost attribution data for {attribution_backup_count - preserved_count:,} relationships")
 
 def display_validation_results(conn):
     """Display comprehensive validation results and statistics"""
@@ -481,7 +546,32 @@ def analyze_product_usage(conn):
     cursor = conn.cursor()
     
     # CRITICAL: Always rebuild user-product relationships from scratch
-    # Clear existing relationships first
+    # But PRESERVE attribution data that was set by Module 4
+    print("   → Preserving existing attribution data before clearing relationships...")
+    
+    # First, backup existing attribution data
+    cursor.execute("""
+        CREATE TEMP TABLE temp_attribution_backup AS
+        SELECT 
+            distinct_id,
+            product_id,
+            abi_ad_id,
+            abi_campaign_id,
+            abi_ad_set_id,
+            country,
+            region,
+            device,
+            store
+        FROM user_product_metrics
+        WHERE abi_ad_id IS NOT NULL 
+           OR abi_campaign_id IS NOT NULL 
+           OR abi_ad_set_id IS NOT NULL
+    """)
+    
+    attribution_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup").fetchone()[0]
+    print(f"   → Backed up attribution data for {attribution_backup_count:,} records")
+    
+    # Clear existing relationships
     print("   → Clearing existing user-product relationships...")
     cursor.execute("DELETE FROM user_product_metrics WHERE 1=1")
     conn.commit()
@@ -513,29 +603,82 @@ def analyze_product_usage(conn):
     
     for distinct_id, product_id in user_product_pairs:
         try:
+            # Check if we have attribution data backed up for this user-product combination
             cursor.execute("""
-                INSERT INTO user_product_metrics 
-                (distinct_id, product_id, credited_date, current_status, current_value, 
-                 value_status, last_updated_ts, valid_lifecycle)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                distinct_id, 
-                product_id,
-                'PLACEHOLDER_DATE',      # Clear placeholder - will be set by Module 3
-                'PLACEHOLDER_STATUS',    # Clear placeholder - will be set by Module 3
-                -999.99,                 # Clear placeholder - will be set by Module 3
-                'PLACEHOLDER_VALUE_STATUS',  # Clear placeholder - will be set by Module 3
-                datetime.now(),
-                0  # Will be validated in Step 3
-            ))
+                SELECT abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store
+                FROM temp_attribution_backup
+                WHERE distinct_id = ? AND product_id = ?
+            """, (distinct_id, product_id))
+            
+            attribution_data = cursor.fetchone()
+            
+            if attribution_data:
+                # Restore with attribution data
+                abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store = attribution_data
+                cursor.execute("""
+                    INSERT INTO user_product_metrics 
+                    (distinct_id, product_id, credited_date, current_status, current_value, 
+                     value_status, last_updated_ts, valid_lifecycle, abi_ad_id, abi_campaign_id, 
+                     abi_ad_set_id, country, region, device, store)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    distinct_id, 
+                    product_id,
+                    'PLACEHOLDER_DATE',      # Clear placeholder - will be set by Module 3
+                    'PLACEHOLDER_STATUS',    # Clear placeholder - will be set by Module 3
+                    -999.99,                 # Clear placeholder - will be set by Module 3
+                    'PLACEHOLDER_VALUE_STATUS',  # Clear placeholder - will be set by Module 3
+                    datetime.now(),
+                    0,  # Will be validated in Step 3
+                    abi_ad_id,              # PRESERVED attribution data
+                    abi_campaign_id,        # PRESERVED attribution data
+                    abi_ad_set_id,          # PRESERVED attribution data
+                    country,                # PRESERVED geographic data
+                    region,                 # PRESERVED geographic data
+                    device,                 # PRESERVED device data
+                    store                   # PRESERVED store data
+                ))
+            else:
+                # Create without attribution data (new relationship)
+                cursor.execute("""
+                    INSERT INTO user_product_metrics 
+                    (distinct_id, product_id, credited_date, current_status, current_value, 
+                     value_status, last_updated_ts, valid_lifecycle)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    distinct_id, 
+                    product_id,
+                    'PLACEHOLDER_DATE',      # Clear placeholder - will be set by Module 3
+                    'PLACEHOLDER_STATUS',    # Clear placeholder - will be set by Module 3
+                    -999.99,                 # Clear placeholder - will be set by Module 3
+                    'PLACEHOLDER_VALUE_STATUS',  # Clear placeholder - will be set by Module 3
+                    datetime.now(),
+                    0  # Will be validated in Step 3
+                ))
             
             total_relationships += 1
                 
         except Exception as e:
             print(f"Error inserting user-product relationship for {distinct_id}, {product_id}: {e}")
     
+    # Clean up temporary table
+    cursor.execute("DROP TABLE temp_attribution_backup")
+    
     conn.commit()
     print(f"   → Created {total_relationships:,} user-product relationships for validation")
+    
+    # Verify attribution preservation
+    cursor.execute("""
+        SELECT COUNT(*) FROM user_product_metrics 
+        WHERE abi_ad_id IS NOT NULL OR abi_campaign_id IS NOT NULL OR abi_ad_set_id IS NOT NULL
+    """)
+    preserved_count = cursor.fetchone()[0]
+    print(f"   → ✅ Preserved attribution data for {preserved_count:,} relationships ({preserved_count/total_relationships*100:.1f}%)")
+    
+    if preserved_count == 0:
+        print("   → ⚠️  WARNING: No attribution data preserved! Check if Module 4 ran successfully.")
+    elif preserved_count < attribution_backup_count:
+        print(f"   → ⚠️  WARNING: Lost attribution data for {attribution_backup_count - preserved_count:,} relationships")
 
 def classify_event_type(event_name):
     """Classify an event name into lifecycle event types"""

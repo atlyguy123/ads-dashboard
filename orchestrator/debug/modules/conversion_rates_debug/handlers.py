@@ -3,16 +3,24 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+import sys
+
+# Add utils directory to path for database utilities
+sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent / "utils"))
+from database_utils import get_database_path
 
 logger = logging.getLogger(__name__)
 
-# Database connection
-DB_PATH = "/Users/joshuakaufman/Ads Dashboard V3 copy 12 - updated ingest copy 2/database/mixpanel_data.db"
+# Database path - use dynamic discovery
+def get_db_path():
+    return get_database_path('mixpanel_data')
 
 def handle_load_overview(data: Dict[str, Any]) -> Dict[str, Any]:
     """Load overview statistics from the database"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         conn.row_factory = sqlite3.Row
         
         # Get basic stats
@@ -35,7 +43,7 @@ def handle_load_overview(data: Dict[str, Any]) -> Dict[str, Any]:
 def handle_load_cohort_tree(data: Dict[str, Any]) -> Dict[str, Any]:
     """Load hierarchical cohort tree from the database"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         conn.row_factory = sqlite3.Row
         
         # Build hierarchical tree structure

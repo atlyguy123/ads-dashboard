@@ -7,25 +7,33 @@ It helps verify bucket creation, assignment logic, and data integrity.
 
 import sqlite3
 import pandas as pd
-import os
-from datetime import datetime
-from collections import defaultdict
-from typing import Dict, List, Any, Optional
+import json
 import logging
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
+from pathlib import Path
+import sys
 
-# Database path - adjust as needed
-DB_PATH = "/Users/joshuakaufman/Ads Dashboard V3 copy 12 - updated ingest copy 2/database/mixpanel_data.db"
+# Add utils directory to path for database utilities
+sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent / "utils"))
+from database_utils import get_database_path
+
+logger = logging.getLogger(__name__)
+
+# Database path - use dynamic discovery
+def get_db_path():
+    return get_database_path('mixpanel_data')
 
 def handle_get_bucket_overview(request_data):
     """Get overview of all price buckets created by the assignment pipeline"""
     try:
-        if not os.path.exists(DB_PATH):
+        if not get_db_path():
             return {
                 'success': False,
-                'error': f'Database not found at {DB_PATH}'
+                'error': f'Database not found'
             }
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         # Get price bucket distribution
         query = """
@@ -99,7 +107,7 @@ def handle_get_bucket_overview(request_data):
 def handle_get_assignment_summary(request_data):
     """Get summary of how price buckets were assigned (conversion types)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         # Since assignment_type is not stored, we need to infer it from the data
         # We'll analyze the assignment patterns to understand the distribution
@@ -202,7 +210,7 @@ def handle_search_assignments(request_data):
         max_bucket = request_data.get('max_bucket', '')
         limit = min(int(request_data.get('limit', 100)), 500)  # Max 500 results
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         # Build dynamic query
         conditions = ["upm.valid_lifecycle = 1"]
@@ -299,7 +307,7 @@ def handle_search_assignments(request_data):
 def handle_validate_data(request_data):
     """Validate data integrity and identify potential issues"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         issues = []
         
@@ -410,7 +418,7 @@ def handle_validate_data(request_data):
 def handle_analyze_conversions(request_data):
     """Analyze conversion events that create the price buckets"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         # Get conversion events analysis
         query = """
@@ -481,7 +489,7 @@ def handle_analyze_conversions(request_data):
 def handle_get_sample_data(request_data):
     """Get sample data showing how buckets were assigned"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(get_db_path())
         
         # Get sample of each assignment type
         query = """

@@ -6,12 +6,20 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 from decimal import Decimal
+import json
+import logging
+from pathlib import Path
+import sys
 
+# Add utils directory to path for database utilities
+sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent / "utils"))
+from database_utils import get_database_path
+
+logger = logging.getLogger(__name__)
 
 def get_db_path():
-    """Get the path to the mixpanel database"""
-    # This matches the path from the 03_estimate_values.py file
-    return "/Users/joshuakaufman/Ads Dashboard V3 copy 12 - updated ingest copy 2/database/mixpanel_data.db"
+    """Get database path using dynamic discovery"""
+    return get_database_path('mixpanel_data')
 
 
 def handle_load_timeline_data(request_data):

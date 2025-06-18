@@ -18,10 +18,16 @@ import sqlite3
 import json
 import logging
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, Set, Tuple, Optional, Any
+
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
 # Configure logging
 logging.basicConfig(
@@ -500,38 +506,8 @@ def main():
         description="Create user-product relationships by analyzing events (EFFICIENT approach)"
     )
     
-    # Default to database path - find project root robustly
-    script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-    project_root = None
-
-    # Try different levels to find the project root that contains database/mixpanel_data.db
-    potential_roots = [
-        script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-        script_dir.parent.parent.parent,  # In case we're nested deeper
-        Path.cwd().parent,  # Parent of current working directory
-        Path.cwd().parent.parent,  # Grandparent of current working directory
-    ]
-
-    for potential_root in potential_roots:
-        db_path = potential_root / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = potential_root
-            break
-
-    if project_root is None:
-        # Fallback: walk up from script location looking for database/mixpanel_data.db
-        current = script_dir
-        while current != current.parent:  # Stop at filesystem root
-            db_path = current / "database" / "mixpanel_data.db"
-            if db_path.exists():
-                project_root = current
-                break
-            current = current.parent
-        
-        if project_root is None:
-            raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-    default_db_path = project_root / "database" / "mixpanel_data.db"
+    # Use centralized database path discovery
+    default_db_path = get_database_path('mixpanel_data')
     
     parser.add_argument(
         '--database', 

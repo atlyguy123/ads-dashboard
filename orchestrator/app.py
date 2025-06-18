@@ -27,7 +27,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(debug_bp)
 
 # Enable CORS for all routes to handle cross-origin requests
-CORS(app, origins=['http://localhost:5001', 'http://localhost:5678'], 
+CORS(app, origins=['http://localhost:3000', 'http://localhost:5001', 'http://localhost:5678'], 
      allow_headers=['Content-Type', 'Authorization'], 
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 

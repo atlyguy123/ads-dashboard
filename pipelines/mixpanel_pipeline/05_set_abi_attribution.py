@@ -1,45 +1,22 @@
 #!/usr/bin/env python3
 """
-Module 3: Set HasABI Attribution
+Module 5: Set HasABI Attribution
+
 Sets has_abi_attribution=TRUE for users who have abi_ad_id set (not null).
+This module provides comprehensive ABI attribution analysis and verification.
 """
 import os
 import sys
 import sqlite3
 from pathlib import Path
 
-# Configuration - find database path robustly
-script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-project_root = None
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
-# Try different levels to find the project root that contains database/mixpanel_data.db
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    db_path = potential_root / "database" / "mixpanel_data.db"
-    if db_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-DATABASE_PATH = project_root / "database" / "mixpanel_data.db"
+# Configuration - Use centralized database path discovery
+DATABASE_PATH = get_database_path('mixpanel_data')
 
 def main():
     try:

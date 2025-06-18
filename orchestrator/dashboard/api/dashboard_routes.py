@@ -182,6 +182,8 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
+
+
 @dashboard_bp.route('/chart-data', methods=['POST'])
 def get_chart_data():
     """Get chart data for a specific campaign/adset/ad"""

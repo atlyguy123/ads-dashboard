@@ -7,12 +7,8 @@
 
 from .api.dashboard_routes import dashboard_bp
 from .services.dashboard_service import DashboardService
-from .services.data_transformer import DataTransformer
-from .services.config_manager import ConfigManager
 
 __all__ = [
     'dashboard_bp',
-    'DashboardService', 
-    'DataTransformer',
-    'ConfigManager'
+    'DashboardService'
 ] 

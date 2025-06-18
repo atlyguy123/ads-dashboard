@@ -25,43 +25,19 @@ import re
 from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
 
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuration - Use paths relative to project root
-# Get the actual project root by finding the directory that contains the schema.sql file
-script_dir = Path(__file__).parent  # pipelines/mixpanel_pipeline/
-project_root = None
-
-# Try different levels to find the project root that contains database/schema.sql
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/mixpanel_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    schema_path = potential_root / "database" / "schema.sql"
-    if schema_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/schema.sql
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        schema_path = current / "database" / "schema.sql"
-        if schema_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/schema.sql'")
-
-DATABASE_PATH = project_root / "database" / "mixpanel_data.db"
+# Configuration - Use centralized database path discovery
+DATABASE_PATH = Path(get_database_path('mixpanel_data'))
+# Find project root for schema path
+project_root = DATABASE_PATH.parent.parent  # database is in project root, so go up one more level
 SCHEMA_PATH = project_root / "database" / "schema.sql"
 
 # Debug logging for path resolution
@@ -296,17 +272,17 @@ def main():
         # Setup database connection
         conn = create_database_connection()
         
-        # Check if database needs initialization or migration
+        # Always create a fresh, clean database for the pipeline
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
         existing_tables = cursor.fetchall()
         
-        if not existing_tables:
-            logger.info("Database is empty - performing full initialization from schema")
-            initialize_database_from_schema(conn)
-        else:
-            logger.info("Database has existing tables - validating against schema")
-            migrate_existing_database(conn)
+        if existing_tables:
+            logger.info("Database has existing tables - refreshing Mixpanel data while preserving Meta data")
+            drop_mixpanel_tables(conn)
+        
+        logger.info("Creating fresh Mixpanel tables from authoritative schema")
+        initialize_database_from_schema(conn)
         
         # Validate final schema
         validation_results = validate_database_schema(conn)
@@ -347,8 +323,47 @@ def create_database_connection() -> sqlite3.Connection:
     logger.info("Database connection established with optimizations")
     return conn
 
+def drop_mixpanel_tables(conn: sqlite3.Connection):
+    """Drop only Mixpanel-related tables while preserving Meta advertising data"""
+    logger.info("Dropping Mixpanel tables for fresh data...")
+    
+    cursor = conn.cursor()
+    
+    # Tables to drop (Mixpanel data only) - Order matters for foreign key constraints
+    mixpanel_tables = [
+        'user_product_metrics',  # Drop dependent tables first
+        'mixpanel_event',        # Drop dependent tables first  
+        'mixpanel_user',         # Drop parent table last
+        'processed_event_days'   # This tracks which event dates have been processed
+    ]
+    
+    try:
+        cursor.execute("BEGIN TRANSACTION")
+        
+        # Disable foreign key constraints temporarily for clean deletion
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        
+        for table in mixpanel_tables:
+            try:
+                cursor.execute(f"DROP TABLE IF EXISTS [{table}]")
+                logger.info(f"Dropped table: {table}")
+            except Exception as e:
+                logger.warning(f"Could not drop table {table}: {e}")
+        
+        # Re-enable foreign key constraints
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("COMMIT")
+        
+        logger.info("Successfully dropped Mixpanel tables while preserving Meta data")
+        
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        cursor.execute("PRAGMA foreign_keys = ON")  # Re-enable even on error
+        logger.error(f"Failed to drop Mixpanel tables: {e}")
+        raise
+
 def initialize_database_from_schema(conn: sqlite3.Connection):
-    """Initialize database by executing the authoritative schema"""
+    """Initialize database by executing the authoritative schema (CREATE IF NOT EXISTS for existing tables)"""
     logger.info("Initializing database from authoritative schema...")
     
     cursor = conn.cursor()
@@ -357,6 +372,10 @@ def initialize_database_from_schema(conn: sqlite3.Connection):
         # Read and execute schema
         with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
             schema_sql = f.read()
+        
+        # Modify CREATE TABLE statements to use CREATE TABLE IF NOT EXISTS
+        # This allows Meta tables to be preserved while Mixpanel tables are recreated
+        schema_sql = schema_sql.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')
         
         # Clean SQL and split into individual statements
         statements = clean_and_split_sql(schema_sql)
@@ -372,9 +391,13 @@ def initialize_database_from_schema(conn: sqlite3.Connection):
                     cursor.execute(statement)
                     logger.debug(f"Executed statement {i+1}/{len(statements)}")
                 except Exception as stmt_error:
-                    logger.error(f"Failed to execute statement {i+1}: {statement[:100]}...")
-                    logger.error(f"Error: {stmt_error}")
-                    raise
+                    # Log but don't fail on index creation errors (indexes might already exist)
+                    if "CREATE INDEX" in statement and "already exists" in str(stmt_error):
+                        logger.debug(f"Index already exists (statement {i+1}): {str(stmt_error)}")
+                    else:
+                        logger.error(f"Failed to execute statement {i+1}: {statement[:100]}...")
+                        logger.error(f"Error: {stmt_error}")
+                        raise
         
         cursor.execute("COMMIT")
         
@@ -388,22 +411,7 @@ def initialize_database_from_schema(conn: sqlite3.Connection):
         logger.error(f"Failed to initialize database schema: {e}")
         raise
 
-def migrate_existing_database(conn: sqlite3.Connection):
-    """Check if existing database matches schema exactly"""
-    logger.info("Checking if existing database matches schema exactly...")
-    
-    # For existing databases, we should validate they match the schema
-    # Rather than trying to migrate, we'll validate and warn if there are differences
-    validation_results = validate_database_schema(conn)
-    
-    if not validation_results['valid']:
-        logger.warning("⚠️  Existing database does not match schema exactly")
-        logger.warning("⚠️  Consider backing up data and reinitializing if critical discrepancies exist")
-        
-        for error in validation_results['errors']:
-            logger.warning(f"  - {error}")
-    else:
-        logger.info("✅ Existing database matches schema requirements")
+
 
 def get_current_database_structure(cursor: sqlite3.Cursor) -> Dict[str, Dict[str, str]]:
     """Get current database structure for comparison"""

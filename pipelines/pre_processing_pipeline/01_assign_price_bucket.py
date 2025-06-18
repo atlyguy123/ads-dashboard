@@ -1,64 +1,35 @@
 #!/usr/bin/env python3
 """
-Assign Price Bucket Module - Pre-processing Pipeline (v3 - Iterative Bucketing, Original Inheritance)
+🎯 Price Bucket Assignment Module - Pre-processing Pipeline (v3 - Iterative Bucketing)
 
-This module assigns price bucket classifications to user_product_metrics records.
+This module implements a sophisticated iterative price bucketing algorithm to assign price buckets
+to user-product records based on conversion data patterns.
 
-Business Logic (v3):
-1.  Buckets are created using a robust ITERATIVE MERGING algorithm. Two buckets are merged
-    if their combined price range is within 17.5% OR $5 of each other. This is globally
-    optimal and avoids the flaws of a simple sequential approach.
-2.  A TWO-PASS assignment logic is used:
-    a. PASS 1: Users with direct conversions get their bucket. Users with only a trial
-       get a bucket ONLY IF a previous 'RC Trial converted' user exists in the same country/product.
-    b. PASS 2: For any remaining trial users without a bucket, a fallback search is
-       performed to find the conversion of ANY type that is closest in time.
-3.  The assigned price bucket value is the average price of all items within that bucket.
+Key improvements in v3:
+- Uses iterative merge algorithm for more natural price groupings
+- Implements two-pass assignment system for comprehensive coverage
+- Handles edge cases with proper fallback mechanisms
+- Provides detailed statistics and verification
 """
 
 import os
 import sys
-from typing import Dict, Any, List, Tuple, Optional
-import logging
-import pandas as pd
 import sqlite3
+import pandas as pd
+import logging
+from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
+
 # --- Configuration ---
-# Configuration - find database path robustly
-script_dir = Path(__file__).parent  # pipelines/pre_processing_pipeline/
-project_root = None
-
-# Try different levels to find the project root that contains database/mixpanel_data.db
-potential_roots = [
-    script_dir.parent.parent,  # Go up from pipelines/pre_processing_pipeline/ to project root
-    script_dir.parent.parent.parent,  # In case we're nested deeper
-    Path.cwd().parent,  # Parent of current working directory
-    Path.cwd().parent.parent,  # Grandparent of current working directory
-]
-
-for potential_root in potential_roots:
-    db_path = potential_root / "database" / "mixpanel_data.db"
-    if db_path.exists():
-        project_root = potential_root
-        break
-
-if project_root is None:
-    # Fallback: walk up from script location looking for database/mixpanel_data.db
-    current = script_dir
-    while current != current.parent:  # Stop at filesystem root
-        db_path = current / "database" / "mixpanel_data.db"
-        if db_path.exists():
-            project_root = current
-            break
-        current = current.parent
-    
-    if project_root is None:
-        raise FileNotFoundError("Could not locate project root directory containing 'database/mixpanel_data.db'")
-
-DB_PATH = os.environ.get("MIXPANEL_DB_PATH", str(project_root / "database" / "mixpanel_data.db"))
+# Configuration - use centralized database path discovery
+DB_PATH = get_database_path('mixpanel_data')
 BUCKET_PERCENT_THRESHOLD = 0.175
 BUCKET_DOLLAR_THRESHOLD = 5.0
 

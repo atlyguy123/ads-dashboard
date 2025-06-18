@@ -35,6 +35,12 @@ import time
 from typing import Dict, Any, List, Optional, Tuple, Set
 from datetime import datetime, timedelta
 from collections import defaultdict
+from pathlib import Path
+
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
 
 # --- Configuration & Constants ---
 
@@ -90,8 +96,10 @@ def main():
     logger.info("--- Starting Pre-processing: Assign Conversion Rates ---")
     
     try:
-        # Database path should be clearly defined
-        db_path = "/Users/joshuakaufman/Ads Dashboard V3 copy 12 - updated ingest copy/database/mixpanel_data.db"
+        # Use database_utils to get the correct database path
+        db_path = get_database_path('mixpanel_data')
+        logger.info(f"Using database at: {db_path}")
+        
         if not os.path.exists(db_path):
             logger.error(f"Database not found at {db_path}")
             return False

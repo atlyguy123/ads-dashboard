@@ -1,0 +1,10 @@
+{
+  "name": "repo-to-prompt",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A utility to generate documentation from a codebase",
+  "main": "repo-to-prompt.js",
+  "scripts": {
+    "generate": "node repo-to-prompt.js"
+  }
+} 

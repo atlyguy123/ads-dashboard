@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 
 # Add the project root to the Python path for database utilities
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.database_utils import get_database_path
@@ -64,19 +64,23 @@ class AnalyticsQueryService:
     
     def execute_analytics_query(self, config: QueryConfig) -> Dict[str, Any]:
         """
-        Execute analytics query with JOIN between meta and mixpanel data
-        
-        Args:
-            config: Query configuration
-            
-        Returns:
-            Dictionary with flat array of hierarchical data
+        Execute analytics query with comprehensive error handling and fallback logic
         """
         try:
-            # Get the appropriate table name
+            logger.info(f"🔍 EXECUTE_ANALYTICS_QUERY CALLED - NEW CODE VERSION")
+            # Get the appropriate table name based on breakdown
             table_name = self.get_table_name(config.breakdown)
+            logger.info(f"🔍 Table name: {table_name}")
             
-            # Build and execute the main query based on hierarchy level
+            # Check if Meta ad performance tables have data
+            meta_data_count = self._get_meta_data_count(table_name)
+            logger.info(f"🔍 Meta data count: {meta_data_count}")
+            
+            if meta_data_count == 0:
+                logger.info(f"🔍 No data found in {table_name}, falling back to Mixpanel-only data")
+                return self._execute_mixpanel_only_query(config)
+            
+            # Original logic for when Meta data exists
             if config.group_by == 'campaign':
                 structured_data = self._get_campaign_level_data(config, table_name)
             elif config.group_by == 'adset':
@@ -106,6 +110,292 @@ class AnalyticsQueryService:
                     'generated_at': datetime.now().isoformat()
                 }
             }
+    
+    def _get_meta_data_count(self, table_name: str) -> int:
+        """Check if Meta ad performance table has any data"""
+        try:
+            query = f"SELECT COUNT(*) as count FROM {table_name}"
+            result = self._execute_meta_query(query, [])
+            return result[0]['count'] if result else 0
+        except Exception as e:
+            logger.error(f"Error checking Meta data count: {e}")
+            return 0
+    
+    def _execute_mixpanel_only_query(self, config: QueryConfig) -> Dict[str, Any]:
+        """
+        Execute analytics query using only Mixpanel data when Meta ad performance tables are empty
+        """
+        try:
+            # Get data directly from Mixpanel tables
+            if config.group_by == 'campaign':
+                structured_data = self._get_mixpanel_campaign_data(config)
+            elif config.group_by == 'adset':
+                structured_data = self._get_mixpanel_adset_data(config)
+            else:  # ad level
+                structured_data = self._get_mixpanel_ad_data(config)
+            
+            return {
+                'success': True,
+                'data': structured_data,
+                'metadata': {
+                    'query_config': config.__dict__,
+                    'table_used': 'mixpanel_user + mixpanel_event (Mixpanel-only mode)',
+                    'record_count': len(structured_data),
+                    'date_range': f"{config.start_date} to {config.end_date}",
+                    'generated_at': datetime.now().isoformat(),
+                    'data_source': 'mixpanel_only'
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing Mixpanel-only query: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'metadata': {
+                    'query_config': config.__dict__,
+                    'generated_at': datetime.now().isoformat()
+                }
+            }
+    
+    def _get_mixpanel_campaign_data(self, config: QueryConfig) -> List[Dict[str, Any]]:
+        """Get campaign-level data from Mixpanel only"""
+        
+        # Get campaign-level aggregated data from Mixpanel
+        campaign_query = """
+        SELECT 
+            e.abi_campaign_id as campaign_id,
+            'Unknown Campaign' as campaign_name,
+            COUNT(DISTINCT u.distinct_id) as total_users,
+            COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
+            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue_usd
+        FROM mixpanel_user u
+        LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+        WHERE e.abi_campaign_id IS NOT NULL
+          AND JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ?
+        GROUP BY e.abi_campaign_id
+        ORDER BY mixpanel_revenue_usd DESC
+        """
+        
+        # Use the date range for all filters
+        params = [
+            config.start_date, config.end_date,  # new_users filter
+            config.start_date, config.end_date,  # trials filter
+            config.start_date, config.end_date,  # purchases filter
+            config.start_date, config.end_date,  # revenue filter
+            config.start_date, config.end_date   # main user filter
+        ]
+        
+        campaigns = self._execute_mixpanel_query(campaign_query, params)
+        
+        # Format campaigns with default Meta values
+        formatted_campaigns = []
+        for campaign in campaigns:
+            formatted_campaign = {
+                'id': f"campaign_{campaign['campaign_id']}",
+                'entity_type': 'campaign',
+                'campaign_id': campaign['campaign_id'],
+                'campaign_name': campaign['campaign_name'] or 'Unknown Campaign',
+                'name': campaign['campaign_name'] or 'Unknown Campaign',
+                
+                # Meta metrics (all zeros since we don't have Meta data)
+                'spend': 0.0,
+                'impressions': 0,
+                'clicks': 0,
+                'meta_trials_started': 0,
+                'meta_purchases': 0,
+                
+                # Mixpanel metrics
+                'mixpanel_trials_started': int(campaign['mixpanel_trials_started'] or 0),
+                'mixpanel_purchases': int(campaign['mixpanel_purchases'] or 0),
+                'mixpanel_revenue_usd': float(campaign['mixpanel_revenue_usd'] or 0),
+                
+                # Calculated metrics
+                'estimated_revenue_usd': float(campaign['mixpanel_revenue_usd'] or 0),
+                'estimated_roas': 0.0,  # Can't calculate without spend
+                'profit': float(campaign['mixpanel_revenue_usd'] or 0),  # Revenue - 0 spend
+                'trial_accuracy_ratio': 0.0,  # Can't calculate without Meta trials
+                
+                # Additional info
+                'total_users': int(campaign['total_users'] or 0),
+                'new_users': int(campaign['new_users'] or 0),
+                'children': []
+            }
+            formatted_campaigns.append(formatted_campaign)
+        
+        return formatted_campaigns
+    
+    def _get_mixpanel_adset_data(self, config: QueryConfig) -> List[Dict[str, Any]]:
+        """Get adset-level data from Mixpanel only"""
+        
+        # Get adset-level aggregated data from Mixpanel
+        adset_query = """
+        SELECT 
+            e.abi_ad_set_id as adset_id,
+            'Unknown Adset' as adset_name,
+            e.abi_campaign_id as campaign_id,
+            'Unknown Campaign' as campaign_name,
+            COUNT(DISTINCT u.distinct_id) as total_users,
+            COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
+            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue_usd
+        FROM mixpanel_user u
+        LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+        WHERE e.abi_ad_set_id IS NOT NULL
+          AND JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ?
+        GROUP BY e.abi_ad_set_id, e.abi_campaign_id
+        ORDER BY mixpanel_revenue_usd DESC
+        """
+        
+        # Use the date range for all filters
+        params = [
+            config.start_date, config.end_date,  # new_users filter
+            config.start_date, config.end_date,  # trials filter
+            config.start_date, config.end_date,  # purchases filter
+            config.start_date, config.end_date,  # revenue filter
+            config.start_date, config.end_date   # main user filter
+        ]
+        
+        adsets = self._execute_mixpanel_query(adset_query, params)
+        
+        # Format adsets with default Meta values
+        formatted_adsets = []
+        for adset in adsets:
+            formatted_adset = {
+                'id': f"adset_{adset['adset_id']}",
+                'entity_type': 'adset',
+                'adset_id': adset['adset_id'],
+                'adset_name': adset['adset_name'] or 'Unknown Adset',
+                'campaign_id': adset['campaign_id'],
+                'campaign_name': adset['campaign_name'] or 'Unknown Campaign',
+                'name': adset['adset_name'] or 'Unknown Adset',
+                
+                # Meta metrics (all zeros since we don't have Meta data)
+                'spend': 0.0,
+                'impressions': 0,
+                'clicks': 0,
+                'meta_trials_started': 0,
+                'meta_purchases': 0,
+                
+                # Mixpanel metrics
+                'mixpanel_trials_started': int(adset['mixpanel_trials_started'] or 0),
+                'mixpanel_purchases': int(adset['mixpanel_purchases'] or 0),
+                'mixpanel_revenue_usd': float(adset['mixpanel_revenue_usd'] or 0),
+                
+                # Calculated metrics
+                'estimated_revenue_usd': float(adset['mixpanel_revenue_usd'] or 0),
+                'estimated_roas': 0.0,  # Can't calculate without spend
+                'profit': float(adset['mixpanel_revenue_usd'] or 0),  # Revenue - 0 spend
+                'trial_accuracy_ratio': 0.0,  # Can't calculate without Meta trials
+                
+                # Additional info
+                'total_users': int(adset['total_users'] or 0),
+                'new_users': int(adset['new_users'] or 0),
+                'children': []
+            }
+            formatted_adsets.append(formatted_adset)
+        
+        return formatted_adsets
+    
+    def _get_mixpanel_ad_data(self, config: QueryConfig) -> List[Dict[str, Any]]:
+        """Get ad-level data from Mixpanel only"""
+        
+        # Get ad-level aggregated data from Mixpanel
+        ad_query = """
+        SELECT 
+            u.abi_ad_id as ad_id,
+            'Unknown Ad' as ad_name,
+            e.abi_ad_set_id as adset_id,
+            'Unknown Adset' as adset_name,
+            e.abi_campaign_id as campaign_id,
+            'Unknown Campaign' as campaign_name,
+            COUNT(DISTINCT u.distinct_id) as total_users,
+            COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
+            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue_usd
+        FROM mixpanel_user u
+        LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+        WHERE u.abi_ad_id IS NOT NULL
+          AND JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ?
+        GROUP BY u.abi_ad_id, e.abi_ad_set_id, e.abi_campaign_id
+        ORDER BY mixpanel_revenue_usd DESC
+        """
+        
+        # Use the date range for all filters
+        params = [
+            config.start_date, config.end_date,  # new_users filter
+            config.start_date, config.end_date,  # trials filter
+            config.start_date, config.end_date,  # purchases filter
+            config.start_date, config.end_date,  # revenue filter
+            config.start_date, config.end_date   # main user filter
+        ]
+        
+        ads = self._execute_mixpanel_query(ad_query, params)
+        
+        # Format ads with default Meta values
+        formatted_ads = []
+        for ad in ads:
+            formatted_ad = {
+                'id': f"ad_{ad['ad_id']}",
+                'entity_type': 'ad',
+                'ad_id': ad['ad_id'],
+                'ad_name': ad['ad_name'] or 'Unknown Ad',
+                'adset_id': ad['adset_id'],
+                'adset_name': ad['adset_name'] or 'Unknown Adset',
+                'campaign_id': ad['campaign_id'],
+                'campaign_name': ad['campaign_name'] or 'Unknown Campaign',
+                'name': ad['ad_name'] or 'Unknown Ad',
+                
+                # Meta metrics (all zeros since we don't have Meta data)
+                'spend': 0.0,
+                'impressions': 0,
+                'clicks': 0,
+                'meta_trials_started': 0,
+                'meta_purchases': 0,
+                
+                # Mixpanel metrics
+                'mixpanel_trials_started': int(ad['mixpanel_trials_started'] or 0),
+                'mixpanel_purchases': int(ad['mixpanel_purchases'] or 0),
+                'mixpanel_revenue_usd': float(ad['mixpanel_revenue_usd'] or 0),
+                
+                # Calculated metrics
+                'estimated_revenue_usd': float(ad['mixpanel_revenue_usd'] or 0),
+                'estimated_roas': 0.0,  # Can't calculate without spend
+                'profit': float(ad['mixpanel_revenue_usd'] or 0),  # Revenue - 0 spend
+                'trial_accuracy_ratio': 0.0,  # Can't calculate without Meta trials
+                
+                # Additional info
+                'total_users': int(ad['total_users'] or 0),
+                'new_users': int(ad['new_users'] or 0),
+                'children': []
+            }
+            formatted_ads.append(formatted_ad)
+        
+        return formatted_ads
+    
+    def _execute_mixpanel_query(self, query: str, params: List) -> List[Dict[str, Any]]:
+        """Execute query against Mixpanel database"""
+        try:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                
+                results = []
+                for row in cursor.fetchall():
+                    results.append(dict(row))
+                
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error executing Mixpanel query: {e}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Params: {params}")
+            raise
     
     def _get_campaign_level_data(self, config: QueryConfig, table_name: str) -> List[Dict[str, Any]]:
         """Get campaign-level aggregated data with adset and ad children"""
@@ -194,11 +484,7 @@ class AnalyticsQueryService:
                 
                 adset['children'] = formatted_ads
             
-            # Add mixpanel data to adsets
-            if config.include_mixpanel:
-                self._add_mixpanel_data_to_records(adsets, config)
-            
-            # Format adsets
+            # Format adsets (Mixpanel data will be aggregated from ad children)
             formatted_adsets = []
             for adset in adsets:
                 formatted_adset = self._format_record(adset, 'adset')
@@ -208,11 +494,7 @@ class AnalyticsQueryService:
             
             campaign['children'] = formatted_adsets
         
-        # Add mixpanel data to campaigns
-        if config.include_mixpanel:
-            self._add_mixpanel_data_to_records(campaigns, config)
-        
-        # Format campaigns
+        # Format campaigns (Mixpanel data will be aggregated from adset children)
         formatted_campaigns = []
         for campaign in campaigns:
             formatted_campaign = self._format_record(campaign, 'campaign')
@@ -285,11 +567,7 @@ class AnalyticsQueryService:
             
             adset['children'] = formatted_ads
         
-        # Add mixpanel data to adsets
-        if config.include_mixpanel:
-            self._add_mixpanel_data_to_records(adsets, config)
-        
-        # Format adsets
+        # Format adsets (Mixpanel data will be aggregated from ad children)
         formatted_adsets = []
         for adset in adsets:
             formatted_adset = self._format_record(adset, 'adset')
@@ -357,246 +635,202 @@ class AnalyticsQueryService:
             raise
     
     def _add_mixpanel_data_to_records(self, records: List[Dict[str, Any]], config: QueryConfig):
-        """Add mixpanel metrics to records using direct attribution"""
-        try:
-            # Get all unique entity IDs for batch query
-            campaign_ids = set()
-            adset_ids = set()
-            ad_ids = set()
-            
-            for record in records:
-                if record.get('campaign_id'):
-                    campaign_ids.add(record['campaign_id'])
-                if record.get('adset_id'):
-                    adset_ids.add(record['adset_id'])
-                if record.get('ad_id'):
-                    ad_ids.add(record['ad_id'])
-            
-            # Connect to mixpanel analytics database
-            conn = sqlite3.connect(self.mixpanel_analytics_db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # Get mixpanel metrics grouped by attribution
-            mixpanel_data = {}
-            
-            # Campaign-level metrics
-            if campaign_ids:
-                campaign_placeholders = ','.join(['?' for _ in campaign_ids])
-                campaign_query = f"""
-                SELECT 
-                    abi_campaign_id,
-                    -- Trial metrics (users who started with trials)
-                    COUNT(CASE WHEN current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_started,
-                    COUNT(CASE WHEN current_status = 'trial_pending' THEN 1 END) as mixpanel_trials_in_progress,
-                    COUNT(CASE WHEN current_status IN ('trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_ended,
-                    
-                    -- Purchase metrics (initial purchases + converted trials)
-                    COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as mixpanel_purchases,
-                    COUNT(CASE WHEN current_status = 'trial_converted' THEN 1 END) as mixpanel_converted_amount,
-                    
-                    -- Revenue metrics (sum of current_value attributed to credited_date)
-                    SUM(CASE WHEN current_status != 'refunded' THEN current_value ELSE 0 END) as mixpanel_revenue_usd,
-                    SUM(CASE WHEN current_status = 'refunded' THEN ABS(current_value) ELSE 0 END) as mixpanel_refunds_usd,
-                    SUM(current_value) as estimated_revenue_usd,
-                    
-                    -- Net conversions (purchases minus refunds)
-                    (COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) - 
-                     COUNT(CASE WHEN current_status = 'refunded' THEN 1 END)) as mixpanel_conversions_net_refunds,
-                    
-                    -- Segment accuracy metrics
-                    AVG(CASE WHEN accuracy_score IS NOT NULL THEN 
-                        CASE accuracy_score 
-                            WHEN 'Very High' THEN 5
-                            WHEN 'High' THEN 4  
-                            WHEN 'Medium' THEN 3
-                            WHEN 'Low' THEN 2
-                            WHEN 'Very Low' THEN 1
-                            ELSE 3
-                        END
-                    END) as segment_accuracy_average,
-                    
-                    -- Conversion rates (weighted averages)
-                    AVG(trial_conversion_rate) as avg_trial_conversion_rate,
-                    AVG(trial_converted_to_refund_rate) as avg_trial_refund_rate,
-                    AVG(initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
-                    
-                    -- User counts for calculations
-                    COUNT(DISTINCT distinct_id) as total_attributed_users
-                    
-                FROM user_product_metrics
-                WHERE abi_campaign_id IN ({campaign_placeholders})
-                  AND credited_date BETWEEN ? AND ?
-                GROUP BY abi_campaign_id
-                """
-                
-                cursor.execute(campaign_query, list(campaign_ids) + [config.start_date, config.end_date])
-                for row in cursor.fetchall():
-                    mixpanel_data[f"campaign_{row['abi_campaign_id']}"] = dict(row)
-            
-            # AdSet-level metrics
-            if adset_ids:
-                adset_placeholders = ','.join(['?' for _ in adset_ids])
-                adset_query = f"""
-                SELECT 
-                    abi_ad_set_id,
-                    -- Trial metrics (users who started with trials)
-                    COUNT(CASE WHEN current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_started,
-                    COUNT(CASE WHEN current_status = 'trial_pending' THEN 1 END) as mixpanel_trials_in_progress,
-                    COUNT(CASE WHEN current_status IN ('trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_ended,
-                    
-                    -- Purchase metrics (initial purchases + converted trials)
-                    COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as mixpanel_purchases,
-                    COUNT(CASE WHEN current_status = 'trial_converted' THEN 1 END) as mixpanel_converted_amount,
-                    
-                    -- Revenue metrics (sum of current_value attributed to credited_date)
-                    SUM(CASE WHEN current_status != 'refunded' THEN current_value ELSE 0 END) as mixpanel_revenue_usd,
-                    SUM(CASE WHEN current_status = 'refunded' THEN ABS(current_value) ELSE 0 END) as mixpanel_refunds_usd,
-                    SUM(current_value) as estimated_revenue_usd,
-                    
-                    -- Net conversions (purchases minus refunds)
-                    (COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) - 
-                     COUNT(CASE WHEN current_status = 'refunded' THEN 1 END)) as mixpanel_conversions_net_refunds,
-                    
-                    -- Segment accuracy metrics
-                    AVG(CASE WHEN accuracy_score IS NOT NULL THEN 
-                        CASE accuracy_score 
-                            WHEN 'Very High' THEN 5
-                            WHEN 'High' THEN 4  
-                            WHEN 'Medium' THEN 3
-                            WHEN 'Low' THEN 2
-                            WHEN 'Very Low' THEN 1
-                            ELSE 3
-                        END
-                    END) as segment_accuracy_average,
-                    
-                    -- Conversion rates (weighted averages)
-                    AVG(trial_conversion_rate) as avg_trial_conversion_rate,
-                    AVG(trial_converted_to_refund_rate) as avg_trial_refund_rate,
-                    AVG(initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
-                    
-                    -- User counts for calculations
-                    COUNT(DISTINCT distinct_id) as total_attributed_users
-                    
-                FROM user_product_metrics
-                WHERE abi_ad_set_id IN ({adset_placeholders})
-                  AND credited_date BETWEEN ? AND ?
-                GROUP BY abi_ad_set_id
-                """
-                
-                cursor.execute(adset_query, list(adset_ids) + [config.start_date, config.end_date])
-                for row in cursor.fetchall():
-                    mixpanel_data[f"adset_{row['abi_ad_set_id']}"] = dict(row)
-            
-            # Ad-level metrics
-            if ad_ids:
-                ad_placeholders = ','.join(['?' for _ in ad_ids])
-                ad_query = f"""
-                SELECT 
-                    abi_ad_id,
-                    -- Trial metrics (users who started with trials)
-                    COUNT(CASE WHEN current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_started,
-                    COUNT(CASE WHEN current_status = 'trial_pending' THEN 1 END) as mixpanel_trials_in_progress,
-                    COUNT(CASE WHEN current_status IN ('trial_cancelled', 'trial_converted') THEN 1 END) as mixpanel_trials_ended,
-                    
-                    -- Purchase metrics (initial purchases + converted trials)
-                    COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as mixpanel_purchases,
-                    COUNT(CASE WHEN current_status = 'trial_converted' THEN 1 END) as mixpanel_converted_amount,
-                    
-                    -- Revenue metrics (sum of current_value attributed to credited_date)
-                    SUM(CASE WHEN current_status != 'refunded' THEN current_value ELSE 0 END) as mixpanel_revenue_usd,
-                    SUM(CASE WHEN current_status = 'refunded' THEN ABS(current_value) ELSE 0 END) as mixpanel_refunds_usd,
-                    SUM(current_value) as estimated_revenue_usd,
-                    
-                    -- Net conversions (purchases minus refunds)
-                    (COUNT(CASE WHEN current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) - 
-                     COUNT(CASE WHEN current_status = 'refunded' THEN 1 END)) as mixpanel_conversions_net_refunds,
-                    
-                    -- Segment accuracy metrics
-                    AVG(CASE WHEN accuracy_score IS NOT NULL THEN 
-                        CASE accuracy_score 
-                            WHEN 'Very High' THEN 5
-                            WHEN 'High' THEN 4  
-                            WHEN 'Medium' THEN 3
-                            WHEN 'Low' THEN 2
-                            WHEN 'Very Low' THEN 1
-                            ELSE 3
-                        END
-                    END) as segment_accuracy_average,
-                    
-                    -- Conversion rates (weighted averages)
-                    AVG(trial_conversion_rate) as avg_trial_conversion_rate,
-                    AVG(trial_converted_to_refund_rate) as avg_trial_refund_rate,
-                    AVG(initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
-                    
-                    -- User counts for calculations
-                    COUNT(DISTINCT distinct_id) as total_attributed_users
-                    
-                FROM user_product_metrics
-                WHERE abi_ad_id IN ({ad_placeholders})
-                  AND credited_date BETWEEN ? AND ?
-                GROUP BY abi_ad_id
-                """
-                
-                cursor.execute(ad_query, list(ad_ids) + [config.start_date, config.end_date])
-                for row in cursor.fetchall():
-                    mixpanel_data[f"ad_{row['abi_ad_id']}"] = dict(row)
-            
-            conn.close()
-            
-            # Merge mixpanel data with records
-            for record in records:
-                # Try to find mixpanel data for this record
-                mixpanel_metrics = None
-                
-                if record.get('ad_id'):
-                    mixpanel_metrics = mixpanel_data.get(f"ad_{record['ad_id']}")
-                elif record.get('adset_id'):
-                    mixpanel_metrics = mixpanel_data.get(f"adset_{record['adset_id']}")
-                elif record.get('campaign_id'):
-                    mixpanel_metrics = mixpanel_data.get(f"campaign_{record['campaign_id']}")
-                
-                if mixpanel_metrics:
-                    record.update(mixpanel_metrics)
-                else:
-                    # Set default values for all metrics
-                    record.update({
-                        'mixpanel_trials_started': 0,
-                        'mixpanel_trials_in_progress': 0,
-                        'mixpanel_trials_ended': 0,
-                        'mixpanel_purchases': 0,
-                        'mixpanel_converted_amount': 0,
-                        'mixpanel_revenue_usd': 0.0,
-                        'mixpanel_refunds_usd': 0.0,
-                        'estimated_revenue_usd': 0.0,
-                        'mixpanel_conversions_net_refunds': 0,
-                        'segment_accuracy_average': None,
-                        'avg_trial_conversion_rate': 0.0,
-                        'avg_trial_refund_rate': 0.0,
-                        'avg_purchase_refund_rate': 0.0,
-                        'total_attributed_users': 0
-                    })
-            
-        except Exception as e:
-            logger.error(f"Error adding mixpanel data: {e}")
-            # Set default values for all records on error
-            for record in records:
+        """
+        Add mixpanel metrics to records using ONLY abi_ad_id from mixpanel_user table.
+        Campaign/AdSet IDs come from Meta database.
+        """
+        if not config.include_mixpanel or not records:
+            # Initialize Mixpanel fields to 0 if not included
+            def initialize_mixpanel_fields(record):
                 record.update({
                     'mixpanel_trials_started': 0,
-                    'mixpanel_trials_in_progress': 0,
-                    'mixpanel_trials_ended': 0,
                     'mixpanel_purchases': 0,
-                    'mixpanel_converted_amount': 0,
                     'mixpanel_revenue_usd': 0.0,
-                    'mixpanel_refunds_usd': 0.0,
                     'estimated_revenue_usd': 0.0,
-                    'mixpanel_conversions_net_refunds': 0,
-                    'segment_accuracy_average': None,
-                    'avg_trial_conversion_rate': 0.0,
-                    'avg_trial_refund_rate': 0.0,
-                    'avg_purchase_refund_rate': 0.0,
+                    'trial_accuracy_ratio': 0.0,
                     'total_attributed_users': 0
                 })
+                if 'children' in record:
+                    for child in record['children']:
+                        initialize_mixpanel_fields(child)
+            
+            for record in records:
+                initialize_mixpanel_fields(record)
+            return
+
+        logger.info(f"🔍 Adding Mixpanel data to {len(records)} records using CORRECTED logic...")
+        logger.info(f"📅 Date range: {config.start_date} to {config.end_date}")
+        logger.info(f"🎯 Group by: {config.group_by}, Breakdown: {config.breakdown}")
+
+        # DEBUG: Log the structure of records to understand the hierarchy
+        def debug_record_structure(items, level=0):
+            indent = "  " * level
+            for i, item in enumerate(items):
+                item_type = "UNKNOWN"
+                item_id = "NO_ID"
+                
+                if item.get('campaign_id'):
+                    item_type = "CAMPAIGN"
+                    item_id = item['campaign_id']
+                elif item.get('adset_id'):
+                    item_type = "ADSET"  
+                    item_id = item['adset_id']
+                elif item.get('ad_id'):
+                    item_type = "AD"
+                    item_id = item['ad_id']
+                
+                children_count = len(item.get('children', []))
+                logger.info(f"{indent}📊 [{i}] {item_type}: {item_id} (children: {children_count})")
+                
+                if 'children' in item and item['children']:
+                    debug_record_structure(item['children'], level + 1)
+        
+        logger.info("🔍 DEBUG: Record structure:")
+        debug_record_structure(records)
+
+        # Step 1: Collect all unique ad_ids from the entire hierarchy
+        all_ad_ids = set()
+        def collect_ad_ids(items):
+            for item in items:
+                if item.get('ad_id'):
+                    all_ad_ids.add(item['ad_id'])
+                    logger.debug(f"🎯 Found ad_id: {item['ad_id']}")
+                if item.get('children'):
+                    collect_ad_ids(item['children'])
+        
+        collect_ad_ids(records)
+        logger.info(f"🎯 Collected {len(all_ad_ids)} unique ad_ids from records")
+        
+        if len(all_ad_ids) > 0:
+            # Log first few ad_ids for verification
+            sample_ads = list(all_ad_ids)[:5]
+            logger.info(f"📝 Sample ad_ids: {sample_ads}")
+
+        if not all_ad_ids:
+            logger.warning("❌ No ad_ids found in records to query Mixpanel with. Skipping Mixpanel enrichment.")
+            logger.warning("💡 This usually means:")
+            logger.warning("   1. No Meta data for the selected date range")
+            logger.warning("   2. Query is grouped at campaign/adset level without drilling down to ads")
+            logger.warning("   3. Meta data structure is missing ad-level records")
+            return
+
+        # Step 2: Run ONE query to get Mixpanel data for all ads
+        # CORRECTED: Only use abi_ad_id from mixpanel_user table
+        mixpanel_data_map = {}
+        try:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                ad_placeholders = ','.join(['?' for _ in all_ad_ids])
+                # CORRECTED QUERY: Only uses abi_ad_id from user table
+                query = f"""
+                SELECT 
+                    u.abi_ad_id,
+                    COUNT(DISTINCT CASE WHEN e.event_name = 'RC Trial started' AND DATE(e.event_time) BETWEEN ? AND ? THEN u.distinct_id END) as mixpanel_trials_started,
+                    COUNT(DISTINCT CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND DATE(e.event_time) BETWEEN ? AND ? THEN u.distinct_id END) as mixpanel_purchases,
+                    COALESCE(SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Renewal') AND DATE(e.event_time) BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd,
+                    COUNT(DISTINCT u.distinct_id) as total_attributed_users
+                FROM mixpanel_user u
+                LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+                WHERE u.abi_ad_id IN ({ad_placeholders})
+                  AND u.has_abi_attribution = TRUE
+                GROUP BY u.abi_ad_id
+                """
+                
+                params = [
+                    config.start_date, config.end_date,  # trial date filter
+                    config.start_date, config.end_date,  # purchase date filter
+                    config.start_date, config.end_date,  # revenue date filter
+                    *list(all_ad_ids)
+                ]
+                
+                logger.info(f"🔍 Executing Mixpanel query for {len(all_ad_ids)} ad_ids with date range {config.start_date} to {config.end_date}")
+                cursor.execute(query, params)
+                
+                results = cursor.fetchall()
+                logger.info(f"🎯 Mixpanel query returned {len(results)} rows")
+                
+                for row in results:
+                    ad_id = row['abi_ad_id']
+                    data = dict(row)
+                    mixpanel_data_map[ad_id] = data
+                    logger.debug(f"  Ad {ad_id}: {data['mixpanel_trials_started']} trials, {data['mixpanel_purchases']} purchases, ${data['mixpanel_revenue_usd']} revenue")
+            
+            logger.info(f"✅ Successfully fetched Mixpanel data for {len(mixpanel_data_map)} ads out of {len(all_ad_ids)} requested")
+
+        except Exception as e:
+            logger.error(f"FATAL: Error fetching Mixpanel data: {e}", exc_info=True)
+            # On error, initialize to zeros to prevent crashes
+            for record in records:
+                def init_zeros(item):
+                    item.update({
+                        'mixpanel_trials_started': 0,
+                        'mixpanel_purchases': 0,
+                        'mixpanel_revenue_usd': 0.0,
+                        'estimated_revenue_usd': 0.0,
+                        'trial_accuracy_ratio': 0.0,
+                        'total_attributed_users': 0
+                    })
+                    if 'children' in item:
+                        for child in item['children']:
+                            init_zeros(child)
+                init_zeros(record)
+            return
+
+        # Step 3: Recursively process records to add and aggregate Mixpanel data
+        def process_and_aggregate(items):
+            for item in items:
+                # Initialize Mixpanel metrics to 0
+                item.update({
+                    'mixpanel_trials_started': 0,
+                    'mixpanel_purchases': 0,
+                    'mixpanel_revenue_usd': 0.0,
+                    'total_attributed_users': 0
+                })
+
+                if item.get('ad_id'):
+                    # It's an ad, get data directly from the map
+                    ad_metrics = mixpanel_data_map.get(item['ad_id'])
+                    if ad_metrics:
+                        item.update({
+                            'mixpanel_trials_started': int(ad_metrics.get('mixpanel_trials_started', 0)),
+                            'mixpanel_purchases': int(ad_metrics.get('mixpanel_purchases', 0)),
+                            'mixpanel_revenue_usd': float(ad_metrics.get('mixpanel_revenue_usd', 0)),
+                            'total_attributed_users': int(ad_metrics.get('total_attributed_users', 0))
+                        })
+                        logger.debug(f"✅ Ad {item['ad_id']}: Applied Mixpanel data - {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases")
+                    else:
+                        logger.debug(f"❌ Ad {item['ad_id']}: No Mixpanel data found")
+                        
+                elif 'children' in item and item['children']:
+                    # It's a campaign or adset, process children first then aggregate
+                    process_and_aggregate(item['children'])
+                    
+                    # Aggregate metrics from children
+                    for child in item['children']:
+                        item['mixpanel_trials_started'] += child.get('mixpanel_trials_started', 0)
+                        item['mixpanel_purchases'] += child.get('mixpanel_purchases', 0)
+                        item['mixpanel_revenue_usd'] += child.get('mixpanel_revenue_usd', 0)
+                        item['total_attributed_users'] += child.get('total_attributed_users', 0)
+                    
+                    entity_type = 'campaign' if item.get('campaign_id') else 'adset'
+                    entity_id = item.get('campaign_id') or item.get('adset_id')
+                    logger.debug(f"✅ {entity_type.title()} {entity_id}: Aggregated from {len(item['children'])} children - {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases")
+
+                # Add derived metrics
+                item['estimated_revenue_usd'] = item.get('mixpanel_revenue_usd', 0.0)
+                meta_trials = item.get('meta_trials_started', 0)
+                mixpanel_trials = item.get('mixpanel_trials_started', 0)
+                item['trial_accuracy_ratio'] = (mixpanel_trials / meta_trials) * 100 if meta_trials > 0 else 0.0
+        
+        process_and_aggregate(records)
+        
+        # Log final summary
+        total_trials = sum(record.get('mixpanel_trials_started', 0) for record in records)
+        total_purchases = sum(record.get('mixpanel_purchases', 0) for record in records)
+        total_revenue = sum(record.get('mixpanel_revenue_usd', 0) for record in records)
+        logger.info(f"🎯 FINAL: Added Mixpanel data totaling {total_trials} trials, {total_purchases} purchases, ${total_revenue:.2f} revenue")
     
     def _format_record(self, record: Dict[str, Any], entity_type: str) -> Dict[str, Any]:
         """Format a record with the expected structure for the frontend"""
