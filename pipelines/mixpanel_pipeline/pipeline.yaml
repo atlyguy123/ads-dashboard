@@ -1,0 +1,32 @@
+description: Complete pipeline for processing Mixpanel data with database setup, data
+  ingestion, user validation, attribution, and economic tier assignment
+name: mixpanel_pipeline
+steps:
+- description: Download and update Mixpanel data files from API
+  file: 01_download_update_data.py
+  id: download_update_data
+  tested: true
+- description: Initialize and migrate database schema to match authoritative schema
+  file: 02_setup_database.py
+  id: setup_database
+  tested: true
+- description: Ingest downloaded data into properly configured database
+  file: 03_ingest_data.py
+  id: ingest_data
+  tested: true
+- description: Assign product information to user records
+  file: 04_assign_product_information.py
+  id: assign_product_information
+  tested: true
+- description: Set ABI attribution data for events and users
+  file: 05_set_abi_attribution.py
+  id: set_abi_attribution
+  tested: true
+- description: Validate event lifecycle data for consistency
+  file: 06_validate_event_lifecycle.py
+  id: validate_event_lifecycle
+  tested: true
+- description: Assign economic tier classifications to users
+  file: 07_assign_economic_tier.py
+  id: assign_economic_tier
+  tested: true

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="Ads Dashboard Application" />
+    <link rel="apple-touch-icon" href="/logo192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <link href="/dashboard-static/css/main.f8825f6d.css" rel="stylesheet">
+    <title>🚀 Ads Dashboard</title>
+    
+    <!-- API Redirection and Environment Setup -->
+    <script>
+        // Override fetch globally to redirect API calls from 5678 to 5001
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options) {
+            if (typeof url === 'string' && url.includes('localhost:5678')) {
+                url = url.replace('localhost:5678', 'localhost:5001');
+                console.log('🔄 Redirected API call to:', url);
+            }
+            return originalFetch(url, options);
+        };
+        
+        // Override XMLHttpRequest for axios and other libraries
+        const originalXHROpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+            if (typeof url === 'string' && url.includes('localhost:5678')) {
+                url = url.replace('localhost:5678', 'localhost:5001');
+                console.log('🔄 Redirected XHR call to:', url);
+            }
+            return originalXHROpen.call(this, method, url, ...rest);
+        };
+        
+        // Set environment variable for React app
+        window.REACT_APP_API_URL = 'http://localhost:5001';
+        
+        // Auto-navigate to dashboard if on root
+        window.addEventListener('load', function() {
+            if (window.location.pathname === '/' || window.location.pathname === '/ads-dashboard') {
+                // Only navigate if we're not already in a React app route
+                if (!document.getElementById('root').children.length) {
+                    console.log('🚀 Auto-navigating to dashboard...');
+                    window.location.hash = '#/';
+                }
+            }
+        });
+        
+        // Loading indicator
+        console.log('🚀 Ads Dashboard loading...');
+        
+        // Handle errors gracefully
+        window.addEventListener('error', function(e) {
+            console.error('🚨 Dashboard error:', e.error);
+        });
+        
+        // Show loading status
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📊 Dashboard DOM loaded, initializing...');
+        });
+    </script>
+    
+    <!-- Enhanced Loading Styles -->
+    <style>
+        #root:empty::before {
+            content: "🚀 Loading Ads Dashboard...";
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-size: 1.5rem;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #3b82f6;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .dashboard-loading {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <noscript>
+        <div style="padding: 2rem; text-align: center; font-family: sans-serif;">
+            <h2>🚨 JavaScript Required</h2>
+            <p>The Ads Dashboard requires JavaScript to function properly.</p>
+            <p>Please enable JavaScript in your browser and refresh the page.</p>
+        </div>
+    </noscript>
+    
+    <!-- Dashboard Container -->
+    <div id="root">
+        <!-- Fallback loading indicator -->
+        <div class="dashboard-loading">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📊</div>
+            <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">Ads Dashboard</div>
+            <div style="opacity: 0.8;">Loading analytics...</div>
+        </div>
+    </div>
+    
+    <!-- Main Dashboard Script - UPDATED TO LATEST BUILD -->
+    <script defer="defer" src="/dashboard-static/js/main.a108d44b.js"></script>
+    
+    <!-- Enhanced Error Handling -->
+    <script>
+        // Monitor for successful React mount
+        let mountCheckInterval = setInterval(function() {
+            if (document.getElementById('root').children.length > 1) {
+                console.log('✅ Dashboard successfully mounted');
+                clearInterval(mountCheckInterval);
+            }
+        }, 1000);
+        
+        // Clear interval after 30 seconds to prevent memory leaks
+        setTimeout(function() {
+            clearInterval(mountCheckInterval);
+        }, 30000);
+        
+        // API Health Check
+        setTimeout(function() {
+            fetch('/api/dashboard/health')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('💚 Dashboard API Health:', data.status);
+                })
+                .catch(error => {
+                    console.warn('⚠️ Dashboard API health check failed:', error.message);
+                });
+        }, 2000);
+    </script>
+</body>
+</html>

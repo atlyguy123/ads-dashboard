@@ -1,0 +1,6 @@
+name: "value_estimation_debug"
+display_name: "Value Estimation Debug"
+description: "Debug tools for value estimation pipeline - shows credited date timelines and revenue analysis"
+version: "1.0.0"
+enabled: true
+author: "System" 

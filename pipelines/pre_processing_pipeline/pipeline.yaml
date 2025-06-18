@@ -1,0 +1,21 @@
+description: Pre-processing pipeline for data preparation with credited date assignment,
+  price bucket assignment, conversion rate calculation, and value estimation
+name: pre_processing_pipeline
+steps:
+- description: Assign credited dates based on starter events to user-product lifecycle
+    records
+  file: 00_assign_credited_date.py
+  id: assign_credited_date
+  tested: false
+- description: Assign price bucket classifications to data records
+  file: 01_assign_price_bucket.py
+  id: assign_price_bucket
+  tested: false
+- description: Calculate and assign conversion rates to relevant records
+  file: 02_assign_conversion_rates.py
+  id: assign_conversion_rates
+  tested: false
+- description: Estimate monetary values based on assigned buckets and rates
+  file: 03_estimate_values.py
+  id: estimate_values
+  tested: false

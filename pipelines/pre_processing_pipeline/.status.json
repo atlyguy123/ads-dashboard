@@ -1,0 +1,22 @@
+{
+  "assign_price_bucket": {
+    "status": "success",
+    "timestamp": "2025-06-17T15:56:09.621585",
+    "error_message": null
+  },
+  "assign_credited_date": {
+    "status": "success",
+    "timestamp": "2025-06-17T15:54:26.030833",
+    "error_message": null
+  },
+  "assign_conversion_rates": {
+    "status": "success",
+    "timestamp": "2025-06-17T16:00:19.310315",
+    "error_message": null
+  },
+  "estimate_values": {
+    "status": "success",
+    "timestamp": "2025-06-17T16:00:50.912222",
+    "error_message": null
+  }
+}

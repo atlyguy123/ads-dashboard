@@ -1,0 +1,6 @@
+name: "price_bucket_debug"
+display_name: "Price Bucket Debug"
+description: "Debug tools for price bucket assignment pipeline - analyze buckets, assignments, and data integrity"
+version: "1.0.0"
+enabled: true
+author: "Analytics Team" 

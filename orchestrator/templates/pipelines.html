@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Orchestrator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
+        }
+        
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .sidebar {
+            width: 300px;
+            background: white;
+            border-right: 1px solid #d2d2d7;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #1d1d1f;
+        }
+        
+        h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #1d1d1f;
+        }
+        
+        .pipeline-item {
+            background: white;
+            border: 1px solid #d2d2d7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .pipeline-item:hover {
+            background: #f9f9fb;
+            border-color: #007aff;
+        }
+        
+        .pipeline-item.active {
+            background: #007aff;
+            color: white;
+            border-color: #007aff;
+        }
+        
+        .pipeline-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .pipeline-description {
+            font-size: 14px;
+            color: #86868b;
+        }
+        
+        .pipeline-item.active .pipeline-description {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .pipeline-details {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        
+        .steps-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .step {
+            display: flex;
+            align-items: center;
+            background: #f9f9fb;
+            border-radius: 8px;
+            padding: 15px;
+            position: relative;
+        }
+        
+        .step.pending {
+            background: #f9f9fb;
+            border-left: 4px solid #d2d2d7;
+        }
+        
+        .step.running {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .step.success {
+            background: #e8f5e8;
+            border-left: 4px solid #4caf50;
+        }
+        
+        .step.failed {
+            background: #ffeaea;
+            border-left: 4px solid #f44336;
+        }
+        
+        .step.cancelled {
+            background: #fff8e1;
+            border-left: 4px solid #ff9500;
+        }
+        
+        .step-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .step.pending .step-icon {
+            background: #d2d2d7;
+            color: white;
+        }
+        
+        .step.running .step-icon {
+            background: #2196f3;
+            color: white;
+            animation: pulse 1s infinite;
+        }
+        
+        .step.success .step-icon {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .step.failed .step-icon {
+            background: #f44336;
+            color: white;
+        }
+        
+        .step.cancelled .step-icon {
+            background: #ff9500;
+            color: white;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .step-file {
+            font-size: 14px;
+            color: #86868b;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        
+        .step-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-primary {
+            background: #007aff;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #0056cc;
+        }
+        
+        .btn-primary:disabled {
+            background: #b0b0b0;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .btn-secondary {
+            background: #86868b;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #e5e5ea;
+        }
+        
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+        
+        .tested-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .tested-badge.tested {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .tested-badge.untested {
+            background: #ff9500;
+            color: white;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .status-message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .status-message.success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            border: 1px solid #4caf50;
+        }
+        
+        .status-message.error {
+            background: #ffeaea;
+            color: #c62828;
+            border: 1px solid #f44336;
+        }
+        
+        .no-pipeline {
+            text-align: center;
+            color: #86868b;
+            padding: 50px;
+        }
+        
+        .btn-debug {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 8px;
+        }
+        
+        .btn-debug:hover {
+            background: #5a6268;
+        }
+        
+        .btn-reset {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 8px;
+        }
+        
+        .btn-reset:hover {
+            background: #138496;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Pipelines</h1>
+            <div style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px;">
+                <a href="/" style="padding: 8px 16px; background: #34c759; color: white; text-decoration: none; border-radius: 6px; text-align: center; font-size: 14px;">← Main Dashboard</a>
+                <a href="/ads-dashboard" style="padding: 8px 16px; background: #007aff; color: white; text-decoration: none; border-radius: 6px; text-align: center; font-size: 14px;">📊 Ads Dashboard</a>
+                <button class="btn btn-secondary" id="refreshBtn" style="width: 100%;">
+                    Refresh
+                </button>
+            </div>
+            <div id="pipelineList"></div>
+        </div>
+        
+        <div class="main-content">
+            <div id="pipelineDetails">
+                <div class="no-pipeline">
+                    <h2>Select a pipeline to view details</h2>
+                    <p>Choose a pipeline from the sidebar to see its steps and run it.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        class PipelineOrchestrator {
+            constructor() {
+                this.pipelines = [];
+                this.selectedPipeline = null;
+                this.socket = io();
+                this.init();
+            }
+            
+            init() {
+                this.socket.on('connect', () => {
+                    console.log('Connected to server');
+                });
+                
+                this.socket.on('status_update', (data) => {
+                    this.handleStatusUpdate(data);
+                });
+                
+                document.getElementById('refreshBtn').addEventListener('click', () => {
+                    this.refreshPipelines();
+                });
+                
+                this.loadPipelines();
+            }
+            
+            async loadPipelines() {
+                try {
+                    const response = await fetch('/api/pipelines');
+                    this.pipelines = await response.json();
+                    this.renderPipelineList();
+                    
+                    // Try to restore previously selected pipeline
+                    this.restoreSelectedPipeline();
+                } catch (error) {
+                    console.error('Error loading pipelines:', error);
+                }
+            }
+            
+            async refreshPipelines() {
+                try {
+                    await fetch('/api/refresh', { method: 'POST' });
+                    await this.loadPipelines();
+                    // Note: loadPipelines() will automatically restore the selected pipeline via restoreSelectedPipeline()
+                    this.showMessage('Pipelines refreshed successfully', 'success');
+                } catch (error) {
+                    this.showMessage('Error refreshing pipelines', 'error');
+                }
+            }
+            
+            renderPipelineList() {
+                const listContainer = document.getElementById('pipelineList');
+                listContainer.innerHTML = '';
+                
+                this.pipelines.forEach(pipeline => {
+                    const item = document.createElement('div');
+                    item.className = 'pipeline-item';
+                    item.innerHTML = `
+                        <div class="pipeline-name">${pipeline.name}</div>
+                        <div class="pipeline-description">${pipeline.description}</div>
+                    `;
+                    
+                    item.addEventListener('click', () => {
+                        this.selectPipeline(pipeline, true);
+                    });
+                    
+                    listContainer.appendChild(item);
+                });
+            }
+            
+            selectPipeline(pipeline, fromClick = false) {
+                this.selectedPipeline = pipeline;
+                
+                // Save selection to localStorage
+                localStorage.setItem('selectedPipeline', pipeline.name);
+                
+                // Update sidebar selection
+                document.querySelectorAll('.pipeline-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // Only add active class if this was called from a click event
+                if (fromClick && event && event.currentTarget) {
+                    event.currentTarget.classList.add('active');
+                }
+                
+                this.renderPipelineDetails();
+                
+                console.log(`Selected and saved pipeline: ${pipeline.name}`);
+            }
+            
+            renderPipelineDetails() {
+                const detailsContainer = document.getElementById('pipelineDetails');
+                
+                if (!this.selectedPipeline) {
+                    detailsContainer.innerHTML = `
+                        <div class="no-pipeline">
+                            <h2>Select a pipeline to view details</h2>
+                            <p>Choose a pipeline from the sidebar to see its steps and run it.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const pipeline = this.selectedPipeline;
+                const allTested = pipeline.steps.every(step => step.tested);
+                
+                detailsContainer.innerHTML = `
+                    <div class="pipeline-details">
+                        <h2>${pipeline.name}</h2>
+                        <p>${pipeline.description}</p>
+                        
+                        <div class="controls">
+                            <button class="btn btn-primary" id="runPipelineBtn" ${!allTested ? 'disabled' : ''}>
+                                Run Pipeline
+                            </button>
+                            <button class="btn-debug" onclick="app.debugPipeline('${pipeline.name}')" title="Debug pipeline tracking">
+                                🐛 Debug
+                            </button>
+                            ${!allTested ? '<span style="color: #ff9500; font-size: 14px; margin-left: 10px;">All steps must be tested before running</span>' : ''}
+                        </div>
+                        
+                        <div class="steps-container" id="stepsContainer">
+                            ${pipeline.steps.map(step => this.renderStep(step, pipeline.status[step.id] || {})).join('')}
+                        </div>
+                        
+                        <div id="statusMessage"></div>
+                    </div>
+                `;
+                
+                // Add event listeners
+                document.getElementById('runPipelineBtn').addEventListener('click', () => {
+                    this.runPipeline(pipeline.name);
+                });
+                
+                pipeline.steps.forEach(step => {
+                    const toggleBtn = document.getElementById(`toggle-${step.id}`);
+                    if (toggleBtn) {
+                        toggleBtn.addEventListener('click', () => {
+                            this.markTested(pipeline.name, step.id, !step.tested);
+                        });
+                    }
+                    
+                    const runBtn = document.getElementById(`run-${step.id}`);
+                    if (runBtn) {
+                        runBtn.addEventListener('click', () => {
+                            this.runStep(pipeline.name, step.id);
+                        });
+                    }
+                    
+                    const cancelBtn = document.getElementById(`cancel-${step.id}`);
+                    if (cancelBtn) {
+                        cancelBtn.addEventListener('click', () => {
+                            this.cancelStep(pipeline.name, step.id);
+                        });
+                    }
+                    
+                    const resetBtn = document.getElementById(`reset-${step.id}`);
+                    if (resetBtn) {
+                        resetBtn.addEventListener('click', () => {
+                            this.resetStep(pipeline.name, step.id);
+                        });
+                    }
+                });
+            }
+            
+            renderStep(step, status) {
+                const stepStatus = status.status || 'pending';
+                const tested = step.tested;
+                
+                let icon = '○';
+                let statusText = '';
+                if (stepStatus === 'running') {
+                    icon = '●';
+                    statusText = '<span style="color: #2196f3; font-weight: 600; margin-left: 10px;">RUNNING...</span>';
+                } else if (stepStatus === 'success') {
+                    icon = '✓';
+                    statusText = '<span style="color: #4caf50; font-weight: 600; margin-left: 10px;">SUCCESS</span>';
+                } else if (stepStatus === 'failed') {
+                    icon = '✗';
+                    statusText = '<span style="color: #f44336; font-weight: 600; margin-left: 10px;">FAILED</span>';
+                } else if (stepStatus === 'cancelled') {
+                    icon = '🛑';
+                    statusText = '<span style="color: #ff9500; font-weight: 600; margin-left: 10px;">CANCELLED</span>';
+                }
+                
+                return `
+                    <div class="step ${stepStatus}">
+                        <div class="step-icon">${icon}</div>
+                        <div class="step-content">
+                            <div class="step-name">
+                                ${step.id}
+                                ${statusText}
+                            </div>
+                            <div class="step-file">${step.file}</div>
+                            ${status.error_message ? `<div style="color: #f44336; font-size: 12px; margin-top: 5px; padding: 8px; background: #fdf0f0; border-radius: 4px;"><strong>Error:</strong> ${status.error_message}</div>` : ''}
+                            ${stepStatus === 'success' && status.timestamp ? `<div style="color: #4caf50; font-size: 12px; margin-top: 5px;">Completed: ${new Date(status.timestamp).toLocaleTimeString()}</div>` : ''}
+                        </div>
+                        <div class="step-actions">
+                            <button class="btn ${tested ? 'btn-success' : 'btn-secondary'}" id="toggle-${step.id}">
+                                ${tested ? '✓ Tested' : 'Mark Tested'}
+                            </button>
+                            <button class="btn btn-primary" id="run-${step.id}" ${stepStatus === 'running' ? 'disabled' : ''}>
+                                ${stepStatus === 'running' ? '⏳ Running...' : '▶️ Run'}
+                            </button>
+                            ${stepStatus === 'running' ? `
+                                <button class="btn btn-danger" id="cancel-${step.id}">
+                                    🛑 Cancel
+                                </button>
+                            ` : ''}
+                            ${(stepStatus === 'cancelled' || stepStatus === 'failed' || stepStatus === 'success') ? `
+                                <button class="btn-reset" id="reset-${step.id}">
+                                    🔄 Reset
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            async runPipeline(pipelineName) {
+                try {
+                    const response = await fetch(`/api/run/${pipelineName}`, { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showMessage('Pipeline started successfully', 'success');
+                    } else {
+                        this.showMessage(`Error: ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Error starting pipeline', 'error');
+                }
+            }
+            
+            async runStep(pipelineName, stepId) {
+                try {
+                    const response = await fetch(`/api/run/${pipelineName}/${stepId}`, { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showMessage(`Step '${stepId}' started successfully`, 'success');
+                    } else {
+                        this.showMessage(`Error: ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Error starting step', 'error');
+                }
+            }
+            
+            async markTested(pipelineName, stepId, tested) {
+                try {
+                    const response = await fetch(`/api/mark_tested/${pipelineName}/${stepId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tested })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Update local state
+                        const step = this.selectedPipeline.steps.find(s => s.id === stepId);
+                        if (step) step.tested = tested;
+                        
+                        this.renderPipelineDetails();
+                        this.showMessage(result.message, 'success');
+                    } else {
+                        this.showMessage(`Error: ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Error updating step status', 'error');
+                }
+            }
+            
+            async cancelStep(pipelineName, stepId) {
+                console.log(`🛑 CLIENT: Attempting to cancel step '${stepId}' in pipeline '${pipelineName}'`);
+                
+                try {
+                    const response = await fetch(`/api/cancel/${pipelineName}/${stepId}`, {
+                        method: 'POST'
+                    });
+                    
+                    const result = await response.json();
+                    console.log(`🛑 CLIENT: Cancel response:`, result);
+                    
+                    if (result.success) {
+                        this.showMessage(result.message, 'success');
+                        console.log(`✅ CLIENT: Successfully cancelled step '${stepId}'`);
+                    } else {
+                        this.showMessage(`Cancel failed: ${result.message}`, 'error');
+                        console.log(`❌ CLIENT: Failed to cancel step '${stepId}': ${result.message}`);
+                    }
+                    
+                    // Refresh the pipeline view to get updated status
+                    console.log(`🔄 CLIENT: Refreshing pipeline view after cancel attempt`);
+                    this.loadPipelines();
+                } catch (error) {
+                    console.error(`❌ CLIENT: Error cancelling step '${stepId}':`, error);
+                    this.showMessage(`Error cancelling step: ${error.message}`, 'error');
+                }
+            }
+            
+            async cancelPipeline(pipelineName) {
+                try {
+                    const response = await fetch(`/api/cancel/${pipelineName}`, { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showMessage(`Pipeline '${pipelineName}' cancelled successfully`, 'success');
+                    } else {
+                        this.showMessage(`Error: ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Error cancelling pipeline', 'error');
+                }
+            }
+            
+            handleStatusUpdate(data) {
+                if (this.selectedPipeline && this.selectedPipeline.name === data.pipeline) {
+                    // Update the pipeline status
+                    this.selectedPipeline.status[data.step] = {
+                        status: data.status,
+                        timestamp: data.timestamp,
+                        error_message: data.error_message
+                    };
+                    
+                    this.renderPipelineDetails();
+                    
+                    // Show/hide cancel pipeline button based on running steps
+                    const cancelPipelineBtn = document.getElementById('cancelPipelineBtn');
+                    const hasRunningSteps = Object.values(this.selectedPipeline.status).some(s => s.status === 'running');
+                    
+                    if (cancelPipelineBtn) {
+                        cancelPipelineBtn.style.display = hasRunningSteps ? 'inline-block' : 'none';
+                    }
+                }
+            }
+            
+            showMessage(message, type) {
+                const messageContainer = document.getElementById('statusMessage');
+                if (messageContainer) {
+                    messageContainer.innerHTML = `<div class="status-message ${type}">${message}</div>`;
+                    
+                    setTimeout(() => {
+                        messageContainer.innerHTML = '';
+                    }, 5000);
+                }
+            }
+            
+            restoreSelectedPipeline() {
+                // Check if we have a saved pipeline selection
+                const savedPipelineName = localStorage.getItem('selectedPipeline');
+                if (savedPipelineName) {
+                    // Find the pipeline in our current list
+                    const savedPipeline = this.pipelines.find(p => p.name === savedPipelineName);
+                    if (savedPipeline) {
+                        // Automatically select it
+                        this.selectPipeline(savedPipeline);
+                        
+                        // Update the UI to show it as selected
+                        setTimeout(() => {
+                            const pipelineItems = document.querySelectorAll('.pipeline-item');
+                            pipelineItems.forEach(item => {
+                                const nameElement = item.querySelector('.pipeline-name');
+                                if (nameElement && nameElement.textContent === savedPipelineName) {
+                                    item.classList.add('active');
+                                }
+                            });
+                        }, 100);
+                        
+                        console.log(`Restored selection: ${savedPipelineName}`);
+                        
+                        // Show a subtle message that the selection was restored
+                        setTimeout(() => {
+                            this.showMessage(`Restored previous selection: ${savedPipelineName}`, 'success');
+                        }, 500);
+                    } else {
+                        // Pipeline no longer exists, clear saved selection
+                        localStorage.removeItem('selectedPipeline');
+                        console.log(`Pipeline '${savedPipelineName}' no longer exists, cleared selection`);
+                    }
+                }
+            }
+            
+            async debugPipeline(pipelineName) {
+                console.log(`🐛 DEBUG: Getting debug info for pipeline '${pipelineName}'`);
+                
+                try {
+                    const response = await fetch(`/api/debug/${pipelineName}`);
+                    const debugInfo = await response.json();
+                    
+                    console.log('🐛 DEBUG INFO:', debugInfo);
+                    
+                    // Create a detailed debug message
+                    let debugMessage = `DEBUG INFO for '${pipelineName}':\n\n`;
+                    
+                    debugMessage += `Pipeline exists: ${debugInfo.pipeline_exists}\n\n`;
+                    
+                    debugMessage += `TRACKED PROCESSES:\n`;
+                    if (Object.keys(debugInfo.tracked_processes).length > 0) {
+                        for (const [stepId, processInfo] of Object.entries(debugInfo.tracked_processes)) {
+                            debugMessage += `  • ${stepId}: PID=${processInfo.pid}, Running=${processInfo.is_running}, Poll=${processInfo.poll_result}\n`;
+                        }
+                    } else {
+                        debugMessage += `  (No processes currently tracked)\n`;
+                    }
+                    
+                    debugMessage += `\nSTATUS FILE DATA:\n`;
+                    if (Object.keys(debugInfo.status_file_data).length > 0) {
+                        for (const [stepId, statusInfo] of Object.entries(debugInfo.status_file_data)) {
+                            debugMessage += `  • ${stepId}: Status=${statusInfo.status}, Updated=${statusInfo.updated_at}\n`;
+                        }
+                    } else {
+                        debugMessage += `  (No status data found)\n`;
+                    }
+                    
+                    // Show debug info in an alert for now (could be improved with a modal)
+                    alert(debugMessage);
+                    
+                } catch (error) {
+                    console.error('❌ Error getting debug info:', error);
+                    this.showMessage(`Error getting debug info: ${error.message}`, 'error');
+                }
+            }
+            
+            async resetStep(pipelineName, stepId) {
+                console.log(`🔄 RESET STEP: Resetting step '${stepId}' in pipeline '${pipelineName}'`);
+                
+                try {
+                    const response = await fetch(`/api/reset/${pipelineName}/${stepId}`, {
+                        method: 'POST'
+                    });
+                    
+                    const result = await response.json();
+                    console.log(`🔄 RESET STEP: Reset response:`, result);
+                    
+                    if (result.success) {
+                        this.showMessage(result.message, 'success');
+                        console.log(`✅ RESET STEP: Successfully reset step '${stepId}'`);
+                        
+                        // Refresh the pipeline view to show updated status
+                        this.loadPipelines();
+                    } else {
+                        this.showMessage(`Reset failed: ${result.message}`, 'error');
+                        console.log(`❌ RESET STEP: Failed to reset step '${stepId}': ${result.message}`);
+                    }
+                } catch (error) {
+                    console.error(`❌ RESET STEP: Error resetting step '${stepId}':`, error);
+                    this.showMessage(`Error resetting step: ${error.message}`, 'error');
+                }
+            }
+        }
+        
+        // Initialize the orchestrator when the page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            new PipelineOrchestrator();
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,7 @@
+name: meta_pipeline
+description: Meta pipeline for processing and analyzing meta data with advanced analytics
+steps:
+- file: 01_placeholder_module.py
+  id: placeholder_module
+  tested: false
+  description: Placeholder module for future meta data processing functionality 

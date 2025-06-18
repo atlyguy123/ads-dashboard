@@ -1,0 +1,436 @@
+<h3>Value Estimation Debug Tools</h3>
+<p>Analyze credited date timelines and revenue trends from the value estimation pipeline</p>
+
+<div class="form-group">
+    <button class="btn btn-primary" data-action="load_timeline_data">Load Timeline Data</button>
+    <button class="btn btn-secondary" data-action="refresh_data">Refresh Data</button>
+</div>
+
+<div class="form-group">
+    <label for="date_range">Date Range:</label>
+    <select id="date_range" class="form-control">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 365 days</option>
+        <option value="all">All time</option>
+    </select>
+</div>
+
+<div class="result-container">
+    <div id="loading" style="display: none;">
+        <div class="text-center">
+            <p><i class="fa fa-spinner fa-spin"></i> Loading timeline data...</p>
+        </div>
+    </div>
+    
+    <div id="summary-stats" style="display: none;">
+        <h4>📊 Summary Statistics</h4>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h5>Total Trials</h5>
+                    <span id="total-trials">-</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h5>Total Value</h5>
+                    <span id="total-value">-</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h5>Avg Value/Trial</h5>
+                    <span id="avg-value">-</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <h5>Date Range</h5>
+                    <span id="date-range-display">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="charts-container" style="display: none;">
+        <div class="chart-section">
+            <h4>📈 Timeline 1: Trials Credited Per Day</h4>
+            <div style="position: relative; height: 300px; width: 100%;">
+                <canvas id="trials-chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="chart-section">
+            <h4>💰 Timeline 2: Current Value Sum Per Day</h4>
+            <div style="position: relative; height: 300px; width: 100%;">
+                <canvas id="value-chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="chart-section">
+            <h4>📋 Data Table</h4>
+            <div id="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-striped" id="timeline-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Trials Count</th>
+                            <th>Current Value Sum</th>
+                            <th>Avg Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="timeline-table-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="error-message" style="display: none;" class="alert alert-danger">
+    </div>
+    
+    <!-- Hidden debug info -->
+    <div id="debug-info" style="display: none;">
+        <details>
+            <summary>Debug Information (click to expand)</summary>
+            <pre id="debug-json"></pre>
+        </details>
+    </div>
+</div>
+
+<style>
+.stat-card {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.stat-card h5 {
+    margin-bottom: 5px;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.stat-card span {
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.chart-section {
+    margin: 30px 0;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+.chart-section h4 {
+    margin-bottom: 15px;
+    color: #2c3e50;
+}
+
+#timeline-table {
+    font-size: 0.9em;
+}
+
+#timeline-table th {
+    background-color: #f8f9fa;
+    position: sticky;
+    top: 0;
+}
+</style>
+
+<script>
+// Chart.js integration for timelines
+let trialsChart = null;
+let valueChart = null;
+
+// Check if Chart.js is loaded
+function checkChartJs() {
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not loaded');
+        showError('Chart.js library is not available. Charts cannot be displayed.');
+        return false;
+    }
+    console.log('Chart.js is available');
+    return true;
+}
+
+// Handle timeline data loading
+document.addEventListener('click', function(e) {
+    if (e.target.dataset.action === 'load_timeline_data') {
+        loadTimelineData();
+    } else if (e.target.dataset.action === 'refresh_data') {
+        refreshData();
+    }
+});
+
+// Handle date range changes
+document.getElementById('date_range').addEventListener('change', function() {
+    if (trialsChart || valueChart) {
+        loadTimelineData();
+    }
+});
+
+function showLoading() {
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('summary-stats').style.display = 'none';
+    document.getElementById('charts-container').style.display = 'none';
+    document.getElementById('error-message').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loading').style.display = 'none';
+}
+
+function showError(message) {
+    hideLoading();
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+}
+
+function loadTimelineData() {
+    showLoading();
+    
+    const dateRange = document.getElementById('date_range').value;
+    
+    fetch('/api/debug/value_estimation_debug/load_timeline_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date_range: dateRange })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
+        if (data.success) {
+            displayTimelineData(data.data);
+        } else {
+            showError(data.error || 'Failed to load timeline data');
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        showError('Error: ' + error.message);
+    });
+}
+
+function refreshData() {
+    showLoading();
+    
+    fetch('/api/debug/value_estimation_debug/refresh_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
+        if (data.success) {
+            alert('Data refreshed successfully');
+            loadTimelineData();
+        } else {
+            showError(data.error || 'Failed to refresh data');
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        showError('Error: ' + error.message);
+    });
+}
+
+function displayTimelineData(data) {
+    console.log('Displaying timeline data:', data);
+    
+    // Hide any existing error messages
+    document.getElementById('error-message').style.display = 'none';
+    
+    // Store debug info but don't show it by default
+    document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
+    
+    // Show summary stats
+    document.getElementById('total-trials').textContent = data.summary.total_trials.toLocaleString();
+    document.getElementById('total-value').textContent = '$' + data.summary.total_value.toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('avg-value').textContent = '$' + data.summary.avg_value.toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('date-range-display').textContent = data.summary.date_range;
+    document.getElementById('summary-stats').style.display = 'block';
+    
+    // Create charts - wait a bit for DOM to be ready
+    setTimeout(() => {
+        try {
+            if (checkChartJs()) {
+                createTrialsChart(data.timeline);
+                createValueChart(data.timeline);
+                console.log('Charts created successfully');
+            } else {
+                // Fallback: show a message about missing Chart.js
+                document.getElementById('charts-container').innerHTML = `
+                    <div class="alert alert-warning">
+                        <h4>⚠️ Charts Not Available</h4>
+                        <p>Chart.js library is not loaded. Here's your data instead:</p>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h5>📈 Trials Timeline</h5>
+                                <ul>
+                                    ${data.timeline.map(d => `<li>${d.date}: ${d.trials_count} trials</li>`).join('')}
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>💰 Value Timeline</h5>
+                                <ul>
+                                    ${data.timeline.map(d => `<li>${d.date}: $${d.value_sum.toLocaleString()}</li>`).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error creating charts:', error);
+            showError('Failed to create charts: ' + error.message);
+        }
+    }, 100);
+    
+    // Populate data table
+    populateDataTable(data.timeline);
+    
+    // Show the charts container
+    document.getElementById('charts-container').style.display = 'block';
+    
+    // Show debug info if needed
+    document.getElementById('debug-info').style.display = 'block';
+}
+
+function createTrialsChart(timelineData) {
+    console.log('Creating trials chart with data:', timelineData);
+    
+    const canvas = document.getElementById('trials-chart');
+    if (!canvas) {
+        console.error('Trials chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    if (trialsChart) {
+        trialsChart.destroy();
+    }
+    
+    if (!timelineData || timelineData.length === 0) {
+        console.warn('No timeline data for trials chart');
+        return;
+    }
+    
+    trialsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timelineData.map(d => d.date),
+            datasets: [{
+                label: 'Trials Credited',
+                data: timelineData.map(d => d.trials_count),
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Daily Trial Acquisitions'
+                }
+            }
+        }
+    });
+}
+
+function createValueChart(timelineData) {
+    console.log('Creating value chart with data:', timelineData);
+    
+    const canvas = document.getElementById('value-chart');
+    if (!canvas) {
+        console.error('Value chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    if (valueChart) {
+        valueChart.destroy();
+    }
+    
+    if (!timelineData || timelineData.length === 0) {
+        console.warn('No timeline data for value chart');
+        return;
+    }
+    
+    valueChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timelineData.map(d => d.date),
+            datasets: [{
+                label: 'Current Value Sum ($)',
+                data: timelineData.map(d => d.value_sum),
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Daily Revenue Value'
+                }
+            }
+        }
+    });
+}
+
+function populateDataTable(timelineData) {
+    const tbody = document.getElementById('timeline-table-body');
+    tbody.innerHTML = '';
+    
+    timelineData.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${row.date}</td>
+            <td>${row.trials_count.toLocaleString()}</td>
+            <td>$${row.value_sum.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+            <td>$${row.avg_value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+</script>
+
+<!-- Include Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
