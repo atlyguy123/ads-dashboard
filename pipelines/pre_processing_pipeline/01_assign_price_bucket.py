@@ -162,20 +162,28 @@ def assign_price_buckets_to_users(conversion_buckets: Dict, conversions_df: pd.D
         
         bucket_value = 0
         assignment_type = 'unassigned'
+        inherited_event_type = None
 
         if user_key in conversion_lookup:
             conv = conversion_lookup[user_key][0]
             buckets = conversion_buckets.get(conv['country'], {}).get(product_id, {}).get(conv['event_name'], [])
             bucket_value = find_bucket_for_price(conv['revenue_usd'], buckets) or 0
             assignment_type = 'conversion' if bucket_value > 0 else 'conversion_no_bucket'
+            inherited_event_type = conv['event_name'] if bucket_value > 0 else None  # Track the event type for conversions too
         elif user_key in trial_lookup:
             trial_time = trial_lookup[user_key]['event_time']
-            bucket_value = find_previous_trial_bucket(country, product_id, trial_time, conversions_df, conversion_buckets) or 0
-            assignment_type = 'inherited_prior' if bucket_value > 0 else 'needs_pass_2'
+            bucket_result = find_previous_trial_bucket(country, product_id, trial_time, conversions_df, conversion_buckets)
+            if bucket_result:
+                bucket_value, inherited_event_type = bucket_result
+                assignment_type = 'inherited_prior'
+            else:
+                bucket_value = 0
+                inherited_event_type = None
+                assignment_type = 'needs_pass_2'
         else:
             assignment_type = 'no_event'
 
-        assignments.append({'distinct_id': distinct_id, 'product_id': product_id, 'price_bucket': bucket_value, 'assignment_type': assignment_type, 'country': country})
+        assignments.append({'distinct_id': distinct_id, 'product_id': product_id, 'price_bucket': bucket_value, 'assignment_type': assignment_type, 'country': country, 'inherited_from_event_type': inherited_event_type})
         stats[assignment_type] += 1
     
     # --- PASS 2: Closest-Time Inheritance for Remaining Users ---
@@ -189,14 +197,18 @@ def assign_price_buckets_to_users(conversion_buckets: Dict, conversions_df: pd.D
             user_key = (assignment['distinct_id'], assignment['product_id'])
             trial_time = trial_lookup[user_key]['event_time']
             
-            bucket_value = find_closest_conversion_bucket(assignment['country'], assignment['product_id'], trial_time, conversions_df, conversion_buckets) or 0
+            bucket_result = find_closest_conversion_bucket(assignment['country'], assignment['product_id'], trial_time, conversions_df, conversion_buckets)
             
-            assignment['price_bucket'] = bucket_value
-            if bucket_value > 0:
+            if bucket_result:
+                bucket_value, inherited_event_type = bucket_result
+                assignment['price_bucket'] = bucket_value
+                assignment['inherited_from_event_type'] = inherited_event_type
                 assignment['assignment_type'] = 'inherited_closest'
                 stats['inherited_closest'] += 1
                 stats['needs_pass_2'] -= 1
             else:
+                assignment['price_bucket'] = 0
+                assignment['inherited_from_event_type'] = None
                 assignment['assignment_type'] = 'no_conversions_ever'
                 stats['no_conversions_ever'] += 1
                 stats['needs_pass_2'] -= 1
@@ -208,10 +220,20 @@ def assign_price_buckets_to_users(conversion_buckets: Dict, conversions_df: pd.D
         conn.execute("ALTER TABLE user_product_metrics ADD COLUMN price_bucket REAL")
         logger.info("   Added 'price_bucket' column.")
     except sqlite3.OperationalError: pass
+    
+    try:
+        conn.execute("ALTER TABLE user_product_metrics ADD COLUMN assignment_type TEXT")
+        logger.info("   Added 'assignment_type' column.")
+    except sqlite3.OperationalError: pass
+    
+    try:
+        conn.execute("ALTER TABLE user_product_metrics ADD COLUMN inherited_from_event_type TEXT")
+        logger.info("   Added 'inherited_from_event_type' column.")
+    except sqlite3.OperationalError: pass
         
-    update_data = [(a['price_bucket'], a['distinct_id'], a['product_id']) for a in assignments]
+    update_data = [(a['price_bucket'], a['assignment_type'], a['inherited_from_event_type'], a['distinct_id'], a['product_id']) for a in assignments]
     cursor = conn.cursor()
-    cursor.executemany("UPDATE user_product_metrics SET price_bucket = ? WHERE distinct_id = ? AND product_id = ?", update_data)
+    cursor.executemany("UPDATE user_product_metrics SET price_bucket = ?, assignment_type = ?, inherited_from_event_type = ? WHERE distinct_id = ? AND product_id = ?", update_data)
     conn.commit()
     logger.info(f"   Successfully updated {cursor.rowcount:,} records.")
     conn.close()
@@ -219,7 +241,7 @@ def assign_price_buckets_to_users(conversion_buckets: Dict, conversions_df: pd.D
     log_final_summary(assignments, stats)
 
 # Inheritance function: Looks ONLY for prior 'RC Trial converted' events.
-def find_previous_trial_bucket(country: str, product_id: str, trial_time: str, conversions_df: pd.DataFrame, conversion_buckets: Dict) -> Optional[float]:
+def find_previous_trial_bucket(country: str, product_id: str, trial_time: str, conversions_df: pd.DataFrame, conversion_buckets: Dict) -> Optional[Tuple[float, str]]:
     prev_conversions = conversions_df[
         (conversions_df['country'] == country) &
         (conversions_df['product_id'] == product_id) &
@@ -229,10 +251,13 @@ def find_previous_trial_bucket(country: str, product_id: str, trial_time: str, c
     if prev_conversions.empty: return None
     last_conversion = prev_conversions.sort_values('event_time', ascending=False).iloc[0]
     buckets = conversion_buckets.get(country, {}).get(product_id, {}).get('RC Trial converted', [])
-    return find_bucket_for_price(last_conversion['revenue_usd'], buckets)
+    bucket_value = find_bucket_for_price(last_conversion['revenue_usd'], buckets)
+    if bucket_value:
+        return (bucket_value, 'RC Trial converted')
+    return None
 
 # Inheritance function: Finds closest conversion of ANY type.
-def find_closest_conversion_bucket(country: str, product_id: str, trial_time: str, conversions_df: pd.DataFrame, conversion_buckets: Dict) -> Optional[float]:
+def find_closest_conversion_bucket(country: str, product_id: str, trial_time: str, conversions_df: pd.DataFrame, conversion_buckets: Dict) -> Optional[Tuple[float, str]]:
     relevant_conversions = conversions_df[(conversions_df['country'] == country) & (conversions_df['product_id'] == product_id)].copy()
     if relevant_conversions.empty: return None
     
@@ -240,7 +265,10 @@ def find_closest_conversion_bucket(country: str, product_id: str, trial_time: st
     closest_conversion = relevant_conversions.loc[relevant_conversions['time_diff'].idxmin()]
     
     buckets = conversion_buckets.get(country, {}).get(product_id, {}).get(closest_conversion['event_name'], [])
-    return find_bucket_for_price(closest_conversion['revenue_usd'], buckets)
+    bucket_value = find_bucket_for_price(closest_conversion['revenue_usd'], buckets)
+    if bucket_value:
+        return (bucket_value, closest_conversion['event_name'])
+    return None
 
 # Logging function for the final summary.
 def log_final_summary(assignments: List[Dict], stats: Dict):

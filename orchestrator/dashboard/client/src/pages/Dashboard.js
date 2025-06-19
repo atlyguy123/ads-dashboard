@@ -1,37 +1,77 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   RefreshCw, 
   Search, 
-  Filter, 
   BarChart3, 
-  AlertTriangle, 
-  CheckCircle, 
   Clock,
   Database,
   TrendingUp,
   Users,
   DollarSign,
   Eye,
-  EyeOff,
-  Grid,
-  List,
-  Settings,
-  XCircle
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle
 } from 'lucide-react';
 import { DashboardGrid } from '../components/DashboardGrid';
 import { DebugModal } from '../components/DebugModal';
 import { GraphModal } from '../components/GraphModal';
 import TimelineModal from '../components/TimelineModal';
-import AnalyticsPipelineControls from '../components/dashboard/AnalyticsPipelineControls';
-import { DashboardControls } from '../components/dashboard/DashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
+
+// Available columns for visibility control
+const AVAILABLE_COLUMNS = [
+  { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true },
+  { key: 'campaign_name', label: 'Campaign', defaultVisible: true },
+  { key: 'adset_name', label: 'Ad Set', defaultVisible: true },
+  { key: 'impressions', label: 'Impressions', defaultVisible: true },
+  { key: 'clicks', label: 'Clicks', defaultVisible: true },
+  { key: 'spend', label: 'Spend', defaultVisible: true },
+  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
+  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
+  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
+  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
+  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
+  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_refunds_usd', label: 'Refunds (Mixpanel)', defaultVisible: true },
+  { key: 'mixpanel_revenue_usd', label: 'Revenue (Mixpanel)', defaultVisible: true },
+  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
+  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
+  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
+  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
+  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: true },
+  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
+  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
+  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
+  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue', defaultVisible: true },
+  { key: 'profit', label: 'Profit', defaultVisible: true },
+  { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
+  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
+];
 
 export const Dashboard = () => {
   // Main dashboard state
   const [loading, setLoading] = useState(false);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [dashboardData, setDashboardData] = useState([]);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [dashboardData, setDashboardData] = useState(() => {
+    // Load saved dashboard data immediately
+    const saved = localStorage.getItem('dashboard_data');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved dashboard data:', e);
+      }
+    }
+    return [];
+  });
+  const [lastUpdated, setLastUpdated] = useState(() => {
+    return localStorage.getItem('dashboard_last_updated') || null;
+  });
   
   // Dashboard controls state
   const [dateRange, setDateRange] = useState(() => {
@@ -57,7 +97,9 @@ export const Dashboard = () => {
     return localStorage.getItem('dashboard_hierarchy') || 'campaign';
   });
 
-  const [textFilter, setTextFilter] = useState('');
+  const [textFilter, setTextFilter] = useState(() => {
+    return localStorage.getItem('dashboard_text_filter') || '';
+  });
   
   // Modal states
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
@@ -65,9 +107,7 @@ export const Dashboard = () => {
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
   const [selectedRowData, setSelectedRowData] = useState(null);
   
-  // UI state
-  const [viewMode, setViewMode] = useState('grid');
-  const [showSettings, setShowSettings] = useState(false);
+
   
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState(() => {
@@ -99,10 +139,52 @@ export const Dashboard = () => {
   });
 
   // Column order state
-  const [columnOrder, setColumnOrder] = useState([]);
+  const [columnOrder, setColumnOrder] = useState(() => {
+    const saved = localStorage.getItem('dashboard_column_order');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved column order:', e);
+      }
+    }
+    return AVAILABLE_COLUMNS.map(col => col.key);
+  });
   
   // Row order state  
-  const [rowOrder, setRowOrder] = useState([]);
+  const [rowOrder, setRowOrder] = useState(() => {
+    const saved = localStorage.getItem('dashboard_row_order');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved row order:', e);
+      }
+    }
+    return [];
+  });
+
+  // Column visibility dropdown state
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+
+  // Track if initial load has been performed
+  const hasInitialLoadRef = useRef(false);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showColumnSelector && !event.target.closest('.column-selector-container')) {
+        setShowColumnSelector(false);
+      }
+    };
+
+    if (showColumnSelector) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showColumnSelector]);
 
   // Save states to localStorage
   useEffect(() => {
@@ -120,6 +202,53 @@ export const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('dashboard_column_visibility', JSON.stringify(columnVisibility));
   }, [columnVisibility]);
+
+  // Save additional states to localStorage
+  useEffect(() => {
+    localStorage.setItem('dashboard_text_filter', textFilter);
+  }, [textFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_column_order', JSON.stringify(columnOrder));
+  }, [columnOrder]);
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_row_order', JSON.stringify(rowOrder));
+  }, [rowOrder]);
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_data', JSON.stringify(dashboardData));
+  }, [dashboardData]);
+
+  useEffect(() => {
+    if (lastUpdated) {
+      localStorage.setItem('dashboard_last_updated', lastUpdated);
+    }
+  }, [lastUpdated]);
+
+  // Column visibility functions
+  const handleColumnToggle = (columnKey) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnKey]: !prev[columnKey]
+    }));
+  };
+
+  const handleSelectAllColumns = () => {
+    const newVisibility = {};
+    AVAILABLE_COLUMNS.forEach(col => {
+      newVisibility[col.key] = true;
+    });
+    setColumnVisibility(newVisibility);
+  };
+
+  const handleSelectNoColumns = () => {
+    const newVisibility = {};
+    AVAILABLE_COLUMNS.forEach(col => {
+      newVisibility[col.key] = col.alwaysVisible || false;
+    });
+    setColumnVisibility(newVisibility);
+  };
 
   // Filter data based on text filter
   const filteredData = React.useMemo(() => {
@@ -155,8 +284,48 @@ export const Dashboard = () => {
     return filterRecursive(dashboardData);
   }, [dashboardData, textFilter]);
 
+  // Handle background data refresh (doesn't show main loading state)
+  const handleBackgroundRefresh = useCallback(async () => {
+    setBackgroundLoading(true);
+    setError(null);
+    
+    try {
+      console.log('🔄 Background refresh - fetching fresh data:', {
+        dateRange,
+        breakdown,
+        hierarchy
+      });
+      
+      const response = await dashboardApi.getAnalyticsData({
+        start_date: dateRange.start_date,
+        end_date: dateRange.end_date,
+        breakdown: breakdown,
+        group_by: hierarchy
+      });
+      
+      if (response.success) {
+        setDashboardData(response.data || []);
+        setLastUpdated(new Date().toISOString());
+        
+        // Initialize row order with data IDs if not already set
+        if (response.data && response.data.length > 0 && rowOrder.length === 0) {
+          setRowOrder(response.data.map(r => r.id));
+        }
+        
+        console.log('✅ Background refresh completed successfully');
+      } else {
+        setError(response.error || 'Failed to fetch analytics data');
+      }
+    } catch (error) {
+      console.error('Background refresh error:', error);
+      setError(error.message || 'Failed to refresh dashboard data');
+    } finally {
+      setBackgroundLoading(false);
+    }
+  }, [dateRange, breakdown, hierarchy, rowOrder.length]);
+
   // Handle dashboard data refresh (fast, pre-computed data)
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -199,7 +368,26 @@ export const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange, breakdown, hierarchy]);
+
+  // Auto-refresh on component mount (after functions are defined)
+  useEffect(() => {
+    if (hasInitialLoadRef.current) return; // Prevent multiple initial loads
+    
+    const hasValidData = dashboardData && dashboardData.length > 0;
+    
+    if (hasValidData) {
+      // If we have cached data, show it immediately and refresh in background
+      console.log('🔄 Loading cached data and refreshing in background');
+      handleBackgroundRefresh();
+    } else {
+      // If no cached data, do a regular refresh
+      console.log('🔄 No cached data, performing initial load');
+      handleRefresh();
+    }
+    
+    hasInitialLoadRef.current = true;
+  }, [handleBackgroundRefresh, handleRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle row actions
   const handleRowAction = (action, rowData) => {
@@ -316,26 +504,62 @@ export const Dashboard = () => {
                 Advanced analytics for Meta advertising performance
               </p>
             </div>
-            <div className="flex items-center space-x-4">
+            
+            {/* Column Visibility Control */}
+            <div className="relative column-selector-container">
               <button
-                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                onClick={() => setShowColumnSelector(!showColumnSelector)}
+                className="flex items-center space-x-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-blue-500 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
               >
-                {viewMode === 'grid' ? <List className="h-5 w-5" /> : <Grid className="h-5 w-5" />}
+                <Eye className="h-4 w-4" />
+                <span className="text-sm">Columns</span>
+                {showColumnSelector ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
-              <button
-                onClick={() => setShowSettings(!showSettings)}
-                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              >
-                <Settings className="h-5 w-5" />
-              </button>
+              
+              {showColumnSelector && (
+                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 max-h-80 overflow-y-auto">
+                  <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex space-x-2 mb-2">
+                      <button
+                        onClick={handleSelectAllColumns}
+                        className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800"
+                      >
+                        Show All
+                      </button>
+                      <button
+                        onClick={handleSelectNoColumns}
+                        className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
+                      >
+                        Hide All
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="p-3 space-y-2">
+                    {AVAILABLE_COLUMNS.map((column) => (
+                      <div key={column.key} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={columnVisibility[column.key] || false}
+                          onChange={() => handleColumnToggle(column.key)}
+                          disabled={column.alwaysVisible}
+                          className="mr-3 h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-500 focus:ring-blue-500"
+                        />
+                        <span className={`text-sm ${
+                          column.alwaysVisible 
+                            ? 'text-gray-500 dark:text-gray-400' 
+                            : 'text-gray-700 dark:text-gray-300'
+                        }`}>
+                          {column.label}
+                          {column.alwaysVisible && <span className="ml-1 text-xs">(always visible)</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-
-        {/* Analytics Pipeline Status */}
-        <div className="mb-6">
-          <AnalyticsPipelineControls />
         </div>
 
         {/* Dashboard Controls */}
@@ -400,11 +624,18 @@ export const Dashboard = () => {
                 {/* Actions */}
                 <div className="flex flex-col justify-end">
                   <button
-                    onClick={handleRefresh}
-                    disabled={loading}
+                    onClick={() => {
+                      // Use background refresh if we have existing data, otherwise regular refresh
+                      if (dashboardData && dashboardData.length > 0) {
+                        handleBackgroundRefresh();
+                      } else {
+                        handleRefresh();
+                      }
+                    }}
+                    disabled={loading || backgroundLoading}
                     className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {loading ? (
+                    {(loading || backgroundLoading) ? (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                         Refreshing...
@@ -422,30 +653,7 @@ export const Dashboard = () => {
           </div>
         </div>
 
-        {/* Column Management Settings Panel */}
-        {showSettings && (
-          <div className="mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                    Column Settings
-                  </h3>
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  >
-                    <XCircle className="h-5 w-5" />
-                  </button>
-                </div>
-                <DashboardControls
-                  onColumnVisibilityChange={setColumnVisibility}
-                  onColumnOrderChange={setColumnOrder}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* Search and Filter */}
         <div className="mb-6">
@@ -514,11 +722,20 @@ export const Dashboard = () => {
           </div>
         )}
 
-        {/* Last Updated */}
-        {lastUpdated && (
-          <div className="mb-4 flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <Clock className="mr-2 h-4 w-4" />
-            Last updated: {new Date(lastUpdated).toLocaleString()}
+        {/* Last Updated with Background Loading Indicator */}
+        {(lastUpdated || backgroundLoading) && (
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+              <Clock className="mr-2 h-4 w-4" />
+              Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleString() : 'Loading...'}
+            </div>
+            
+            {backgroundLoading && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-full text-xs border border-blue-200 dark:border-blue-800">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                <span>Refreshing data...</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -568,10 +785,20 @@ export const Dashboard = () => {
             {!textFilter && (
               <button 
                 onClick={handleRefresh}
-                className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                disabled={loading || backgroundLoading}
+                className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh Data
+                {(loading || backgroundLoading) ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Refreshing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Refresh Data
+                  </>
+                )}
               </button>
             )}
           </div>

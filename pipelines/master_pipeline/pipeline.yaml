@@ -47,7 +47,7 @@ steps:
   file: ../pre_processing_pipeline/03_estimate_values.py
   id: ⚙️ Pre-processing - Estimate Values
   tested: true
-- description: Placeholder module for future meta data processing functionality
-  file: ../meta_pipeline/01_placeholder_module.py
-  id: 🔮 Meta - Placeholder Module
-  tested: true
+- description: Update Meta advertising data from most recent date to today
+  file: ../meta_pipeline/01_update_meta_data.py
+  id: 🔮 Meta - Update Data
+  tested: false

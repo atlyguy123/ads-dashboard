@@ -11,6 +11,7 @@ class DashboardApiService {
 
   async makeRequest(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
+    console.log('🔥🔥🔥 DASHBOARD API - makeRequest called:', url, options);
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -20,8 +21,10 @@ class DashboardApiService {
     };
 
     try {
+      console.log('🔥🔥🔥 DASHBOARD API - Fetching:', url, config);
       const response = await fetch(url, config);
       const data = await response.json();
+      console.log('🔥🔥🔥 DASHBOARD API - Response:', data);
       
       if (!response.ok) {
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -143,7 +146,10 @@ class DashboardApiService {
    * Get chart data for analytics sparklines and detailed views
    */
   async getAnalyticsChartData(params) {
+    console.log('🔥🔥🔥 DASHBOARD API - getAnalyticsChartData called with:', params);
     const queryParams = new URLSearchParams(params).toString();
+    console.log('🔥🔥🔥 DASHBOARD API - Query params:', queryParams);
+    console.log('🔥🔥🔥 DASHBOARD API - Full URL:', `/analytics/chart-data?${queryParams}`);
     return this.makeRequest(`/analytics/chart-data?${queryParams}`);
   }
 

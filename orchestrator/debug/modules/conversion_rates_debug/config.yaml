@@ -1,6 +1,6 @@
 name: "conversion_rates_debug"
 display_name: "Conversion Rates Debug"
-description: "Debug and validation tools for the assigned conversion rates processing pipeline"
+description: "Debug tools for conversion rate calculation pipeline"
 version: "1.0.0"
 enabled: true
 author: "Analytics Team" 

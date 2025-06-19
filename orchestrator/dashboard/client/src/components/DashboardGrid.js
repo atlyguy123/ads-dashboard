@@ -257,6 +257,8 @@ const TRIAL_RELATED_COLUMNS = [
 ];
 
 // PURCHASE columns: "Purchases (Meta)", "Purchases (Mixpanel)", etc.
+// Note: estimated_revenue_usd, profit, and estimated_roas are excluded from graying 
+// because they should always remain visible as key metrics
 const PURCHASE_RELATED_COLUMNS = [
   'mixpanel_purchases',         // "Purchases (Mixpanel)"
   'meta_purchases',             // "Purchases (Meta)"  
@@ -265,11 +267,10 @@ const PURCHASE_RELATED_COLUMNS = [
   'purchase_refund_rate',       // "Purchase Refund Rate"
   'purchase_accuracy_ratio',    // "Purchase Accuracy Ratio"
   'mixpanel_conversions_net_refunds', // "Net Conversions (Mixpanel)"
-  'estimated_revenue_usd',      // "Estimated Revenue"
   'mixpanel_revenue_usd',       // "Revenue (Mixpanel)"
-  'mixpanel_refunds_usd',       // "Refunds (Mixpanel)"
-  'profit',                     // "Profit"
-  'estimated_roas'              // "ROAS"
+  'mixpanel_refunds_usd'        // "Refunds (Mixpanel)"
+  // estimated_revenue_usd, profit, and estimated_roas intentionally excluded 
+  // so they never get grayed out - they're always-visible key metrics
 ];
 
 // Helper to determine event priority based on Mixpanel counts

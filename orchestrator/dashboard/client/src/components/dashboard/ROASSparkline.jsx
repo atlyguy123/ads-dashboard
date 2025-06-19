@@ -76,10 +76,15 @@ const ROASSparkline = ({
         
         const response = await dashboardApi.getAnalyticsChartData(apiParams);
         
+        console.log('🔥 SPARKLINE DEBUG - API RESPONSE:', response);
+        console.log('🔥 SPARKLINE DEBUG - API PARAMS:', apiParams);
+        
         if (response && response.success && response.chart_data) {
+          console.log('🔥 SPARKLINE DEBUG - CHART DATA:', response.chart_data);
+          console.log('🔥 SPARKLINE DEBUG - CHART DATA LENGTH:', response.chart_data.length);
           setChartData(response.chart_data);
         } else {
-          console.error('ROASSparkline: Invalid API response for', entityId, response);
+          console.error('🔥 SPARKLINE ERROR - Invalid API response for', entityId, response);
           setError('Invalid API response');
         }
       } catch (error) {
@@ -111,7 +116,7 @@ const ROASSparkline = ({
     if (dataIndex >= 0 && dataIndex < chartData.length) {
       setHoveredPoint(dataIndex);
       setTooltipPosition({ 
-        x: event.clientX, 
+        x: event.clientX - 180, // Offset 180px to the left
         y: event.clientY - 60 
       });
     }
@@ -140,6 +145,14 @@ const ROASSparkline = ({
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
     parseFloat(d.daily_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
   );
+
+  console.log('🔥 SPARKLINE RENDER DEBUG:');
+  console.log('   chartData.length:', chartData.length);
+  console.log('   hasEnoughData:', hasEnoughData);
+  console.log('   chartData sample:', chartData[0]);
+  if (chartData.length > 0) {
+    console.log('   daily_roas values:', chartData.map(d => d.daily_roas));
+  }
 
   return (
     <div className="flex items-center space-x-3 min-w-[120px] relative">
@@ -242,11 +255,12 @@ const ROASSparkline = ({
                 {/* Tooltip */}
                 {hoveredPoint !== null && (
                   <div 
-                    className="fixed z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 pointer-events-none shadow-lg"
+                    className="fixed z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 pointer-events-none shadow-lg border border-gray-700"
                     style={{
-                      left: tooltipPosition.x - 120, // Move tooltip to the left of cursor
-                      top: tooltipPosition.y,
-                      transform: 'none' // Remove centering transform
+                      left: tooltipPosition.x, // Use the already offset position
+                      top: tooltipPosition.y - 10, // Slight upward offset
+                      transform: 'none',
+                      maxWidth: '200px' // Prevent tooltip from being too wide
                     }}
                   >
                     {(() => {

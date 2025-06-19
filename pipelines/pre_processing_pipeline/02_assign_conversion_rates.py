@@ -139,13 +139,21 @@ class ConversionRateProcessor:
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
 
-        # Define cohort date windows based on business logic
-        self.cohort_start_date = (datetime.now() - timedelta(days=53)).strftime('%Y-%m-%d')
-        self.cohort_end_date = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
-        self.refund_observation_cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        # Define separate cohort date windows for trials and purchases
+        # Trial cohort window: 53 days ago to 8 days ago
+        self.trial_cohort_start_date = (datetime.now() - timedelta(days=53)).strftime('%Y-%m-%d')
+        self.trial_cohort_end_date = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
+        self.trial_refund_cutoff = (datetime.now() - timedelta(days=38)).strftime('%Y-%m-%d %H:%M:%S')
+
+        # Purchase cohort window: 45 days ago to 0 days ago (today)
+        self.purchase_cohort_start_date = (datetime.now() - timedelta(days=45)).strftime('%Y-%m-%d')
+        self.purchase_cohort_end_date = datetime.now().strftime('%Y-%m-%d')
+        self.purchase_refund_cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
         
-        logger.info(f"Cohort Window (for start events based on credited_date): {self.cohort_start_date} to {self.cohort_end_date}")
-        logger.info(f"Refund Observation Cutoff (conversions/purchases must be before this time): {self.refund_observation_cutoff}")
+        logger.info(f"Trial Cohort Window (for start events based on credited_date): {self.trial_cohort_start_date} to {self.trial_cohort_end_date}")
+        logger.info(f"Purchase Cohort Window: {self.purchase_cohort_start_date} to {self.purchase_cohort_end_date}")
+        logger.info(f"Trial Refund Cutoff (trial conversions must be before this time): {self.trial_refund_cutoff}")
+        logger.info(f"Purchase Refund Cutoff (purchases must be before this time): {self.purchase_refund_cutoff}")
 
         # --- NEW In-Memory Data Model ---
         # A single, unified data structure to hold all necessary data, replacing the previous brittle caches.
@@ -294,9 +302,9 @@ class ConversionRateProcessor:
         
         # For each user-product combination, create index keys for different property combinations
         for (distinct_id, product_id), props in self.user_product_lookup.items():
-            # Check if this user-product is in the cohort window
+            # Check if this user-product is in the trial cohort window (used for cohort matching)
             credited_date = props['credited_date']
-            if not (self.cohort_start_date <= credited_date <= self.cohort_end_date):
+            if not (self.trial_cohort_start_date <= credited_date <= self.trial_cohort_end_date):
                 continue
                 
             # Create keys for different property levels
@@ -417,8 +425,43 @@ class ConversionRateProcessor:
         conversions_eligible_for_refund = 0
         conversion_refunds = 0
 
+        # 🚨 DEBUGGING: Track detailed information for zero rate debugging
+        debug_info = {
+            'cohort_size': len(cohort_user_ids),
+            'product_id': product_id,
+            'trial_cohort_window': f"{self.trial_cohort_start_date} to {self.trial_cohort_end_date}",
+            'purchase_cohort_window': f"{self.purchase_cohort_start_date} to {self.purchase_cohort_end_date}",
+            'trial_refund_cutoff': self.trial_refund_cutoff,
+            'purchase_refund_cutoff': self.purchase_refund_cutoff,
+            'trial_events_found': 0,
+            'trial_events_in_window': 0,
+            'trial_events_out_of_window': 0,
+            'conversion_events_found': 0,
+            'conversion_events_eligible': 0,
+            'purchase_events_found': 0,
+            'purchase_events_eligible': 0,
+            'sample_events': [],
+            'sample_user_properties': [],
+            'window_mismatches': []
+        }
+
         for user_id in cohort_user_ids:
             user_events = self.users_data[user_id]['events']
+            
+            # 🚨 DEBUGGING: Collect sample user properties for the first few users
+            if len(debug_info['sample_user_properties']) < 3:
+                user_product_info = self.user_product_lookup.get((user_id, product_id))
+                if user_product_info:
+                    debug_info['sample_user_properties'].append({
+                        'user_id': user_id[:10] + '...',
+                        'credited_date': user_product_info['credited_date'],
+                        'price_bucket': user_product_info.get('price_bucket'),
+                        'store': user_product_info.get('store'),
+                        'economic_tier': self.users_data[user_id]['properties'].get('economic_tier'),
+                        'country': self.users_data[user_id]['properties'].get('country'),
+                        'region': self.users_data[user_id]['properties'].get('region'),
+                        'event_count': len([e for e in user_events if e['product_id'] == product_id])
+                    })
             
             # Iterate through events to find trial starts and initial purchases
             for i, start_event in enumerate(user_events):
@@ -428,11 +471,23 @@ class ConversionRateProcessor:
                 event_name = start_event['event_name']
                 event_time = start_event['event_time']
                 
+                # 🚨 DEBUGGING: Collect sample events
+                if len(debug_info['sample_events']) < 10:
+                    debug_info['sample_events'].append({
+                        'user_id': user_id[:10] + '...',
+                        'event_name': event_name,
+                        'event_time': event_time,
+                        'product_id': start_event['product_id']
+                    })
+                
                 # --- A. Trial Conversion Rate Logic ---
                 if event_name == EVENT_TRIAL_STARTED:
-                    # Confirm this specific trial start is in our cohort window using its credited_date
+                    debug_info['trial_events_found'] += 1
+                    
+                    # Confirm this specific trial start is in our trial cohort window using its credited_date
                     user_product_info = self.user_product_lookup.get((user_id, product_id))
-                    if user_product_info and (self.cohort_start_date <= user_product_info['credited_date'] <= self.cohort_end_date):
+                    if user_product_info and (self.trial_cohort_start_date <= user_product_info['credited_date'] <= self.trial_cohort_end_date):
+                        debug_info['trial_events_in_window'] += 1
                         trials_in_window += 1
                         # Look FORWARD in the event list for the first conversion
                         for subsequent_event in user_events[i+1:]:
@@ -440,10 +495,23 @@ class ConversionRateProcessor:
                                 subsequent_event['event_name'] == EVENT_TRIAL_CONVERTED):
                                 matched_conversions += 1
                                 break # Count only the first conversion per trial
+                    else:
+                        debug_info['trial_events_out_of_window'] += 1
+                        # 🚨 DEBUGGING: Track why events are out of window
+                        if user_product_info:
+                            debug_info['window_mismatches'].append({
+                                'user_id': user_id[:10] + '...',
+                                'event_time': event_time,
+                                'credited_date': user_product_info['credited_date'],
+                                'cohort_window': f"{self.trial_cohort_start_date} to {self.trial_cohort_end_date}",
+                                'reason': 'credited_date outside cohort window'
+                            })
 
                 # --- B. Refund Rate Logic ---
                 if event_name == EVENT_TRIAL_CONVERTED:
-                    if event_time < self.refund_observation_cutoff:
+                    debug_info['conversion_events_found'] += 1
+                    if event_time < self.trial_refund_cutoff:
+                        debug_info['conversion_events_eligible'] += 1
                         conversions_eligible_for_refund += 1
                         # Look FORWARD 30 days for a cancellation
                         refund_window_end = (datetime.fromisoformat(event_time) + timedelta(days=30)).isoformat()
@@ -457,7 +525,9 @@ class ConversionRateProcessor:
                                 break
 
                 if event_name == EVENT_INITIAL_PURCHASE:
-                    if event_time < self.refund_observation_cutoff:
+                    debug_info['purchase_events_found'] += 1
+                    if event_time < self.purchase_refund_cutoff:
+                        debug_info['purchase_events_eligible'] += 1
                         purchases_eligible_for_refund += 1
                         # Look FORWARD 30 days for a cancellation
                         refund_window_end = (datetime.fromisoformat(event_time) + timedelta(days=30)).isoformat()
@@ -471,11 +541,127 @@ class ConversionRateProcessor:
                                 break
 
         # Calculate final rates, avoiding division by zero
-        return {
+        rates = {
             'trial_conversion_rate': matched_conversions / trials_in_window if trials_in_window > 0 else 0,
             'trial_converted_to_refund_rate': conversion_refunds / conversions_eligible_for_refund if conversions_eligible_for_refund > 0 else 0,
             'initial_purchase_to_refund_rate': purchase_refunds / purchases_eligible_for_refund if purchases_eligible_for_refund > 0 else 0
         }
+
+        # 🚨 DEBUGGING: If all rates are zero, trigger detailed debugging output
+        if all(rate == 0 for rate in rates.values()) and debug_info['cohort_size'] >= MIN_COHORT_SIZE:
+            self._debug_zero_rates(debug_info, rates, {
+                'trials_in_window': trials_in_window,
+                'matched_conversions': matched_conversions,
+                'purchases_eligible_for_refund': purchases_eligible_for_refund,
+                'purchase_refunds': purchase_refunds,
+                'conversions_eligible_for_refund': conversions_eligible_for_refund,
+                'conversion_refunds': conversion_refunds
+            })
+
+        return rates
+
+    def _debug_zero_rates(self, debug_info: Dict, rates: Dict, counters: Dict) -> None:
+        """
+        🚨 ZERO RATES DEBUGGING: Comprehensive analysis when all conversion rates are zero.
+        This method provides detailed breakdown of why rates are zero.
+        """
+        logger.error("="*100)
+        logger.error("🚨 ZERO CONVERSION RATES DETECTED - DEBUGGING ANALYSIS")
+        logger.error("="*100)
+        
+        # Basic cohort information
+        logger.error(f"📊 COHORT OVERVIEW:")
+        logger.error(f"   • Product ID: {debug_info['product_id']}")
+        logger.error(f"   • Cohort Size: {debug_info['cohort_size']} users (≥{MIN_COHORT_SIZE} required)")
+        logger.error(f"   • Trial Cohort Window: {debug_info['trial_cohort_window']}")
+        logger.error(f"   • Purchase Cohort Window: {debug_info['purchase_cohort_window']}")
+        logger.error(f"   • Trial Refund Cutoff: {debug_info['trial_refund_cutoff']}")
+        logger.error(f"   • Purchase Refund Cutoff: {debug_info['purchase_refund_cutoff']}")
+        
+        # Event breakdown
+        logger.error(f"\n🎯 EVENT ANALYSIS:")
+        logger.error(f"   • Trial Events Found: {debug_info['trial_events_found']}")
+        logger.error(f"   • Trial Events IN Window: {debug_info['trial_events_in_window']}")
+        logger.error(f"   • Trial Events OUT of Window: {debug_info['trial_events_out_of_window']}")
+        logger.error(f"   • Conversion Events Found: {debug_info['conversion_events_found']}")
+        logger.error(f"   • Conversion Events Eligible for Refund: {debug_info['conversion_events_eligible']}")
+        logger.error(f"   • Purchase Events Found: {debug_info['purchase_events_found']}")
+        logger.error(f"   • Purchase Events Eligible for Refund: {debug_info['purchase_events_eligible']}")
+        
+        # Calculation breakdown
+        logger.error(f"\n🧮 CALCULATION BREAKDOWN:")
+        logger.error(f"   • Trials in Window: {counters['trials_in_window']}")
+        logger.error(f"   • Matched Conversions: {counters['matched_conversions']}")
+        logger.error(f"   • Trial Conversion Rate: {counters['matched_conversions']}/{counters['trials_in_window']} = {rates['trial_conversion_rate']:.4f}")
+        logger.error(f"   • Conversions Eligible for Refund: {counters['conversions_eligible_for_refund']}")
+        logger.error(f"   • Conversion Refunds: {counters['conversion_refunds']}")
+        logger.error(f"   • Trial Refund Rate: {counters['conversion_refunds']}/{counters['conversions_eligible_for_refund']} = {rates['trial_converted_to_refund_rate']:.4f}")
+        logger.error(f"   • Purchases Eligible for Refund: {counters['purchases_eligible_for_refund']}")
+        logger.error(f"   • Purchase Refunds: {counters['purchase_refunds']}")
+        logger.error(f"   • Purchase Refund Rate: {counters['purchase_refunds']}/{counters['purchases_eligible_for_refund']} = {rates['initial_purchase_to_refund_rate']:.4f}")
+        
+        # Sample user properties
+        logger.error(f"\n👥 SAMPLE USER PROPERTIES ({len(debug_info['sample_user_properties'])} users):")
+        for i, user_props in enumerate(debug_info['sample_user_properties']):
+            logger.error(f"   User {i+1} ({user_props['user_id']}):")
+            logger.error(f"      • Credited Date: {user_props['credited_date']}")
+            logger.error(f"      • Price Bucket: {user_props['price_bucket']}")
+            logger.error(f"      • Store: {user_props['store']}")
+            logger.error(f"      • Economic Tier: {user_props['economic_tier']}")
+            logger.error(f"      • Country: {user_props['country']}")
+            logger.error(f"      • Region: {user_props['region']}")
+            logger.error(f"      • Event Count for Product: {user_props['event_count']}")
+        
+        # Sample events
+        logger.error(f"\n📅 SAMPLE EVENTS ({len(debug_info['sample_events'])} events):")
+        for event in debug_info['sample_events']:
+            logger.error(f"   • {event['user_id']}: {event['event_name']} at {event['event_time']} for {event['product_id']}")
+        
+        # Window mismatches (critical for understanding why trial events aren't counted)
+        if debug_info['window_mismatches']:
+            logger.error(f"\n❌ COHORT WINDOW MISMATCHES ({len(debug_info['window_mismatches'])} mismatches):")
+            for mismatch in debug_info['window_mismatches'][:5]:  # Show first 5
+                logger.error(f"   • {mismatch['user_id']}: Event at {mismatch['event_time']}, Credited at {mismatch['credited_date']}")
+                logger.error(f"     Cohort Window: {mismatch['cohort_window']}")
+                logger.error(f"     Reason: {mismatch['reason']}")
+            if len(debug_info['window_mismatches']) > 5:
+                logger.error(f"   ... and {len(debug_info['window_mismatches']) - 5} more mismatches")
+        
+        # Root cause analysis
+        logger.error(f"\n🔍 ROOT CAUSE ANALYSIS:")
+        if debug_info['trial_events_found'] == 0:
+            logger.error(f"   🚨 CRITICAL: No trial events found for this product in the cohort!")
+            logger.error(f"      • This suggests either no users in this cohort have trial events,")
+            logger.error(f"      • or there's a product_id mismatch in the event data")
+        elif debug_info['trial_events_in_window'] == 0:
+            logger.error(f"   🚨 CRITICAL: {debug_info['trial_events_found']} trial events found, but NONE are in the cohort window!")
+            logger.error(f"      • All trial events have credited_date outside {debug_info['trial_cohort_window']}")
+            logger.error(f"      • This is likely a cohort window calculation bug")
+        elif counters['matched_conversions'] == 0:
+            logger.error(f"   🚨 ISSUE: {counters['trials_in_window']} trials in window, but no conversions matched")
+            logger.error(f"      • Users started trials but didn't convert within the tracking period")
+        
+        if debug_info['conversion_events_found'] > 0 and debug_info['conversion_events_eligible'] == 0:
+            logger.error(f"   🚨 REFUND ISSUE: {debug_info['conversion_events_found']} conversions found, but none eligible for refund analysis")
+            logger.error(f"      • All conversions happened after {debug_info['trial_refund_cutoff']}")
+        
+        if debug_info['purchase_events_found'] > 0 and debug_info['purchase_events_eligible'] == 0:
+            logger.error(f"   🚨 REFUND ISSUE: {debug_info['purchase_events_found']} purchases found, but none eligible for refund analysis")
+            logger.error(f"      • All purchases happened after {debug_info['purchase_refund_cutoff']}")
+        
+        # Recommendations
+        logger.error(f"\n💡 DEBUGGING RECOMMENDATIONS:")
+        if debug_info['trial_events_out_of_window'] > debug_info['trial_events_in_window']:
+            logger.error(f"   1. Check cohort window calculation - {debug_info['trial_events_out_of_window']} events are outside the window")
+            logger.error(f"   2. Verify if credited_date should be used for cohort filtering vs event_time")
+        if debug_info['trial_events_found'] > 0 and counters['matched_conversions'] == 0:
+            logger.error(f"   3. Check trial-to-conversion matching logic - events may not be properly linked")
+        if all(counters[key] == 0 for key in ['conversions_eligible_for_refund', 'purchases_eligible_for_refund']):
+            logger.error(f"   4. Check refund cutoff dates - may be too restrictive (Trial: {debug_info['trial_refund_cutoff']}, Purchase: {debug_info['purchase_refund_cutoff']})")
+        
+        logger.error("="*100)
+        logger.error("🚨 END ZERO RATES DEBUGGING ANALYSIS")
+        logger.error("="*100)
 
     def _batch_update_metrics(self, updates: List[Tuple]) -> None:
         """Performs a single, efficient bulk update to the database."""

@@ -100,6 +100,7 @@ EXPECTED_TABLES = {
         'trial_converted_to_refund_rate': 'DECIMAL',
         'initial_purchase_to_refund_rate': 'DECIMAL',
         'price_bucket': 'DECIMAL',
+        'assignment_type': 'TEXT',
         'last_updated_ts': 'DATETIME',
         'valid_lifecycle': 'BOOLEAN',
         'store': 'TEXT'
@@ -581,6 +582,7 @@ def validate_indexes(cursor: sqlite3.Cursor, errors: List[str], warnings: List[s
         'idx_upm_valid_lifecycle',
         'idx_upm_store',
         'idx_upm_price_bucket',
+        'idx_upm_assignment_type',
         
         # Advertising performance table indexes
         'idx_ad_perf_date',

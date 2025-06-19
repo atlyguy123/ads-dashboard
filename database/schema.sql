@@ -80,6 +80,7 @@ CREATE TABLE user_product_metrics (
     trial_converted_to_refund_rate DECIMAL(5,4), -- Changed from REAL to DECIMAL
     initial_purchase_to_refund_rate DECIMAL(5,4), -- Changed from REAL to DECIMAL
     price_bucket DECIMAL(10,2), -- Changed from REAL to DECIMAL
+    assignment_type TEXT, -- Price bucket assignment method: 'conversion', 'inherited_prior', 'inherited_closest', 'no_event', 'no_conversions_ever'
     last_updated_ts DATETIME NOT NULL, -- Changed from TEXT to DATETIME
     -- Additional fields from planned fact_user_products structure
     valid_lifecycle BOOLEAN DEFAULT FALSE, -- Whether this user-product lifecycle can be trusted for analysis
@@ -333,6 +334,7 @@ CREATE INDEX idx_upm_abi_ad_set_id ON user_product_metrics (abi_ad_set_id);
 CREATE INDEX idx_upm_valid_lifecycle ON user_product_metrics (valid_lifecycle);
 CREATE INDEX idx_upm_store ON user_product_metrics (store);
 CREATE INDEX idx_upm_price_bucket ON user_product_metrics (price_bucket);
+CREATE INDEX idx_upm_assignment_type ON user_product_metrics (assignment_type);
 
 -- Meta advertising performance table indexes
 CREATE INDEX idx_ad_perf_date ON ad_performance_daily (date);

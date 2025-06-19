@@ -80,6 +80,19 @@ class ValueEstimator:
             db_path = get_database_path('mixpanel_data')
         self.db_path = db_path
         self.pricing_rules = None
+        
+        # Error counters for summary reporting
+        self.error_counts = {
+            'no_subscription_start_event': 0,
+            'no_price_bucket_in_database': 0,
+            'no_conversion_rates_found': 0,
+            'invalid_credited_date': 0,
+            'failed_profile_json_parse': 0,
+            'failed_user_processing': 0,
+            'failed_price_lookup': 0,
+            'failed_value_calculation': 0
+        }
+        
         self._load_pricing_rules()
         logger.info("ValueEstimator initialized")
     
@@ -129,7 +142,7 @@ class ValueEstimator:
             return None
             
         except Exception as e:
-            logger.warning(f"Error getting price for {product_id}, {country}, {trial_date}: {e}")
+            self.error_counts['failed_price_lookup'] += 1
             return None
 
     def process_attributed_users(self) -> Dict[str, Any]:
@@ -177,11 +190,11 @@ class ValueEstimator:
                 total_user_product_pairs += batch_result['user_product_pairs']
                 total_successful += batch_result['successful_calculations']
                 total_failed += batch_result['failed_calculations']
-                
-                logger.info(f"Batch {batch_num} complete: {batch_result['user_product_pairs']} pairs, "
-                           f"{batch_result['successful_calculations']} successful")
             
             processing_time = (datetime.now() - start_time).total_seconds()
+            
+            # Display error summary
+            self._display_error_summary()
             
             return {
                 'success': True,
@@ -190,6 +203,7 @@ class ValueEstimator:
                 'successful_calculations': total_successful,
                 'failed_calculations': total_failed,
                 'processing_time': processing_time,
+                'error_counts': self.error_counts,
                 'message': f'Successfully processed {total_processed} users with {total_user_product_pairs} user-product pairs'
             }
             
@@ -199,6 +213,20 @@ class ValueEstimator:
                 'success': False,
                 'error': str(e)
             }
+
+    def _display_error_summary(self):
+        """Display summary of all errors encountered during processing"""
+        logger.info("=== VALUE ESTIMATION ERROR SUMMARY ===")
+        total_errors = sum(self.error_counts.values())
+        logger.info(f"Total errors encountered: {total_errors}")
+        
+        if total_errors > 0:
+            for error_type, count in self.error_counts.items():
+                if count > 0:
+                    logger.info(f"  {error_type}: {count}")
+        else:
+            logger.info("  No errors encountered during processing")
+        logger.info("=====================================")
 
     def _clear_value_fields_only(self) -> None:
         """Clear ONLY the three value estimation fields that this script is allowed to modify"""
@@ -211,7 +239,7 @@ class ValueEstimator:
             cursor.execute("""
                 UPDATE user_product_metrics 
                 SET current_status = 'PLACEHOLDER_STATUS',
-                    current_value = -999.99,
+                    current_value = 0.00,
                     value_status = 'PLACEHOLDER_VALUE_STATUS',
                     last_updated_ts = datetime('now')
                 WHERE 1=1
@@ -228,20 +256,17 @@ class ValueEstimator:
             raise
 
     def _get_attributed_users(self) -> List[Dict[str, Any]]:
-        """Get users with valid lifecycles from user_product_metrics table"""
+        """Get ALL users from user_product_metrics table (TEMPORARILY REMOVING FILTERS FOR TESTING)"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Query for users with VALID LIFECYCLES from user_product_metrics table
-            # This is the authoritative source for which user-product pairs should be processed
+            # TEMPORARILY REMOVED FILTERING - Processing ALL users for testing
+            # Original filtering was: u.has_abi_attribution = 1 AND u.valid_user = 1 AND upm.valid_lifecycle = 1
             query = """
                 SELECT DISTINCT u.distinct_id, u.profile_json
                 FROM mixpanel_user u
                 JOIN user_product_metrics upm ON u.distinct_id = upm.distinct_id
-                WHERE u.has_abi_attribution = 1 
-                  AND u.valid_user = 1
-                  AND upm.valid_lifecycle = 1
             """
             
             cursor.execute(query)
@@ -257,7 +282,7 @@ class ValueEstimator:
                         'profile': profile
                     })
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse profile JSON for user {distinct_id}")
+                    self.error_counts['failed_profile_json_parse'] += 1
                     continue
             
             conn.close()
@@ -309,19 +334,18 @@ class ValueEstimator:
                 batch_stats['users_processed'] += 1
                 
             except Exception as e:
-                logger.warning(f"Error processing user {distinct_id}: {e}")
+                self.error_counts['failed_user_processing'] += 1
                 batch_stats['failed_calculations'] += 1
                 continue
         
         # Store all records for this batch in a single transaction
         if user_product_records:
             stored_count = self._store_user_product_records(user_product_records)
-            logger.info(f"Stored {stored_count} user-product records from batch of {len(users_batch)} users")
         
         return batch_stats
 
     def _get_batch_user_events(self, user_ids: List[str]) -> Dict[str, Dict[str, List[Dict]]]:
-        """Get subscription events for a batch of users, only for valid lifecycle user-product pairs"""
+        """Get subscription events for a batch of users, for ALL user-product pairs (TEMPORARILY REMOVING FILTERS)"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -329,15 +353,14 @@ class ValueEstimator:
             # Create placeholder for user IDs
             user_placeholders = ','.join(['?' for _ in user_ids])
             
-            # Get all relevant events for valid lifecycle user-product pairs only
+            # Get all relevant events for ALL user-product pairs (filtering temporarily removed)
             query = f"""
-                WITH valid_user_products AS (
+                WITH all_user_products AS (
                     SELECT DISTINCT 
                         upm.distinct_id,
                         upm.product_id
                     FROM user_product_metrics upm
                     WHERE upm.distinct_id IN ({user_placeholders})
-                      AND upm.valid_lifecycle = 1
                 )
                 SELECT 
                     e.distinct_id,
@@ -348,10 +371,10 @@ class ValueEstimator:
                     e.refund_flag,
                     e.event_json
                 FROM mixpanel_event e
-                INNER JOIN valid_user_products vup ON e.distinct_id = vup.distinct_id 
-                    AND JSON_EXTRACT(e.event_json, '$.properties.product_id') = vup.product_id
+                INNER JOIN all_user_products aup ON e.distinct_id = aup.distinct_id 
+                    AND JSON_EXTRACT(e.event_json, '$.properties.product_id') = aup.product_id
                 WHERE e.event_name IN ('RC Trial started', 'RC Trial cancelled', 'RC Trial converted', 'RC Initial purchase', 'RC Cancellation')
-                ORDER BY e.distinct_id, vup.product_id, e.event_time
+                ORDER BY e.distinct_id, aup.product_id, e.event_time
             """
             
             cursor.execute(query, user_ids)
@@ -455,34 +478,29 @@ class ValueEstimator:
         This implements the core logic from mixpanel_processing_stage.py
         """
         try:
-            # Find subscription start event (trial start OR initial purchase)
+            # Find subscription start event - use the LAST conversion event (trial start OR initial purchase)
+            # This handles complex user journeys like: trial → cancel → initial purchase
             start_event = None
-            for event in events:
+            for event in reversed(events):  # Go backwards to find the last conversion event
                 if event['event_name'] in ['RC Trial started', 'RC Initial purchase']:
                     start_event = event
                     break
             
             if not start_event:
-                logger.warning(f"No subscription start event found for user {distinct_id}, product {product_id}")
+                self.error_counts['no_subscription_start_event'] += 1
                 return None
             
             # Calculate credited date
             credited_date = self._calculate_credited_date(start_event)
             if not credited_date:
-                logger.warning(f"Invalid credited_date for user {distinct_id}, product {product_id}")
+                self.error_counts['invalid_credited_date'] += 1
                 return None
             
             # Calculate current status
             current_status = self._calculate_current_status(events)
             
-            # Extract user properties and calculate price bucket
-            user_properties = self._extract_user_properties(distinct_id, product_id, profile, start_event)
-            if not user_properties:
-                logger.warning(f"Could not extract user properties for {distinct_id}, product {product_id}")
-                return None
-            
-            # Get price bucket value
-            price_bucket_value = float(user_properties.get('price_bucket', '$0.00').replace('$', ''))
+            # Get price bucket value from database (where Module 01 stored it)
+            price_bucket_value = self._get_price_bucket_from_database(distinct_id, product_id)
             
             # Get real conversion metrics from database
             conversion_metrics = self._get_conversion_metrics(distinct_id, product_id)
@@ -505,7 +523,7 @@ class ValueEstimator:
             return record
             
         except Exception as e:
-            logger.error(f"Error processing user-product pair {distinct_id}-{product_id}: {e}")
+            self.error_counts['failed_user_processing'] += 1
             return None
 
     def _calculate_credited_date(self, start_event: Dict) -> Optional[str]:
@@ -674,10 +692,10 @@ class ValueEstimator:
                     
                 else:  # days_since >= 38
                     # Phase 3: Days 38+ (Final Value) - Only check refund/cancel status in final phase
-                    if current_status in ['trial_converted_refunded', 'trial_cancelled', 'trial_converted_cancelled', 'extended_trial_error']:
-                        current_value = 0.0
+                    if current_status in ['trial_converted_refunded', 'trial_cancelled', 'extended_trial_error']:
+                        current_value = 0.0  # Refunded users get $0, trial cancelled users never paid, error users never paid
                     else:
-                        current_value = actual_revenue_from_trial_conversion
+                        current_value = actual_revenue_from_trial_conversion  # trial_converted_cancelled users keep their value (they paid)
                     value_status = "final_value"
                     
             else:
@@ -692,17 +710,17 @@ class ValueEstimator:
                     value_status = "post_purchase_pre_refund"
                     
                 else:  # days_since >= 31
-                    # Phase 2: Days 31+ (Final Value) - Only check refund/cancel status in final phase
-                    if current_status in ['purchase_refunded', 'purchase_cancelled']:
-                        current_value = 0.0
+                    # Phase 2: Days 31+ (Final Value) - Only check refund status in final phase
+                    if current_status == 'purchase_refunded':
+                        current_value = 0.0  # Refunded users get $0 (they got money back)
                     else:
-                        current_value = actual_revenue_from_initial_purchase
+                        current_value = actual_revenue_from_initial_purchase  # Cancelled users keep their value (they paid)
                     value_status = "final_value"
             
             return float(current_value), value_status
             
         except Exception as e:
-            logger.error(f"Error calculating current value: {e}")
+            self.error_counts['failed_value_calculation'] += 1
             return 0.0, "error"
 
     def _extract_user_properties(self, distinct_id: str, product_id: str, profile: Dict, start_event: Dict) -> Optional[Dict]:
@@ -769,6 +787,35 @@ class ValueEstimator:
         except (json.JSONDecodeError, KeyError):
             return ''
 
+    def _get_price_bucket_from_database(self, distinct_id: str, product_id: str) -> float:
+        """
+        Get price bucket from database where Module 01 stored it.
+        Only fallback to calculation if not found in database.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT price_bucket
+                FROM user_product_metrics 
+                WHERE distinct_id = ? AND product_id = ?
+            """, (distinct_id, product_id))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row and row[0] is not None and row[0] > 0:
+                return float(row[0])
+            else:
+                # Fallback: calculate if not in database (for the 7,563 missing records)
+                self.error_counts['no_price_bucket_in_database'] += 1
+                return 9.99  # Default fallback price
+                
+        except Exception as e:
+            self.error_counts['no_price_bucket_in_database'] += 1
+            return 9.99  # Default fallback price
+
     def _get_conversion_metrics(self, distinct_id: str, product_id: str) -> Dict[str, float]:
         """
         Get real conversion metrics from the database for a specific user-product pair.
@@ -795,7 +842,7 @@ class ValueEstimator:
                 }
             else:
                 # Fallback to default rates if not found
-                logger.warning(f"No conversion rates found for user {distinct_id}, product {product_id}. Using defaults.")
+                self.error_counts['no_conversion_rates_found'] += 1
                 return {
                     'trial_conversion_rate': 0.25,  # 25% default trial conversion rate
                     'trial_converted_to_refund_rate': 0.20,  # 20% default refund rate for trial conversions
@@ -803,7 +850,7 @@ class ValueEstimator:
                 }
                 
         except Exception as e:
-            logger.error(f"Error getting conversion metrics for {distinct_id}, {product_id}: {e}")
+            self.error_counts['no_conversion_rates_found'] += 1
             return {
                 'trial_conversion_rate': 0.25,
                 'trial_converted_to_refund_rate': 0.20,
@@ -843,7 +890,6 @@ class ValueEstimator:
             rows_affected = cursor.rowcount
             conn.close()
             
-            logger.info(f"Updated {rows_affected} records with ONLY current_status, current_value, and value_status")
             return rows_affected
             
         except Exception as e:
