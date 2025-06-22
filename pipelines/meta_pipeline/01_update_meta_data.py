@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Add parent directories to path for imports
-current_dir = Path(__file__).parent
+current_dir = Path(__file__).resolve().parent  # Use resolve() for absolute path
 sys.path.append(str(current_dir.parent.parent))  # Add project root
 sys.path.append(str(current_dir.parent.parent / "utils"))  # Add utils
 sys.path.append(str(current_dir.parent.parent / "orchestrator"))  # Add orchestrator

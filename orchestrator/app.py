@@ -153,9 +153,9 @@ class PipelineRunner:
                 self.update_step_status(pipeline_name, step_id, 'running')
                 
                 # Run the step with Popen so we can track and cancel it
-                print(f"   Executing: python {step_file}")
+                print(f"   Executing: python3 {step_file}")
                 process = subprocess.Popen(
-                    ['python', step_file],
+                    ['python3', step_file],
                     cwd=pipeline['dir'],
                     stdout=None,  # Don't capture stdout - let it show live
                     stderr=None,  # Don't capture stderr - let it show live
@@ -263,9 +263,9 @@ class PipelineRunner:
                     self.update_step_status(pipeline_name, step['id'], 'running')
                     
                     # Run the step with Popen so we can track and cancel it
-                    print(f"   Executing: python {step_file}")
+                    print(f"   Executing: python3 {step_file}")
                     process = subprocess.Popen(
-                        ['python', step_file],
+                        ['python3', step_file],
                         cwd=pipeline['dir'],
                         stdout=None,  # Don't capture stdout - let it show live
                         stderr=None,  # Don't capture stderr - let it show live

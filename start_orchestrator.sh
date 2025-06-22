@@ -7,4 +7,4 @@ source venv/bin/activate
 
 # Start the Flask application
 cd orchestrator
-python app.py 
+python3 app.py 
