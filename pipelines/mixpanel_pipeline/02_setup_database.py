@@ -52,6 +52,8 @@ EXPECTED_TABLES = {
     'mixpanel_user': {
         'distinct_id': 'TEXT',
         'abi_ad_id': 'TEXT',
+        'abi_campaign_id': 'TEXT',
+        'abi_ad_set_id': 'TEXT',
         'country': 'TEXT',
         'region': 'TEXT',
         'city': 'TEXT',
@@ -88,9 +90,6 @@ EXPECTED_TABLES = {
         'country': 'TEXT',
         'region': 'TEXT',
         'device': 'TEXT',
-        'abi_ad_id': 'TEXT',
-        'abi_campaign_id': 'TEXT',
-        'abi_ad_set_id': 'TEXT',
         'current_status': 'TEXT',
         'current_value': 'DECIMAL',
         'value_status': 'TEXT',
@@ -558,6 +557,8 @@ def validate_indexes(cursor: sqlite3.Cursor, errors: List[str], warnings: List[s
         'idx_mixpanel_user_valid_user',
         'idx_mixpanel_user_economic_tier',
         'idx_mixpanel_user_abi_ad_id',
+        'idx_mixpanel_user_abi_campaign_id',
+        'idx_mixpanel_user_abi_ad_set_id',
         
         # Event table indexes
         'idx_mixpanel_event_distinct_id',
@@ -576,9 +577,6 @@ def validate_indexes(cursor: sqlite3.Cursor, errors: List[str], warnings: List[s
         'idx_upm_country',
         'idx_upm_region',
         'idx_upm_device',
-        'idx_upm_abi_ad_id',
-        'idx_upm_abi_campaign_id',
-        'idx_upm_abi_ad_set_id',
         'idx_upm_valid_lifecycle',
         'idx_upm_store',
         'idx_upm_price_bucket',

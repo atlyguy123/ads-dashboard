@@ -246,30 +246,24 @@ def setup_and_validate_lifecycles(conn):
         INVALID_LIFECYCLE_STATS[key] = 0
     print("   → Reset invalid lifecycle statistics")
     
-    # PRESERVE ATTRIBUTION DATA: Backup before clearing
-    print("   → Preserving existing attribution data before clearing relationships...")
+    # PRESERVE METADATA: Backup before clearing
+    print("   → Preserving existing metadata before clearing relationships...")
     
-    # First, backup existing attribution data
+    # First, backup existing metadata
     cursor.execute("""
         CREATE TEMP TABLE temp_attribution_backup_setup AS
         SELECT 
             distinct_id,
             product_id,
-            abi_ad_id,
-            abi_campaign_id,
-            abi_ad_set_id,
             country,
             region,
             device,
             store
         FROM user_product_metrics
-        WHERE abi_ad_id IS NOT NULL 
-           OR abi_campaign_id IS NOT NULL 
-           OR abi_ad_set_id IS NOT NULL
     """)
     
-    attribution_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup_setup").fetchone()[0]
-    print(f"   → Backed up attribution data for {attribution_backup_count:,} records")
+    metadata_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup_setup").fetchone()[0]
+    print(f"   → Backed up metadata for {metadata_backup_count:,} records")
     
     # Clear existing relationships and validation data
     print("   → Clearing existing user-product relationships...")
@@ -327,24 +321,23 @@ def setup_and_validate_lifecycles(conn):
                 valid_count += 1
             
             # Create the relationship record with attribution data if available
-            # Check if we have attribution data backed up for this user-product combination
+            # Check if we have metadata backed up for this user-product combination
             cursor.execute("""
-                SELECT abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store
+                SELECT country, region, device, store
                 FROM temp_attribution_backup_setup
                 WHERE distinct_id = ? AND product_id = ?
             """, (distinct_id, product_id))
             
-            attribution_data = cursor.fetchone()
+            metadata = cursor.fetchone()
             
-            if attribution_data:
-                # Restore with attribution data
-                abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store = attribution_data
+            if metadata:
+                # Restore with metadata
+                country, region, device, store = metadata
                 cursor.execute("""
                     INSERT INTO user_product_metrics 
                     (distinct_id, product_id, credited_date, current_status, current_value, 
-                     value_status, last_updated_ts, valid_lifecycle, abi_ad_id, abi_campaign_id, 
-                     abi_ad_set_id, country, region, device, store)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     value_status, last_updated_ts, valid_lifecycle, country, region, device, store)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     distinct_id, 
                     product_id,
@@ -354,16 +347,13 @@ def setup_and_validate_lifecycles(conn):
                     'PLACEHOLDER_VALUE_STATUS',
                     datetime.now(),
                     1 if is_valid else 0,
-                    abi_ad_id,              # PRESERVED attribution data
-                    abi_campaign_id,        # PRESERVED attribution data
-                    abi_ad_set_id,          # PRESERVED attribution data
                     country,                # PRESERVED geographic data
                     region,                 # PRESERVED geographic data
                     device,                 # PRESERVED device data
                     store                   # PRESERVED store data
                 ))
             else:
-                # Create without attribution data (new relationship)
+                # Create without metadata (new relationship)
                 cursor.execute("""
                     INSERT INTO user_product_metrics 
                     (distinct_id, product_id, credited_date, current_status, current_value, 
@@ -397,18 +387,7 @@ def setup_and_validate_lifecycles(conn):
     print(f"   → Valid lifecycles: {valid_count:,} ({valid_count/total_count*100:.1f}%)")
     print(f"   → Invalid lifecycles: {total_count-valid_count:,} ({(total_count-valid_count)/total_count*100:.1f}%)")
     
-    # Verify attribution preservation
-    cursor.execute("""
-        SELECT COUNT(*) FROM user_product_metrics 
-        WHERE abi_ad_id IS NOT NULL OR abi_campaign_id IS NOT NULL OR abi_ad_set_id IS NOT NULL
-    """)
-    preserved_count = cursor.fetchone()[0]
-    print(f"   → ✅ Preserved attribution data for {preserved_count:,} relationships ({preserved_count/total_count*100:.1f}%)")
-    
-    if preserved_count == 0:
-        print("   → ⚠️  WARNING: No attribution data preserved! Check if Module 4 ran successfully.")
-    elif preserved_count < attribution_backup_count:
-        print(f"   → ⚠️  WARNING: Lost attribution data for {attribution_backup_count - preserved_count:,} relationships")
+
 
 def display_validation_results(conn):
     """Display comprehensive validation results and statistics"""
@@ -549,27 +528,21 @@ def analyze_product_usage(conn):
     # But PRESERVE attribution data that was set by Module 4
     print("   → Preserving existing attribution data before clearing relationships...")
     
-    # First, backup existing attribution data
+    # First, backup existing metadata
     cursor.execute("""
         CREATE TEMP TABLE temp_attribution_backup AS
         SELECT 
             distinct_id,
             product_id,
-            abi_ad_id,
-            abi_campaign_id,
-            abi_ad_set_id,
             country,
             region,
             device,
             store
         FROM user_product_metrics
-        WHERE abi_ad_id IS NOT NULL 
-           OR abi_campaign_id IS NOT NULL 
-           OR abi_ad_set_id IS NOT NULL
     """)
     
-    attribution_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup").fetchone()[0]
-    print(f"   → Backed up attribution data for {attribution_backup_count:,} records")
+    metadata_backup_count = cursor.execute("SELECT COUNT(*) FROM temp_attribution_backup").fetchone()[0]
+    print(f"   → Backed up metadata for {metadata_backup_count:,} records")
     
     # Clear existing relationships
     print("   → Clearing existing user-product relationships...")
@@ -603,24 +576,23 @@ def analyze_product_usage(conn):
     
     for distinct_id, product_id in user_product_pairs:
         try:
-            # Check if we have attribution data backed up for this user-product combination
+            # Check if we have metadata backed up for this user-product combination
             cursor.execute("""
-                SELECT abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store
+                SELECT country, region, device, store
                 FROM temp_attribution_backup
                 WHERE distinct_id = ? AND product_id = ?
             """, (distinct_id, product_id))
             
-            attribution_data = cursor.fetchone()
+            metadata = cursor.fetchone()
             
-            if attribution_data:
-                # Restore with attribution data
-                abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, device, store = attribution_data
+            if metadata:
+                # Restore with metadata
+                country, region, device, store = metadata
                 cursor.execute("""
                     INSERT INTO user_product_metrics 
                     (distinct_id, product_id, credited_date, current_status, current_value, 
-                     value_status, last_updated_ts, valid_lifecycle, abi_ad_id, abi_campaign_id, 
-                     abi_ad_set_id, country, region, device, store)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     value_status, last_updated_ts, valid_lifecycle, country, region, device, store)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     distinct_id, 
                     product_id,
@@ -630,16 +602,13 @@ def analyze_product_usage(conn):
                     'PLACEHOLDER_VALUE_STATUS',  # Clear placeholder - will be set by Module 3
                     datetime.now(),
                     0,  # Will be validated in Step 3
-                    abi_ad_id,              # PRESERVED attribution data
-                    abi_campaign_id,        # PRESERVED attribution data
-                    abi_ad_set_id,          # PRESERVED attribution data
                     country,                # PRESERVED geographic data
                     region,                 # PRESERVED geographic data
                     device,                 # PRESERVED device data
                     store                   # PRESERVED store data
                 ))
             else:
-                # Create without attribution data (new relationship)
+                # Create without metadata (new relationship)
                 cursor.execute("""
                     INSERT INTO user_product_metrics 
                     (distinct_id, product_id, credited_date, current_status, current_value, 
@@ -667,18 +636,7 @@ def analyze_product_usage(conn):
     conn.commit()
     print(f"   → Created {total_relationships:,} user-product relationships for validation")
     
-    # Verify attribution preservation
-    cursor.execute("""
-        SELECT COUNT(*) FROM user_product_metrics 
-        WHERE abi_ad_id IS NOT NULL OR abi_campaign_id IS NOT NULL OR abi_ad_set_id IS NOT NULL
-    """)
-    preserved_count = cursor.fetchone()[0]
-    print(f"   → ✅ Preserved attribution data for {preserved_count:,} relationships ({preserved_count/total_relationships*100:.1f}%)")
-    
-    if preserved_count == 0:
-        print("   → ⚠️  WARNING: No attribution data preserved! Check if Module 4 ran successfully.")
-    elif preserved_count < attribution_backup_count:
-        print(f"   → ⚠️  WARNING: Lost attribution data for {attribution_backup_count - preserved_count:,} relationships")
+
 
 def classify_event_type(event_name):
     """Classify an event name into lifecycle event types"""

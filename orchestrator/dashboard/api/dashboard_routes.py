@@ -389,118 +389,31 @@ def get_analytics_chart_data():
         
         # Get chart data with comprehensive error handling and thread safety
         try:
-            # FUCK THE COMPLEX SHIT - JUST RETURN MOCK DATA THAT WORKS
-            mock_chart_data = [
-                {
-                    'date': '2025-01-01',
-                    'daily_spend': 100.0,
-                    'daily_impressions': 5000,
-                    'daily_clicks': 250,
-                    'daily_meta_trials': 15,
-                    'daily_meta_purchases': 8,
-                    'daily_mixpanel_trials': 12,
-                    'daily_mixpanel_purchases': 6,
-                    'daily_mixpanel_conversions': 6,
-                    'daily_mixpanel_revenue': 150.0,
-                    'daily_mixpanel_refunds': 5.0,
-                    'daily_estimated_revenue': 150.0,
-                    'daily_attributed_users': 10,
-                    'daily_roas': 1.5,
-                    'period_accuracy_ratio': 0.8,
-                    'daily_profit': 50.0,
-                    'conversions_for_coloring': 6
-                },
-                {
-                    'date': '2025-01-02',
-                    'daily_spend': 120.0,
-                    'daily_impressions': 6000,
-                    'daily_clicks': 300,
-                    'daily_meta_trials': 18,
-                    'daily_meta_purchases': 10,
-                    'daily_mixpanel_trials': 15,
-                    'daily_mixpanel_purchases': 8,
-                    'daily_mixpanel_conversions': 8,
-                    'daily_mixpanel_revenue': 240.0,
-                    'daily_mixpanel_refunds': 6.0,
-                    'daily_estimated_revenue': 240.0,
-                    'daily_attributed_users': 12,
-                    'daily_roas': 2.0,
-                    'period_accuracy_ratio': 0.8,
-                    'daily_profit': 120.0,
-                    'conversions_for_coloring': 8
-                },
-                {
-                    'date': '2025-01-03',
-                    'daily_spend': 90.0,
-                    'daily_impressions': 4500,
-                    'daily_clicks': 225,
-                    'daily_meta_trials': 12,
-                    'daily_meta_purchases': 6,
-                    'daily_mixpanel_trials': 10,
-                    'daily_mixpanel_purchases': 4,
-                    'daily_mixpanel_conversions': 4,
-                    'daily_mixpanel_revenue': 108.0,
-                    'daily_mixpanel_refunds': 4.0,
-                    'daily_estimated_revenue': 108.0,
-                    'daily_attributed_users': 8,
-                    'daily_roas': 1.2,
-                    'period_accuracy_ratio': 0.8,
-                    'daily_profit': 18.0,
-                    'conversions_for_coloring': 4
-                },
-                {
-                    'date': '2025-01-04',
-                    'daily_spend': 110.0,
-                    'daily_impressions': 5500,
-                    'daily_clicks': 275,
-                    'daily_meta_trials': 16,
-                    'daily_meta_purchases': 9,
-                    'daily_mixpanel_trials': 13,
-                    'daily_mixpanel_purchases': 7,
-                    'daily_mixpanel_conversions': 7,
-                    'daily_mixpanel_revenue': 187.0,
-                    'daily_mixpanel_refunds': 5.5,
-                    'daily_estimated_revenue': 187.0,
-                    'daily_attributed_users': 11,
-                    'daily_roas': 1.7,
-                    'period_accuracy_ratio': 0.8,
-                    'daily_profit': 77.0,
-                    'conversions_for_coloring': 7
-                },
-                {
-                    'date': '2025-01-05',
-                    'daily_spend': 130.0,
-                    'daily_impressions': 6500,
-                    'daily_clicks': 325,
-                    'daily_meta_trials': 20,
-                    'daily_meta_purchases': 12,
-                    'daily_mixpanel_trials': 17,
-                    'daily_mixpanel_purchases': 10,
-                    'daily_mixpanel_conversions': 10,
-                    'daily_mixpanel_revenue': 286.0,
-                    'daily_mixpanel_refunds': 6.5,
-                    'daily_estimated_revenue': 286.0,
-                    'daily_attributed_users': 14,
-                    'daily_roas': 2.2,
-                    'period_accuracy_ratio': 0.8,
-                    'daily_profit': 156.0,
-                    'conversions_for_coloring': 10
-                }
-            ]
+            # Create query configuration
+            config = QueryConfig(
+                breakdown=breakdown,
+                start_date=start_date,
+                end_date=end_date,
+                include_mixpanel=True
+            )
             
-            result = {
-                'success': True,
-                'chart_data': mock_chart_data,
-                'entity_type': entity_type,
-                'entity_id': entity_id,
-                'date_range': f"{start_date} to {end_date}",
-                'total_days': len(mock_chart_data)
-            }
+            # Use analytics service to get real chart data
+            with analytics_lock:
+                result = analytics_service.get_chart_data(config, entity_type, entity_id)
             
-            print(f"🔍 RETURNING MOCK DATA: {len(mock_chart_data)} days")
-            print(f"🔍 FIRST RECORD BEING SENT: {mock_chart_data[0]}")
-            print(f"🔍 ALL DAILY_ROAS BEING SENT: {[r['daily_roas'] for r in mock_chart_data]}")
-            return jsonify(result)
+            print(f"🔍 ANALYTICS SERVICE RESULT: {result.get('success', False)}")
+            if result.get('success'):
+                chart_data = result.get('chart_data', [])
+                print(f"🔍 RETURNING REAL DATA: {len(chart_data)} days")
+                if chart_data:
+                    print(f"🔍 FIRST RECORD BEING SENT: {chart_data[0]}")
+                    print(f"🔍 ALL DAILY_ROAS BEING SENT: {[r.get('daily_roas', 0) for r in chart_data]}")
+                return jsonify(result)
+            else:
+                # If analytics service failed, return the error
+                error_msg = result.get('error', 'Unknown analytics service error')
+                print(f"🔍 ANALYTICS SERVICE ERROR: {error_msg}")
+                return jsonify(result), 500
             
         except Exception as analytics_error:
             error_msg = f"Analytics service exception: {str(analytics_error)}"

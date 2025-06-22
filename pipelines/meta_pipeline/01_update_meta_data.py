@@ -50,22 +50,15 @@ except ImportError as e:
 class MetaActionProcessor:
     """Process Meta API actions to extract trial and purchase counts"""
     
-    # Action type mappings based on metaActionTypes.js
+    # Action type mappings - CORRECTED based on actual business logic
+    # "add_payment_info" = trial_started
+    # "complete_registration" = initial_purchase
     TRIAL_ACTIONS = [
-        'start_trial_mobile_app',
-        'start_trial_total', 
-        'offsite_conversion.fb_pixel_custom.TrialStartedRoasEvent'
+        'add_payment_info'
     ]
     
     PURCHASE_ACTIONS = [
-        'purchase',
-        'onsite_web_purchase',
-        'onsite_web_app_purchase',
-        'omni_purchase',
-        'web_in_store_purchase',
-        'web_app_in_store_purchase',
-        'offsite_conversion.fb_pixel_purchase',
-        'offsite_conversion.fb_pixel_custom.server_purchase'
+        'complete_registration'
     ]
     
     @classmethod
@@ -413,46 +406,46 @@ class MetaDataUpdater:
                     for r in processed_records
                 ]
             
-            # BREAKDOWN TABLES (commented out for now)
-            # elif table_name == 'ad_performance_daily_country':
-            #     sql = """
-            #     INSERT OR REPLACE INTO ad_performance_daily_country 
-            #     (ad_id, date, country, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
-            #      spend, impressions, clicks, meta_trials, meta_purchases)
-            #     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            #     """
-            #     values = [
-            #         (r['ad_id'], r['date'], r['country'], r['adset_id'], r['campaign_id'], 
-            #          r['ad_name'], r['adset_name'], r['campaign_name'],
-            #          r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
-            #         for r in processed_records
-            #     ]
-            # elif table_name == 'ad_performance_daily_region':
-            #     sql = """
-            #     INSERT OR REPLACE INTO ad_performance_daily_region 
-            #     (ad_id, date, region, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
-            #      spend, impressions, clicks, meta_trials, meta_purchases)
-            #     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            #     """
-            #     values = [
-            #         (r['ad_id'], r['date'], r['region'], r['adset_id'], r['campaign_id'], 
-            #          r['ad_name'], r['adset_name'], r['campaign_name'],
-            #          r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
-            #         for r in processed_records
-            #     ]
-            # elif table_name == 'ad_performance_daily_device':
-            #     sql = """
-            #     INSERT OR REPLACE INTO ad_performance_daily_device 
-            #     (ad_id, date, device, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
-            #      spend, impressions, clicks, meta_trials, meta_purchases)
-            #     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            #     """
-            #     values = [
-            #         (r['ad_id'], r['date'], r['device'], r['adset_id'], r['campaign_id'], 
-            #          r['ad_name'], r['adset_name'], r['campaign_name'],
-            #          r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
-            #         for r in processed_records
-            #     ]
+            # BREAKDOWN TABLES (now active)
+            elif table_name == 'ad_performance_daily_country':
+                sql = """
+                INSERT OR REPLACE INTO ad_performance_daily_country 
+                (ad_id, date, country, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
+                 spend, impressions, clicks, meta_trials, meta_purchases)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                values = [
+                    (r['ad_id'], r['date'], r['country'], r['adset_id'], r['campaign_id'], 
+                     r['ad_name'], r['adset_name'], r['campaign_name'],
+                     r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
+                    for r in processed_records
+                ]
+            elif table_name == 'ad_performance_daily_region':
+                sql = """
+                INSERT OR REPLACE INTO ad_performance_daily_region 
+                (ad_id, date, region, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
+                 spend, impressions, clicks, meta_trials, meta_purchases)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                values = [
+                    (r['ad_id'], r['date'], r['region'], r['adset_id'], r['campaign_id'], 
+                     r['ad_name'], r['adset_name'], r['campaign_name'],
+                     r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
+                    for r in processed_records
+                ]
+            elif table_name == 'ad_performance_daily_device':
+                sql = """
+                INSERT OR REPLACE INTO ad_performance_daily_device 
+                (ad_id, date, device, adset_id, campaign_id, ad_name, adset_name, campaign_name, 
+                 spend, impressions, clicks, meta_trials, meta_purchases)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                values = [
+                    (r['ad_id'], r['date'], r['device'], r['adset_id'], r['campaign_id'], 
+                     r['ad_name'], r['adset_name'], r['campaign_name'],
+                     r['spend'], r['impressions'], r['clicks'], r['meta_trials'], r['meta_purchases'])
+                    for r in processed_records
+                ]
             
             else:
                 logger.error(f"   ❌ Unknown table: {table_name}")
@@ -472,6 +465,197 @@ class MetaDataUpdater:
         except Exception as e:
             logger.error(f"   ❌ Error loading to {table_name}: {e}")
             return 0
+    
+    def check_existing_dates_in_table(self, table_name: str, start_date: str, end_date: str) -> List[str]:
+        """
+        Check which dates already exist in a specific table
+        
+        Args:
+            table_name: Name of the table to check
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            
+        Returns:
+            List of dates that already exist in the table
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute(f'''
+                SELECT DISTINCT date 
+                FROM {table_name} 
+                WHERE date BETWEEN ? AND ?
+                ORDER BY date
+            ''', (start_date, end_date))
+            
+            existing_dates = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            
+            logger.info(f"📅 {table_name}: Found {len(existing_dates)} existing dates between {start_date} and {end_date}")
+            return existing_dates
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking existing dates in {table_name}: {e}")
+            return []
+    
+    def calculate_missing_dates(self, start_date: str, end_date: str, existing_dates: List[str]) -> List[str]:
+        """
+        Calculate which dates are missing from the date range
+        
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            existing_dates: List of dates that already exist
+            
+        Returns:
+            List of missing dates that need to be filled
+        """
+        # Generate all dates in range
+        all_dates = []
+        current_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        while current_date <= end_date_obj:
+            all_dates.append(current_date.strftime('%Y-%m-%d'))
+            current_date += timedelta(days=1)
+        
+        # Find missing dates
+        existing_dates_set = set(existing_dates)
+        missing_dates = [date for date in all_dates if date not in existing_dates_set]
+        
+        logger.info(f"📊 Date analysis:")
+        logger.info(f"   Total dates in range: {len(all_dates)}")
+        logger.info(f"   Existing dates: {len(existing_dates)}")
+        logger.info(f"   Missing dates: {len(missing_dates)}")
+        
+        return missing_dates
+    
+    def update_specific_breakdown_table(self, 
+                                      table_name: str, 
+                                      breakdown_type: str, 
+                                      start_date: str, 
+                                      end_date: str, 
+                                      skip_existing: bool = True) -> bool:
+        """
+        Update a specific breakdown table for a custom date range
+        
+        Args:
+            table_name: Target table name (e.g., 'ad_performance_daily_country')
+            breakdown_type: Breakdown type ('country', 'region', 'device', or None)
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            skip_existing: If True, skip dates that already have data; if False, overwrite
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        logger.info(f"🚀 UPDATING SPECIFIC TABLE: {table_name}")
+        logger.info(f"🔍 Breakdown: {breakdown_type or 'no breakdown'}")
+        logger.info(f"📅 Date range: {start_date} to {end_date}")
+        logger.info(f"⏭️  Skip existing: {skip_existing}")
+        logger.info("=" * 60)
+        
+        start_time = time.time()
+        
+        try:
+            # Step 1: Determine which dates to process
+            if skip_existing:
+                existing_dates = self.check_existing_dates_in_table(table_name, start_date, end_date)
+                dates_to_update = self.calculate_missing_dates(start_date, end_date, existing_dates)
+                
+                if not dates_to_update:
+                    logger.info("✅ No missing dates found - table is already complete for this range")
+                    return True
+            else:
+                # Generate all dates in range (overwrite mode)
+                dates_to_update = []
+                current_date = datetime.strptime(start_date, '%Y-%m-%d')
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                
+                while current_date <= end_date_obj:
+                    dates_to_update.append(current_date.strftime('%Y-%m-%d'))
+                    current_date += timedelta(days=1)
+                
+                logger.info(f"📊 Will process {len(dates_to_update)} dates (overwrite mode)")
+            
+            # Step 2: Process dates in chunks
+            chunk_size = 3
+            total_success = 0
+            total_requests = 0
+            
+            for i in range(0, len(dates_to_update), chunk_size):
+                chunk_dates = dates_to_update[i:i+chunk_size]
+                from_date = chunk_dates[0]
+                to_date = chunk_dates[-1]
+                
+                total_requests += 1
+                
+                logger.info(f"📡 REQUEST {total_requests}: {from_date} to {to_date}")
+                
+                # Fetch raw data
+                raw_records = self.fetch_meta_data(
+                    from_date=from_date,
+                    to_date=to_date,
+                    breakdown_type=breakdown_type
+                )
+                
+                if not raw_records:
+                    logger.warning(f"   ⚠️  No data fetched")
+                    continue
+                
+                # Process records
+                processed_records = self.process_meta_records(raw_records, breakdown_type)
+                
+                if not processed_records:
+                    logger.warning(f"   ⚠️  No records processed")
+                    continue
+                
+                # Log summary
+                total_trials = sum(r.get('meta_trials', 0) for r in processed_records)
+                total_purchases = sum(r.get('meta_purchases', 0) for r in processed_records)
+                total_spend = sum(r.get('spend', 0) for r in processed_records)
+                
+                logger.info(f"   📊 Data summary:")
+                logger.info(f"      Records: {len(processed_records)}")
+                logger.info(f"      Total spend: ${total_spend:.2f}")
+                logger.info(f"      Total trials: {total_trials}")
+                logger.info(f"      Total purchases: {total_purchases}")
+                
+                # Load to database
+                loaded_count = self.load_data_to_table(processed_records, table_name)
+                
+                if loaded_count > 0:
+                    total_success += 1
+                    logger.info(f"   🎯 SUCCESS: {loaded_count} records loaded")
+                else:
+                    logger.warning(f"   ⚠️  FAILED: Could not load data")
+                
+                # Rate limiting
+                if i + chunk_size < len(dates_to_update):
+                    logger.info("   ⏳ Waiting 5 seconds (rate limiting)...")
+                    time.sleep(5)
+            
+            # Final summary
+            elapsed_time = time.time() - start_time
+            success_rate = (total_success / total_requests * 100) if total_requests > 0 else 0
+            
+            logger.info(f"🎯 SPECIFIC TABLE UPDATE COMPLETE")
+            logger.info("=" * 60)
+            logger.info(f"📊 Summary:")
+            logger.info(f"   Table: {table_name}")
+            logger.info(f"   Total API requests: {total_requests}")
+            logger.info(f"   Successful requests: {total_success}")
+            logger.info(f"   Success rate: {success_rate:.1f}%")
+            logger.info(f"   Elapsed time: {elapsed_time:.1f} seconds")
+            logger.info(f"   Date range processed: {dates_to_update[0]} to {dates_to_update[-1] if dates_to_update else 'None'}")
+            
+            return total_success > 0
+            
+        except Exception as e:
+            elapsed_time = time.time() - start_time
+            logger.error(f"❌ Specific table update failed after {elapsed_time:.1f} seconds: {e}")
+            return False
     
     def update_meta_data(self) -> bool:
         """

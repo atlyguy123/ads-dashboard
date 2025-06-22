@@ -4,50 +4,50 @@ name: master_pipeline
 steps:
 - description: Download and update Mixpanel data files from API
   file: ../mixpanel_pipeline/01_download_update_data.py
-  id: 📊 Mixpanel - Download & Update Data
+  id: "\U0001F4CA Mixpanel - Download & Update Data"
   tested: true
 - description: Initialize and migrate database schema to match authoritative schema
   file: ../mixpanel_pipeline/02_setup_database.py
-  id: 📊 Mixpanel - Setup Database
+  id: "\U0001F4CA Mixpanel - Setup Database"
   tested: true
 - description: Ingest downloaded data into properly configured database
   file: ../mixpanel_pipeline/03_ingest_data.py
-  id: 📊 Mixpanel - Ingest Data
+  id: "\U0001F4CA Mixpanel - Ingest Data"
   tested: true
 - description: Assign product information to user records
   file: ../mixpanel_pipeline/04_assign_product_information.py
-  id: 📊 Mixpanel - Assign Product Information
+  id: "\U0001F4CA Mixpanel - Assign Product Information"
   tested: true
 - description: Set ABI attribution data for events and users
   file: ../mixpanel_pipeline/05_set_abi_attribution.py
-  id: 📊 Mixpanel - Set ABI Attribution
+  id: "\U0001F4CA Mixpanel - Set ABI Attribution"
   tested: true
 - description: Validate event lifecycle data for consistency
   file: ../mixpanel_pipeline/06_validate_event_lifecycle.py
-  id: 📊 Mixpanel - Validate Event Lifecycle
+  id: "\U0001F4CA Mixpanel - Validate Event Lifecycle"
   tested: true
 - description: Assign economic tier classifications to users
   file: ../mixpanel_pipeline/07_assign_economic_tier.py
-  id: 📊 Mixpanel - Assign Economic Tier
+  id: "\U0001F4CA Mixpanel - Assign Economic Tier"
   tested: true
 - description: Assign credited dates based on starter events to user-product lifecycle
     records
   file: ../pre_processing_pipeline/00_assign_credited_date.py
-  id: ⚙️ Pre-processing - Assign Credited Date
+  id: "\u2699\uFE0F Pre-processing - Assign Credited Date"
   tested: true
 - description: Assign price bucket classifications to data records
   file: ../pre_processing_pipeline/01_assign_price_bucket.py
-  id: ⚙️ Pre-processing - Assign Price Bucket
+  id: "\u2699\uFE0F Pre-processing - Assign Price Bucket"
   tested: true
 - description: Calculate and assign conversion rates to relevant records
   file: ../pre_processing_pipeline/02_assign_conversion_rates.py
-  id: ⚙️ Pre-processing - Assign Conversion Rates
+  id: "\u2699\uFE0F Pre-processing - Assign Conversion Rates"
   tested: true
 - description: Estimate monetary values based on assigned buckets and rates
   file: ../pre_processing_pipeline/03_estimate_values.py
-  id: ⚙️ Pre-processing - Estimate Values
+  id: "\u2699\uFE0F Pre-processing - Estimate Values"
   tested: true
 - description: Update Meta advertising data from most recent date to today
   file: ../meta_pipeline/01_update_meta_data.py
-  id: 🔮 Meta - Update Data
-  tested: false
+  id: "\U0001F52E Meta - Update Data"
+  tested: true

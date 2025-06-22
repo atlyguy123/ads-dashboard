@@ -15,6 +15,8 @@
 CREATE TABLE mixpanel_user (
     distinct_id TEXT PRIMARY KEY,
     abi_ad_id TEXT, -- Attribution ad ID (matches Meta ad_id)
+    abi_campaign_id TEXT, -- Attribution campaign ID (matches Meta campaign_id)
+    abi_ad_set_id TEXT, -- Attribution ad set ID (matches Meta adset_id)
     country TEXT, -- ISO 3166-1 alpha-2 code
     region TEXT,
     city TEXT,
@@ -68,9 +70,6 @@ CREATE TABLE user_product_metrics (
     country TEXT, 
     region TEXT, 
     device TEXT, 
-    abi_ad_id TEXT, -- Attribution ad ID (matches Meta ad_id)
-    abi_campaign_id TEXT, -- Attribution campaign ID (matches Meta campaign_id)
-    abi_ad_set_id TEXT, -- Attribution ad set ID (matches Meta adset_id)
     current_status TEXT NOT NULL, 
     current_value DECIMAL(10,2) NOT NULL, -- Changed from REAL to DECIMAL
     value_status TEXT NOT NULL, 
@@ -310,6 +309,8 @@ CREATE INDEX idx_mixpanel_user_first_seen ON mixpanel_user(first_seen);
 CREATE INDEX idx_mixpanel_user_valid_user ON mixpanel_user(valid_user);
 CREATE INDEX idx_mixpanel_user_economic_tier ON mixpanel_user(economic_tier);
 CREATE INDEX idx_mixpanel_user_abi_ad_id ON mixpanel_user(abi_ad_id); -- Attribution lookup
+CREATE INDEX idx_mixpanel_user_abi_campaign_id ON mixpanel_user(abi_campaign_id); -- Attribution lookup
+CREATE INDEX idx_mixpanel_user_abi_ad_set_id ON mixpanel_user(abi_ad_set_id); -- Attribution lookup
 
 -- Event table indexes
 CREATE INDEX idx_mixpanel_event_distinct_id ON mixpanel_event(distinct_id);
@@ -328,9 +329,6 @@ CREATE INDEX idx_upm_credited_date ON user_product_metrics (credited_date);
 CREATE INDEX idx_upm_country ON user_product_metrics (country);
 CREATE INDEX idx_upm_region ON user_product_metrics (region);
 CREATE INDEX idx_upm_device ON user_product_metrics (device);
-CREATE INDEX idx_upm_abi_ad_id ON user_product_metrics (abi_ad_id);
-CREATE INDEX idx_upm_abi_campaign_id ON user_product_metrics (abi_campaign_id);
-CREATE INDEX idx_upm_abi_ad_set_id ON user_product_metrics (abi_ad_set_id);
 CREATE INDEX idx_upm_valid_lifecycle ON user_product_metrics (valid_lifecycle);
 CREATE INDEX idx_upm_store ON user_product_metrics (store);
 CREATE INDEX idx_upm_price_bucket ON user_product_metrics (price_bucket);
@@ -379,14 +377,14 @@ CONSOLIDATED USER_PRODUCT_METRICS TABLE BENEFITS:
 
 KEY RELATIONSHIPS AFTER CONSOLIDATION:
 - user_product_metrics.distinct_id can JOIN mixpanel_user.distinct_id
-- user_product_metrics attribution fields (abi_ad_id, abi_campaign_id, abi_ad_set_id) can JOIN advertising performance tables
-- Combined analytics enable complete user acquisition-to-conversion journey analysis
+- mixpanel_user attribution fields (abi_ad_id, abi_campaign_id, abi_ad_set_id) provide user-level attribution
+- Combined analytics enable complete user acquisition-to-conversion journey analysis via user table joins
 - price_bucket enables revenue cohort analysis
 
 ATTRIBUTION FIELD CONSISTENCY:
-- abi_ad_id (TEXT) - consistent across mixpanel_user, mixpanel_event, user_product_metrics, and all ad_performance tables
-- abi_campaign_id (TEXT) - consistent across mixpanel_event, user_product_metrics, and all ad_performance tables
-- abi_ad_set_id (TEXT) - consistent across mixpanel_event, user_product_metrics, and all ad_performance tables
+- abi_ad_id (TEXT) - consistent across mixpanel_user, mixpanel_event, and all ad_performance tables
+- abi_campaign_id (TEXT) - consistent across mixpanel_user, mixpanel_event, and all ad_performance tables
+- abi_ad_set_id (TEXT) - consistent across mixpanel_user, mixpanel_event, and all ad_performance tables
 
 MIGRATION IMPACT:
 - Zero downtime merge process with field mapping (user_id → distinct_id)

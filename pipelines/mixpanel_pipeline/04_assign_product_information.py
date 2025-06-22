@@ -176,9 +176,6 @@ def discover_all_user_products_efficiently(cursor: sqlite3.Cursor) -> Dict[str, 
         'first_seen': None,
         'country': None,
         'region': None,
-        'abi_ad_id': None,
-        'abi_campaign_id': None,
-        'abi_ad_set_id': None,
         'device': None,
         'store': None
     }))
@@ -218,13 +215,7 @@ def discover_all_user_products_efficiently(cursor: sqlite3.Cursor) -> Dict[str, 
             if region and not metadata['region']:
                 metadata['region'] = region
                 
-            # Update attribution info (prefer non-null values from events)
-            if abi_ad_id and not metadata['abi_ad_id']:
-                metadata['abi_ad_id'] = abi_ad_id
-            if abi_campaign_id and not metadata['abi_campaign_id']:
-                metadata['abi_campaign_id'] = abi_campaign_id
-            if abi_ad_set_id and not metadata['abi_ad_set_id']:
-                metadata['abi_ad_set_id'] = abi_ad_set_id
+
                 
             # Extract and process store/device metadata from event
             event_metadata = extract_metadata_from_event(event_json)
@@ -302,9 +293,6 @@ def discover_user_products(cursor: sqlite3.Cursor, user_id: str) -> Dict[str, Di
         'first_seen': None,
         'country': None,
         'region': None,
-        'abi_ad_id': None,
-        'abi_campaign_id': None,
-        'abi_ad_set_id': None,
         'device': None,
         'store': None
     })
@@ -331,13 +319,7 @@ def discover_user_products(cursor: sqlite3.Cursor, user_id: str) -> Dict[str, Di
             if region and not metadata['region']:
                 metadata['region'] = region
                 
-            # Update attribution info (prefer non-null values)
-            if abi_ad_id and not metadata['abi_ad_id']:
-                metadata['abi_ad_id'] = abi_ad_id
-            if abi_campaign_id and not metadata['abi_campaign_id']:
-                metadata['abi_campaign_id'] = abi_campaign_id
-            if abi_ad_set_id and not metadata['abi_ad_set_id']:
-                metadata['abi_ad_set_id'] = abi_ad_set_id
+
                 
             # Extract and process event metadata
             event_metadata = extract_metadata_from_event(event_json)
@@ -437,9 +419,6 @@ def create_user_product_relationships(conn: sqlite3.Connection, limit: Optional[
                 'country': metadata.get('country'),
                 'region': metadata.get('region'),
                 'device': metadata.get('device') or metadata.get('store'),  # Use store as device fallback
-                'abi_ad_id': metadata.get('abi_ad_id'),
-                'abi_campaign_id': metadata.get('abi_campaign_id'),
-                'abi_ad_set_id': metadata.get('abi_ad_set_id'),
                 'store': metadata.get('store'),
                 # Required fields with defaults
                 'current_status': 'active',
@@ -464,12 +443,10 @@ def create_user_product_relationships(conn: sqlite3.Connection, limit: Optional[
         cursor.executemany("""
             INSERT INTO user_product_metrics (
                 distinct_id, product_id, credited_date, country, region, device,
-                abi_ad_id, abi_campaign_id, abi_ad_set_id, current_status,
-                current_value, value_status, last_updated_ts, valid_lifecycle, store
+                current_status, current_value, value_status, last_updated_ts, valid_lifecycle, store
             ) VALUES (
                 :distinct_id, :product_id, :credited_date, :country, :region, :device,
-                :abi_ad_id, :abi_campaign_id, :abi_ad_set_id, :current_status,
-                :current_value, :value_status, :last_updated_ts, :valid_lifecycle, :store
+                :current_status, :current_value, :value_status, :last_updated_ts, :valid_lifecycle, :store
             )
         """, relationships_to_create)
         
@@ -483,9 +460,6 @@ def create_user_product_relationships(conn: sqlite3.Connection, limit: Optional[
             SET country = :country,
                 region = :region,
                 device = :device,
-                abi_ad_id = :abi_ad_id,
-                abi_campaign_id = :abi_campaign_id,
-                abi_ad_set_id = :abi_ad_set_id,
                 store = :store,
                 last_updated_ts = :last_updated_ts
             WHERE distinct_id = :distinct_id AND product_id = :product_id

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   RefreshCw, 
   Search, 
@@ -17,6 +17,7 @@ import { DashboardGrid } from '../components/DashboardGrid';
 import { DebugModal } from '../components/DebugModal';
 import { GraphModal } from '../components/GraphModal';
 import TimelineModal from '../components/TimelineModal';
+import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
 
 // Available columns for visibility control
@@ -47,6 +48,7 @@ const AVAILABLE_COLUMNS = [
   { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
   { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
   { key: 'estimated_revenue_usd', label: 'Estimated Revenue', defaultVisible: true },
+  { key: 'mixpanel_revenue_net', label: 'Mixpanel Revenue', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
@@ -132,6 +134,7 @@ export const Dashboard = () => {
       meta_purchases: true,
       mixpanel_purchases: true,
       mixpanel_revenue_usd: true,
+      mixpanel_revenue_net: true,
       estimated_roas: true,
       profit: true,
       trial_accuracy_ratio: true
@@ -164,8 +167,30 @@ export const Dashboard = () => {
     return [];
   });
 
+  // Sorting state - default to spend descending (highest first)
+  const [sortConfig, setSortConfig] = useState(() => {
+    const saved = localStorage.getItem('dashboard_sort_config');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved sort config:', e);
+      }
+    }
+    return {
+      column: 'spend',
+      direction: 'desc'
+    };
+  });
+
   // Column visibility dropdown state
   const [showColumnSelector, setShowColumnSelector] = useState(false);
+
+  // Pipeline state variables (for tracking running/queued pipelines)
+  const [runningPipelines, setRunningPipelines] = useState(new Set());
+  const [pipelineQueue, setPipelineQueue] = useState([]);
+  const [activePipelineCount, setActivePipelineCount] = useState(0);
+  const [maxConcurrentPipelines, setMaxConcurrentPipelines] = useState(8);
 
   // Track if initial load has been performed
   const hasInitialLoadRef = useRef(false);
@@ -217,6 +242,10 @@ export const Dashboard = () => {
   }, [rowOrder]);
 
   useEffect(() => {
+    localStorage.setItem('dashboard_sort_config', JSON.stringify(sortConfig));
+  }, [sortConfig]);
+
+  useEffect(() => {
     localStorage.setItem('dashboard_data', JSON.stringify(dashboardData));
   }, [dashboardData]);
 
@@ -243,46 +272,122 @@ export const Dashboard = () => {
   };
 
   const handleSelectNoColumns = () => {
-    const newVisibility = {};
+    const newVisibility = { ...columnVisibility };
     AVAILABLE_COLUMNS.forEach(col => {
-      newVisibility[col.key] = col.alwaysVisible || false;
+      if (!col.alwaysVisible) {
+        newVisibility[col.key] = false;
+      }
     });
     setColumnVisibility(newVisibility);
   };
 
-  // Filter data based on text filter
-  const filteredData = React.useMemo(() => {
-    if (!textFilter.trim()) return dashboardData;
+  // Handle sorting functionality
+  const handleSort = (column) => {
+    setSortConfig(prevConfig => {
+      if (prevConfig.column === column) {
+        // Toggle direction if same column
+        return {
+          ...prevConfig,
+          direction: prevConfig.direction === 'asc' ? 'desc' : 'asc'
+        };
+      } else {
+        // New column - default to descending for numeric columns, ascending for text
+        const numericColumns = [
+          'impressions', 'clicks', 'spend', 'meta_trials_started', 'mixpanel_trials_started',
+          'meta_purchases', 'mixpanel_purchases', 'trial_accuracy_ratio', 'mixpanel_trials_ended',
+          'mixpanel_trials_in_progress', 'mixpanel_refunds_usd', 'mixpanel_revenue_usd',
+          'mixpanel_revenue_net', 'mixpanel_conversions_net_refunds', 'mixpanel_cost_per_trial', 'mixpanel_cost_per_purchase',
+          'meta_cost_per_trial', 'meta_cost_per_purchase', 'click_to_trial_rate',
+          'trial_conversion_rate', 'avg_trial_refund_rate', 'purchase_accuracy_ratio',
+          'purchase_refund_rate', 'estimated_revenue_usd', 'profit', 'estimated_roas'
+        ];
+        
+        return {
+          column,
+          direction: numericColumns.includes(column) ? 'desc' : 'asc'
+        };
+      }
+    });
+    
+    // Clear manual row ordering when column sorting is applied
+    setRowOrder([]);
+  };
+
+  // Sort data based on current sort configuration
+  const sortData = (data, sortConfig) => {
+    if (!sortConfig.column) return data;
+    
+    return [...data].sort((a, b) => {
+      let aValue = a[sortConfig.column];
+      let bValue = b[sortConfig.column];
+      
+      // Handle undefined/null values
+      if (aValue == null && bValue == null) return 0;
+      if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
+      
+      // Handle numeric comparisons
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      
+      // Handle string comparisons
+      const aStr = String(aValue).toLowerCase();
+      const bStr = String(bValue).toLowerCase();
+      
+      if (sortConfig.direction === 'asc') {
+        return aStr.localeCompare(bStr);
+      } else {
+        return bStr.localeCompare(aStr);
+      }
+    });
+  };
+
+  // Filter and sort data
+  const processedData = useMemo(() => {
+    if (!dashboardData || dashboardData.length === 0) return [];
+    
+    // Apply text filter first
+    const filteredData = textFilter ? 
+      dashboardData.filter(row => 
+        filterRecursive([row]).length > 0
+      ) : dashboardData;
+    
+    // Apply sorting
+    const sortedData = sortData(filteredData, sortConfig);
+    
+    return sortedData;
+  }, [dashboardData, textFilter, sortConfig]);
+
+  // Filter data based on text input
+  const filterRecursive = (items) => {
+    if (!textFilter.trim()) return items;
     
     const filterText = textFilter.toLowerCase();
     
-    const filterRecursive = (items) => {
-      return items.reduce((acc, item) => {
-        // Check if this item matches the filter
-        const matches = (
-          (item.name && item.name.toLowerCase().includes(filterText)) ||
-          (item.campaign_name && item.campaign_name.toLowerCase().includes(filterText)) ||
-          (item.adset_name && item.adset_name.toLowerCase().includes(filterText)) ||
-          (item.ad_name && item.ad_name.toLowerCase().includes(filterText))
-        );
-        
-        // Filter children recursively
-        const filteredChildren = item.children ? filterRecursive(item.children) : [];
-        
-        // Include this item if it matches OR if it has matching children
-        if (matches || filteredChildren.length > 0) {
-          acc.push({
-            ...item,
-            children: filteredChildren
-          });
-        }
-        
-        return acc;
-      }, []);
-    };
-    
-    return filterRecursive(dashboardData);
-  }, [dashboardData, textFilter]);
+    return items.reduce((acc, item) => {
+      // Check if this item matches the filter
+      const matches = (
+        (item.name && item.name.toLowerCase().includes(filterText)) ||
+        (item.campaign_name && item.campaign_name.toLowerCase().includes(filterText)) ||
+        (item.adset_name && item.adset_name.toLowerCase().includes(filterText)) ||
+        (item.ad_name && item.ad_name.toLowerCase().includes(filterText))
+      );
+      
+      // Filter children recursively
+      const filteredChildren = item.children ? filterRecursive(item.children) : [];
+      
+      // Include this item if it matches OR if it has matching children
+      if (matches || filteredChildren.length > 0) {
+        acc.push({
+          ...item,
+          children: filteredChildren
+        });
+      }
+      
+      return acc;
+    }, []);
+  };
 
   // Handle background data refresh (doesn't show main loading state)
   const handleBackgroundRefresh = useCallback(async () => {
@@ -307,8 +412,8 @@ export const Dashboard = () => {
         setDashboardData(response.data || []);
         setLastUpdated(new Date().toISOString());
         
-        // Initialize row order with data IDs if not already set
-        if (response.data && response.data.length > 0 && rowOrder.length === 0) {
+        // Initialize row order with data IDs if not already set AND no column sorting is active
+        if (response.data && response.data.length > 0 && rowOrder.length === 0 && (!sortConfig.column)) {
           setRowOrder(response.data.map(r => r.id));
         }
         
@@ -347,8 +452,8 @@ export const Dashboard = () => {
         setDashboardData(response.data || []);
         setLastUpdated(new Date().toISOString());
         
-        // Initialize row order with data IDs
-        if (response.data && response.data.length > 0) {
+        // Initialize row order with data IDs only if no column sorting is active
+        if (response.data && response.data.length > 0 && (!sortConfig.column)) {
           setRowOrder(response.data.map(r => r.id));
         }
         
@@ -417,52 +522,37 @@ export const Dashboard = () => {
     setSelectedRowData(null);
   };
 
-  // Get stats for summary cards
+  // Get dashboard stats
   const getDashboardStats = () => {
-    if (!dashboardData.length) return null;
+    if (!dashboardData || dashboardData.length === 0) return {};
     
     const calculateStats = (items) => {
-      let totalSpend = 0;
-      let totalRevenue = 0;
-      let totalImpressions = 0;
-      let totalClicks = 0;
-      let totalTrials = 0;
-      let totalPurchases = 0;
-      let count = 0;
-      
-      items.forEach(item => {
-        // Only sum the top-level items (campaigns) - their totals already include adsets/ads
-        totalSpend += parseFloat(item.spend || 0);
-        totalRevenue += parseFloat(item.mixpanel_revenue_usd || item.estimated_revenue_usd || 0);
-        totalImpressions += parseInt(item.impressions || 0);
-        totalClicks += parseInt(item.clicks || 0);
-        totalTrials += parseInt(item.mixpanel_trials_started || 0);
-        totalPurchases += parseInt(item.mixpanel_purchases || 0);
-        count++;
-        
-        // DO NOT add children stats - they're already included in the campaign totals
-        // This prevents double-counting since campaign metrics are aggregated from their adsets/ads
+      return items.reduce((acc, item) => {
+        acc.totalSpend += item.spend || 0;
+        acc.totalImpressions += item.impressions || 0;
+        acc.totalClicks += item.clicks || 0;
+        acc.totalRevenue += item.estimated_revenue_usd || 0;
+        acc.totalProfit += item.profit || 0;
+        return acc;
+      }, {
+        totalSpend: 0,
+        totalImpressions: 0,
+        totalClicks: 0,
+        totalRevenue: 0,
+        totalProfit: 0
       });
-      
-      return {
-        totalSpend,
-        totalRevenue,
-        totalImpressions,
-        totalClicks,
-        totalTrials,
-        totalPurchases,
-        count
-      };
     };
-    
-    const stats = calculateStats(dashboardData);
-    const profit = stats.totalRevenue - stats.totalSpend;
-    const roas = stats.totalSpend > 0 ? stats.totalRevenue / stats.totalSpend : 0;
-    
-    return { ...stats, profit, roas };
+
+    return calculateStats(processedData);
   };
 
-  const stats = getDashboardStats();
+  // Get human-readable sort column name
+  const getSortColumnLabel = () => {
+    if (!sortConfig.column) return 'None';
+    
+    const column = AVAILABLE_COLUMNS.find(col => col.key === sortConfig.column);
+    return column ? column.label : sortConfig.column;
+  };
 
   if (error) {
     return (
@@ -505,155 +595,98 @@ export const Dashboard = () => {
               </p>
             </div>
             
-            {/* Column Visibility Control */}
-            <div className="relative column-selector-container">
-              <button
-                onClick={() => setShowColumnSelector(!showColumnSelector)}
-                className="flex items-center space-x-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-blue-500 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <Eye className="h-4 w-4" />
-                <span className="text-sm">Columns</span>
-                {showColumnSelector ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              </button>
-              
-              {showColumnSelector && (
-                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 max-h-80 overflow-y-auto">
-                  <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex space-x-2 mb-2">
-                      <button
-                        onClick={handleSelectAllColumns}
-                        className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800"
-                      >
-                        Show All
-                      </button>
-                      <button
-                        onClick={handleSelectNoColumns}
-                        className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
-                      >
-                        Hide All
-                      </button>
+            <div className="flex items-center space-x-6">
+              {/* Sort Status Indicator */}
+              <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
+                <TrendingUp size={14} />
+                <span>Sorted by:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">
+                  {getSortColumnLabel()}
+                </span>
+                <span className="text-gray-500">
+                  ({sortConfig.direction === 'asc' ? 'Low to High' : 'High to Low'})
+                </span>
+              </div>
+
+              {/* Column Visibility Control */}
+              <div className="relative column-selector-container">
+                <button
+                  onClick={() => setShowColumnSelector(!showColumnSelector)}
+                  className="flex items-center space-x-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-blue-500 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <Eye className="h-4 w-4" />
+                  <span className="text-sm">Columns</span>
+                  {showColumnSelector ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                
+                {showColumnSelector && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 max-h-80 overflow-y-auto">
+                    <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                      <div className="flex space-x-2 mb-2">
+                        <button
+                          onClick={handleSelectAllColumns}
+                          className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800"
+                        >
+                          Show All
+                        </button>
+                        <button
+                          onClick={handleSelectNoColumns}
+                          className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
+                        >
+                          Hide All
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="p-3 space-y-2">
+                      {AVAILABLE_COLUMNS.map((column) => (
+                        <div key={column.key} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={columnVisibility[column.key] || false}
+                            onChange={() => handleColumnToggle(column.key)}
+                            disabled={column.alwaysVisible}
+                            className="mr-3 h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-500 focus:ring-blue-500"
+                          />
+                          <span className={`text-sm ${
+                            column.alwaysVisible 
+                              ? 'text-gray-500 dark:text-gray-400' 
+                              : 'text-gray-700 dark:text-gray-300'
+                          }`}>
+                            {column.label}
+                            {column.alwaysVisible && <span className="ml-1 text-xs">(always visible)</span>}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  
-                  <div className="p-3 space-y-2">
-                    {AVAILABLE_COLUMNS.map((column) => (
-                      <div key={column.key} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={columnVisibility[column.key] || false}
-                          onChange={() => handleColumnToggle(column.key)}
-                          disabled={column.alwaysVisible}
-                          className="mr-3 h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-500 focus:ring-blue-500"
-                        />
-                        <span className={`text-sm ${
-                          column.alwaysVisible 
-                            ? 'text-gray-500 dark:text-gray-400' 
-                            : 'text-gray-700 dark:text-gray-300'
-                        }`}>
-                          {column.label}
-                          {column.alwaysVisible && <span className="ml-1 text-xs">(always visible)</span>}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Dashboard Controls */}
         <div className="mb-6">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <div className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Date Range */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Date Range
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="date"
-                      value={dateRange.start_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, start_date: e.target.value }))}
-                      className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                    <input
-                      type="date"
-                      value={dateRange.end_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, end_date: e.target.value }))}
-                      className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Breakdown */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Breakdown
-                  </label>
-                  <select
-                    value={breakdown}
-                    onChange={(e) => setBreakdown(e.target.value)}
-                    className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  >
-                    <option value="all">All</option>
-                    <option value="country">Country</option>
-                    <option value="region">Region</option>
-                    <option value="device">Device</option>
-                  </select>
-                </div>
-
-                {/* Hierarchy */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Hierarchy
-                  </label>
-                  <select
-                    value={hierarchy}
-                    onChange={(e) => setHierarchy(e.target.value)}
-                    className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  >
-                    <option value="campaign">Campaign → Ad Set → Ad</option>
-                    <option value="adset">Ad Set → Ad</option>
-                    <option value="ad">Ad Only</option>
-                  </select>
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-col justify-end">
-                  <button
-                    onClick={() => {
-                      // Use background refresh if we have existing data, otherwise regular refresh
-                      if (dashboardData && dashboardData.length > 0) {
-                        handleBackgroundRefresh();
-                      } else {
-                        handleRefresh();
-                      }
-                    }}
-                    disabled={loading || backgroundLoading}
-                    className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {(loading || backgroundLoading) ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Refreshing...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Refresh Data
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ImprovedDashboardControls
+            dateRange={dateRange}
+            breakdown={breakdown}
+            hierarchy={hierarchy}
+            onDateRangeChange={setDateRange}
+            onBreakdownChange={setBreakdown}
+            onHierarchyChange={setHierarchy}
+            onRefresh={() => {
+              // Use background refresh if we have existing data, otherwise regular refresh
+              if (dashboardData && dashboardData.length > 0) {
+                handleBackgroundRefresh();
+              } else {
+                handleRefresh();
+              }
+            }}
+            loading={loading}
+            backgroundLoading={backgroundLoading}
+          />
         </div>
-
-
 
         {/* Search and Filter */}
         <div className="mb-6">
@@ -670,57 +703,64 @@ export const Dashboard = () => {
         </div>
 
         {/* Summary Stats */}
-        {stats && (
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center">
-                <DollarSign className="h-8 w-8 text-blue-500" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Spend</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    ${stats.totalSpend.toLocaleString()}
-                  </p>
+        {(() => {
+          const stats = getDashboardStats();
+          if (!stats || Object.keys(stats).length === 0) return null;
+          
+          const roas = stats.totalSpend > 0 ? stats.totalRevenue / stats.totalSpend : 0;
+          
+          return (
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center">
+                  <DollarSign className="h-8 w-8 text-blue-500" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Spend</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      ${stats.totalSpend.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center">
+                  <TrendingUp className="h-8 w-8 text-green-500" />
+                  <div className="ml-4">
+                                         <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Revenue</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      ${stats.totalRevenue.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center">
+                  <BarChart3 className={`h-8 w-8 ${stats.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Profit</p>
+                    <p className={`text-2xl font-bold ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ${stats.totalProfit.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center">
+                  <Users className="h-8 w-8 text-purple-500" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ROAS</p>
+                    <p className={`text-2xl font-bold ${roas >= 2 ? 'text-green-600' : roas >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {roas.toFixed(2)}x
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
-            
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center">
-                <TrendingUp className="h-8 w-8 text-green-500" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Revenue</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    ${stats.totalRevenue.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center">
-                <BarChart3 className={`h-8 w-8 ${stats.profit >= 0 ? 'text-green-500' : 'text-red-500'}`} />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Profit</p>
-                  <p className={`text-2xl font-bold ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    ${stats.profit.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center">
-                <Users className="h-8 w-8 text-purple-500" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ROAS</p>
-                  <p className={`text-2xl font-bold ${stats.roas >= 1.5 ? 'text-green-600' : stats.roas >= 1.0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                    {stats.roas.toFixed(2)}x
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Last Updated with Background Loading Indicator */}
         {(lastUpdated || backgroundLoading) && (
@@ -752,22 +792,28 @@ export const Dashboard = () => {
               </p>
             </div>
           </div>
-        ) : filteredData.length > 0 ? (
+        ) : processedData.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <DashboardGrid 
-              data={filteredData}
+              data={processedData}
               rowOrder={rowOrder}
               onRowOrderChange={setRowOrder}
               onRowAction={handleRowAction}
               columnVisibility={columnVisibility}
               columnOrder={columnOrder}
               onColumnOrderChange={setColumnOrder}
+              runningPipelines={runningPipelines}
+              pipelineQueue={pipelineQueue}
+              activePipelineCount={activePipelineCount}
+              maxConcurrentPipelines={maxConcurrentPipelines}
               dashboardParams={{
                 start_date: dateRange.start_date,
                 end_date: dateRange.end_date,
                 breakdown: breakdown,
                 hierarchy: hierarchy
               }}
+              sortConfig={sortConfig}
+              onSort={handleSort}
             />
           </div>
         ) : (

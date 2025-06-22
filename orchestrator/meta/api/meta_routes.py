@@ -8,6 +8,9 @@ Includes both live API testing and historical data collection endpoints.
 from flask import Blueprint, request, jsonify
 from ..services.meta_service import fetch_meta_data, check_async_job_status, get_async_job_results
 from ..services.meta_historical_service import meta_historical_service
+import sys
+import importlib.util
+from pathlib import Path
 
 # Create Blueprint for Meta routes
 meta_bp = Blueprint('meta', __name__, url_prefix='/api/meta')
@@ -258,5 +261,138 @@ def save_action_mappings():
             return jsonify({'error': 'Failed to save action mappings'}), 500
             
         return jsonify({'status': 'saved', 'mappings': mappings})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@meta_bp.route('/historical/tables/overview', methods=['GET'])
+def get_tables_overview():
+    """Get overview of all historical data tables"""
+    try:
+        overview = meta_historical_service.get_tables_overview()
+        return jsonify(overview)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@meta_bp.route('/historical/tables/<table_name>', methods=['GET'])
+def get_table_data(table_name):
+    """Get data from a specific table"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        
+        data = meta_historical_service.get_table_data(table_name, limit=limit, offset=offset)
+        if data is None:
+            return jsonify({'error': 'Table not found or access denied'}), 404
+            
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@meta_bp.route('/historical/tables/<table_name>/aggregated', methods=['GET'])
+def get_table_aggregated_data(table_name):
+    """Get aggregated daily metrics from a performance table (all available data)"""
+    try:
+        if table_name == 'composite_validation':
+            data = meta_historical_service.get_composite_validation_metrics()
+        else:
+            data = meta_historical_service.get_aggregated_daily_metrics(table_name)
+            
+        if data is None:
+            return jsonify({'error': 'Table not found or not a performance table'}), 404
+            
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@meta_bp.route('/historical/tables/<table_name>/date/<date>', methods=['DELETE'])
+def delete_table_date(table_name, date):
+    """Delete all data for a specific date from a table"""
+    try:
+        result = meta_historical_service.delete_date_data(table_name, date)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f"Successfully deleted {result['rows_deleted']} rows for {date} from {table_name}",
+                'rows_deleted': result['rows_deleted'],
+                'date': date,
+                'table_name': table_name
+            })
+        else:
+            return jsonify({'success': False, 'error': result['error']}), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@meta_bp.route('/update-table', methods=['POST'])
+def update_meta_table():
+    """Update Meta table with data for a specific date range"""
+    try:
+        data = request.get_json()
+        
+        # Extract parameters
+        table_name = data.get('table_name')
+        breakdown_type = data.get('breakdown_type')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        skip_existing = data.get('skip_existing', True)
+        
+        # Validate required parameters
+        if not all([table_name, start_date, end_date]):
+            return jsonify({'error': 'table_name, start_date, and end_date are required'}), 400
+        
+        # Validate table name
+        valid_tables = [
+            'ad_performance_daily',
+            'ad_performance_daily_country',
+            'ad_performance_daily_region',
+            'ad_performance_daily_device'
+        ]
+        if table_name not in valid_tables:
+            return jsonify({'error': f'Invalid table name. Must be one of: {valid_tables}'}), 400
+        
+        # Import MetaDataUpdater - use absolute path from project root
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        meta_pipeline_path = project_root / "pipelines" / "meta_pipeline" / "01_update_meta_data.py"
+        
+        if not meta_pipeline_path.exists():
+            return jsonify({'error': f'Meta pipeline file not found at {meta_pipeline_path}'}), 500
+        
+        try:
+            spec = importlib.util.spec_from_file_location("meta_updater", meta_pipeline_path)
+            if spec is None:
+                return jsonify({'error': 'Failed to create module spec for MetaDataUpdater'}), 500
+            
+            meta_updater_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(meta_updater_module)
+            MetaDataUpdater = meta_updater_module.MetaDataUpdater
+            
+        except Exception as import_error:
+            return jsonify({'error': f'Failed to import MetaDataUpdater: {str(import_error)}'}), 500
+        
+        try:
+            # Create updater and run update
+            updater = MetaDataUpdater()
+            success = updater.update_specific_breakdown_table(
+                table_name=table_name,
+                breakdown_type=breakdown_type,
+                start_date=start_date,
+                end_date=end_date,
+                skip_existing=skip_existing
+            )
+        except Exception as update_error:
+            return jsonify({'error': f'Update process failed: {str(update_error)}'}), 500
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Successfully updated {table_name} from {start_date} to {end_date}',
+                'table_name': table_name,
+                'date_range': {'start': start_date, 'end': end_date},
+                'skip_existing': skip_existing
+            })
+        else:
+            return jsonify({'error': 'Update failed - check server logs for details'}), 500
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500 

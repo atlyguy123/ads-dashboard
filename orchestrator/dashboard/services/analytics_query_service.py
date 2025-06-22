@@ -20,6 +20,17 @@ sys.path.insert(0, str(project_root))
 
 from utils.database_utils import get_database_path
 
+# Import the modular calculator system
+from ..calculators import (
+    CalculationInput, 
+    RevenueCalculators,
+    ROASCalculators,
+    AccuracyCalculators,
+    CostCalculators,
+    RateCalculators,
+    DatabaseCalculators
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -1067,73 +1078,35 @@ class AnalyticsQueryService:
             'total_attributed_users': int(record.get('total_attributed_users', 0) or 0),
         }
         
-        # Calculate derived metrics according to spec (all limited to 2 decimal places)
-        spend = formatted['spend']
-        mixpanel_trials = formatted['mixpanel_trials_started']
-        mixpanel_purchases = formatted['mixpanel_purchases']
-        meta_trials = formatted['meta_trials_started']
-        meta_purchases = formatted['meta_purchases']
-        clicks = formatted['clicks']
+        # === USE MODULAR CALCULATOR SYSTEM ===
+        # Create standardized input for all calculations
+        calc_input = CalculationInput(raw_record=record)
         
-        # Accuracy ratios (as percentages, limited to 2 decimal places)
-        if meta_trials > 0:
-            formatted['trial_accuracy_ratio'] = round((mixpanel_trials / meta_trials) * 100, 2)
-        else:
-            formatted['trial_accuracy_ratio'] = 0.0
-            
-        if meta_purchases > 0:
-            formatted['purchase_accuracy_ratio'] = round((mixpanel_purchases / meta_purchases) * 100, 2)
-        else:
-            formatted['purchase_accuracy_ratio'] = 0.0
+        # Calculate all derived metrics using the calculator functions
+        formatted['trial_accuracy_ratio'] = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)
+        formatted['purchase_accuracy_ratio'] = AccuracyCalculators.calculate_purchase_accuracy_ratio(calc_input)
         
-        # ROAS calculation with trial accuracy ratio adjustment
-        if spend > 0 and formatted['trial_accuracy_ratio'] > 0:
-            # Adjust estimated revenue by dividing by trial accuracy ratio (to account for Meta/Mixpanel dropoff)
-            # ROAS = (estimated_revenue / trial_accuracy_ratio) / spend
-            adjusted_revenue = formatted['estimated_revenue_usd'] / (formatted['trial_accuracy_ratio'] / 100)
-            formatted['estimated_roas'] = round(adjusted_revenue / spend, 2)
-        elif spend > 0:
-            # Fallback to standard calculation if no trial accuracy ratio
-            formatted['estimated_roas'] = round(formatted['estimated_revenue_usd'] / spend, 2)
-        else:
-            formatted['estimated_roas'] = 0.0
+        # ROAS calculation with accuracy adjustment
+        formatted['estimated_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
         
-        # Cost calculations (limited to 2 decimal places)
-        if mixpanel_trials > 0:
-            formatted['mixpanel_cost_per_trial'] = round(spend / mixpanel_trials, 2)
-        else:
-            formatted['mixpanel_cost_per_trial'] = 0.0
-            
-        if mixpanel_purchases > 0:
-            formatted['mixpanel_cost_per_purchase'] = round(spend / mixpanel_purchases, 2)
-        else:
-            formatted['mixpanel_cost_per_purchase'] = 0.0
-            
-        if meta_trials > 0:
-            formatted['meta_cost_per_trial'] = round(spend / meta_trials, 2)
-        else:
-            formatted['meta_cost_per_trial'] = 0.0
-            
-        if meta_purchases > 0:
-            formatted['meta_cost_per_purchase'] = round(spend / meta_purchases, 2)
-        else:
-            formatted['meta_cost_per_purchase'] = 0.0
+        # Cost calculations
+        formatted['mixpanel_cost_per_trial'] = CostCalculators.calculate_mixpanel_cost_per_trial(calc_input)
+        formatted['mixpanel_cost_per_purchase'] = CostCalculators.calculate_mixpanel_cost_per_purchase(calc_input)
+        formatted['meta_cost_per_trial'] = CostCalculators.calculate_meta_cost_per_trial(calc_input)
+        formatted['meta_cost_per_purchase'] = CostCalculators.calculate_meta_cost_per_purchase(calc_input)
         
-        # Rate calculations (limited to 2 decimal places)
-        if clicks > 0:
-            formatted['click_to_trial_rate'] = round((mixpanel_trials / clicks) * 100, 2)
-        else:
-            formatted['click_to_trial_rate'] = 0.0
+        # Rate calculations
+        formatted['click_to_trial_rate'] = RateCalculators.calculate_click_to_trial_rate(calc_input)
         
-        # CONVERSION RATES: Pull directly from database (DO NOT calculate)
-        # These come from the segment matcher and are already percentages in the database
-        formatted['trial_conversion_rate'] = round(float(record.get('avg_trial_conversion_rate', 0) or 0) * 100, 2)
-        formatted['trial_to_purchase_rate'] = formatted['trial_conversion_rate']  # Same metric
-        formatted['avg_trial_refund_rate'] = round(float(record.get('avg_trial_refund_rate', 0) or 0) * 100, 2)
-        formatted['purchase_refund_rate'] = round(float(record.get('avg_purchase_refund_rate', 0) or 0) * 100, 2)
+        # Database pass-through calculations (conversion rates)
+        formatted['trial_conversion_rate'] = DatabaseCalculators.calculate_trial_conversion_rate(calc_input)
+        formatted['trial_to_purchase_rate'] = DatabaseCalculators.calculate_trial_to_purchase_rate(calc_input)
+        formatted['avg_trial_refund_rate'] = DatabaseCalculators.calculate_avg_trial_refund_rate(calc_input)
+        formatted['purchase_refund_rate'] = DatabaseCalculators.calculate_purchase_refund_rate(calc_input)
         
-        # Profit calculation (limited to 2 decimal places)
-        formatted['profit'] = round(formatted['estimated_revenue_usd'] - spend, 2)
+        # Revenue calculations
+        formatted['mixpanel_revenue_net'] = RevenueCalculators.calculate_mixpanel_revenue_net(calc_input)
+        formatted['profit'] = RevenueCalculators.calculate_profit(calc_input)
         
         # CRITICAL: Preserve children array if it exists (for hierarchical structure)
         if 'children' in record:
@@ -1144,15 +1117,7 @@ class AnalyticsQueryService:
     def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
         """Get detailed daily metrics for sparkline charts - combines Meta and Mixpanel data by date"""
         try:
-            print(f"🔍 GET_CHART_DATA CALLED:")
-            print(f"   config: {config}")
-            print(f"   entity_type: {entity_type}")
-            print(f"   entity_id: {entity_id}")
-            print(f"   meta_db_path: {self.meta_db_path}")
-            print(f"   mixpanel_db_path: {self.mixpanel_db_path}")
-            
             table_name = self.get_table_name(config.breakdown)
-            print(f"   table_name: {table_name}")
             
             # Build WHERE clause for Meta data based on entity type
             if entity_type == 'campaign':
@@ -1166,9 +1131,6 @@ class AnalyticsQueryService:
                 mixpanel_attr_field = "abi_ad_id"
             else:
                 raise ValueError(f"Invalid entity_type: {entity_type}")
-            
-            print(f"   meta_where: {meta_where}")
-            print(f"   mixpanel_attr_field: {mixpanel_attr_field}")
             
             # Get daily Meta data
             meta_query = f"""
@@ -1185,14 +1147,10 @@ class AnalyticsQueryService:
             """
             
             meta_data = self._execute_meta_query(meta_query, [entity_id, config.start_date, config.end_date])
-            print(f"🔍 META QUERY RESULT: {len(meta_data)} rows")
-            if len(meta_data) > 0:
-                print(f"   first meta row: {meta_data[0]}")
             
             # Get daily Mixpanel data (attributed to credited_date)
             mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
             mixpanel_conn.row_factory = sqlite3.Row
-            print(f"🔍 MIXPANEL CONNECTION: {self.mixpanel_analytics_db_path}")
             
             mixpanel_query = f"""
             SELECT 
@@ -1221,14 +1179,8 @@ class AnalyticsQueryService:
             """
             
             cursor = mixpanel_conn.cursor()
-            print(f"🔍 EXECUTING MIXPANEL QUERY:")
-            print(f"   mixpanel_query: {mixpanel_query}")
-            print(f"   params: [{entity_id}, {config.start_date}, {config.end_date}]")
             cursor.execute(mixpanel_query, [entity_id, config.start_date, config.end_date])
             mixpanel_data = [dict(row) for row in cursor.fetchall()]
-            print(f"🔍 MIXPANEL QUERY RESULT: {len(mixpanel_data)} rows")
-            if len(mixpanel_data) > 0:
-                print(f"   first mixpanel row: {mixpanel_data[0]}")
             mixpanel_conn.close()
             
             # Merge Meta and Mixpanel data by date
@@ -1286,42 +1238,69 @@ class AnalyticsQueryService:
                         'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
                     }
             
-            # Calculate OVERALL accuracy ratio for the entire period (trials + purchases combined)
-            total_meta_conversions = sum(d['daily_meta_trials'] + d['daily_meta_purchases'] for d in daily_data.values())
-            total_mixpanel_conversions = sum(d['daily_mixpanel_trials'] + d['daily_mixpanel_purchases'] for d in daily_data.values())
+            # Calculate accuracy ratio using SAME LOGIC as main dashboard event priority
+            total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
+            total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
+            total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
+            total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
             
-            # Calculate the period-wide accuracy ratio
-            overall_accuracy_ratio = 0.0
-            if total_meta_conversions > 0:
-                overall_accuracy_ratio = total_mixpanel_conversions / total_meta_conversions
+            # Use same event priority logic as getEventPriority() in DashboardGrid.js
+            if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
+                # Default to trials when both are zero
+                event_priority = 'trials'
+                overall_accuracy_ratio = 0.0
+            elif total_mixpanel_trials > total_mixpanel_purchases:
+                # Trials are dominant - use trial accuracy ratio
+                event_priority = 'trials'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+            elif total_mixpanel_purchases > total_mixpanel_trials:
+                # Purchases are dominant - use purchase accuracy ratio
+                event_priority = 'purchases'
+                overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
+            else:
+                # Equal - use trial accuracy ratio as default
+                event_priority = 'equal'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+                
+            # DEBUG: Log accuracy ratio calculation
+            logger.info(f"🔥 ACCURACY RATIO DEBUG for {entity_type} {entity_id}:")
+            logger.info(f"   Total MP Trials: {total_mixpanel_trials}, Meta Trials: {total_meta_trials}")
+            logger.info(f"   Total MP Purchases: {total_mixpanel_purchases}, Meta Purchases: {total_meta_purchases}")
+            logger.info(f"   Event Priority: {event_priority}")
+            logger.info(f"   Calculated Accuracy Ratio: {overall_accuracy_ratio:.3f} ({overall_accuracy_ratio * 100:.1f}%)")
             
-            # Calculate daily derived metrics (ROAS, etc.)
+            # Calculate daily derived metrics using the modular calculator system
             chart_data = []
             for date in sorted(daily_data.keys()):
                 day_data = daily_data[date]
                 
-                # Calculate daily ROAS using the overall period accuracy ratio
-                if day_data['daily_spend'] > 0:
-                    # Base revenue from Mixpanel for this day
-                    base_revenue = day_data['daily_estimated_revenue']
-                    
-                    # Apply overall accuracy ratio adjustment
-                    if overall_accuracy_ratio > 0 and overall_accuracy_ratio != 1.0:
-                        # Divide by accuracy ratio to account for Meta/Mixpanel discrepancy
-                        # E.g., if Mixpanel shows 50% of Meta conversions, divide revenue by 0.5 (multiply by 2)
-                        adjusted_revenue = base_revenue / overall_accuracy_ratio
-                        day_data['daily_roas'] = round(adjusted_revenue / day_data['daily_spend'], 2)
-                    else:
-                        # Use standard calculation if no valid accuracy ratio
-                        day_data['daily_roas'] = round(base_revenue / day_data['daily_spend'], 2)
-                else:
-                    day_data['daily_roas'] = 0.0
+                # CRITICAL FIX: Map daily fields to standard calculator field names
+                calculator_record = {
+                    # Map daily fields to standard names expected by calculators
+                    'spend': day_data['daily_spend'],
+                    'estimated_revenue_usd': day_data['daily_estimated_revenue'],
+                    'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
+                    'mixpanel_refunds_usd': day_data.get('daily_mixpanel_refunds', 0),
+                    'mixpanel_trials_started': day_data.get('daily_mixpanel_trials', 0),
+                    'meta_trials_started': day_data.get('daily_meta_trials', 0),
+                    'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
+                    'meta_purchases': day_data.get('daily_meta_purchases', 0),
+                    # Keep original daily fields for reference
+                    **day_data
+                }
                 
-                # Store the accuracy ratio for debugging
+                # Use the modular calculator system for ROAS calculation
+                calc_input = CalculationInput(raw_record=calculator_record)
+                daily_roas = ROASCalculators.calculate_estimated_roas(calc_input)
+                day_data['daily_roas'] = daily_roas
+                
+                # Use the modular calculator system for profit calculation  
+                daily_profit = RevenueCalculators.calculate_profit(calc_input)
+                day_data['daily_profit'] = daily_profit
+                
+                # Store the accuracy ratio and event priority for tooltip
                 day_data['period_accuracy_ratio'] = overall_accuracy_ratio
-                
-                # Calculate daily profit (limited to 2 decimal places)
-                day_data['daily_profit'] = round(day_data['daily_estimated_revenue'] - day_data['daily_spend'], 2)
+                day_data['event_priority'] = event_priority
                 
                 # For sparkline coloring: use conversion count for statistical significance
                 day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']

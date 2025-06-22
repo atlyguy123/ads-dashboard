@@ -67,7 +67,7 @@ def get_all_batch_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     users_query = """
     SELECT DISTINCT upm.distinct_id, upm.product_id, COALESCE(mu.country, 'Unknown') as country
     FROM user_product_metrics upm LEFT JOIN mixpanel_user mu ON upm.distinct_id = mu.distinct_id
-    WHERE upm.valid_lifecycle = 1
+    -- WHERE upm.valid_lifecycle = 1  -- Commented out to process ALL users in user_product_metrics table
     """
     trial_starts_query = """
     SELECT me.distinct_id, me.event_time, JSON_EXTRACT(me.event_json, '$.properties.product_id') as product_id

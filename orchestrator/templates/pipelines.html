@@ -293,20 +293,7 @@
             padding: 50px;
         }
         
-        .btn-debug {
-            background: #6c757d;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-left: 8px;
-        }
-        
-        .btn-debug:hover {
-            background: #5a6268;
-        }
+
         
         .btn-reset {
             background: #17a2b8;
@@ -464,8 +451,8 @@
                             <button class="btn btn-primary" id="runPipelineBtn" ${!allTested ? 'disabled' : ''}>
                                 Run Pipeline
                             </button>
-                            <button class="btn-debug" onclick="app.debugPipeline('${pipeline.name}')" title="Debug pipeline tracking">
-                                🐛 Debug
+                            <button class="btn-reset" id="resetAllBtn" title="Reset all steps to pending status">
+                                🔄 Reset All
                             </button>
                             ${!allTested ? '<span style="color: #ff9500; font-size: 14px; margin-left: 10px;">All steps must be tested before running</span>' : ''}
                         </div>
@@ -481,6 +468,10 @@
                 // Add event listeners
                 document.getElementById('runPipelineBtn').addEventListener('click', () => {
                     this.runPipeline(pipeline.name);
+                });
+                
+                document.getElementById('resetAllBtn').addEventListener('click', () => {
+                    this.resetAllSteps(pipeline.name);
                 });
                 
                 pipeline.steps.forEach(step => {
@@ -733,44 +724,35 @@
                 }
             }
             
-            async debugPipeline(pipelineName) {
-                console.log(`🐛 DEBUG: Getting debug info for pipeline '${pipelineName}'`);
+            async resetAllSteps(pipelineName) {
+                console.log(`🔄 RESET ALL: Resetting all steps in pipeline '${pipelineName}'`);
+                
+                // Confirm the action with the user
+                if (!confirm(`Are you sure you want to reset ALL steps in pipeline '${pipelineName}'?\n\nThis will:\n• Cancel any running steps\n• Reset all step statuses to pending\n• Clear all progress and error states\n\nThis action cannot be undone.`)) {
+                    return;
+                }
                 
                 try {
-                    const response = await fetch(`/api/debug/${pipelineName}`);
-                    const debugInfo = await response.json();
+                    const response = await fetch(`/api/reset-all/${pipelineName}`, {
+                        method: 'POST'
+                    });
                     
-                    console.log('🐛 DEBUG INFO:', debugInfo);
+                    const result = await response.json();
+                    console.log(`🔄 RESET ALL: Reset response:`, result);
                     
-                    // Create a detailed debug message
-                    let debugMessage = `DEBUG INFO for '${pipelineName}':\n\n`;
-                    
-                    debugMessage += `Pipeline exists: ${debugInfo.pipeline_exists}\n\n`;
-                    
-                    debugMessage += `TRACKED PROCESSES:\n`;
-                    if (Object.keys(debugInfo.tracked_processes).length > 0) {
-                        for (const [stepId, processInfo] of Object.entries(debugInfo.tracked_processes)) {
-                            debugMessage += `  • ${stepId}: PID=${processInfo.pid}, Running=${processInfo.is_running}, Poll=${processInfo.poll_result}\n`;
-                        }
+                    if (result.success) {
+                        this.showMessage(result.message, 'success');
+                        console.log(`✅ RESET ALL: Successfully reset all steps in pipeline '${pipelineName}'`);
+                        
+                        // Refresh the pipeline view to show updated status
+                        this.loadPipelines();
                     } else {
-                        debugMessage += `  (No processes currently tracked)\n`;
+                        this.showMessage(`Reset all failed: ${result.message}`, 'error');
+                        console.log(`❌ RESET ALL: Failed to reset all steps in pipeline '${pipelineName}': ${result.message}`);
                     }
-                    
-                    debugMessage += `\nSTATUS FILE DATA:\n`;
-                    if (Object.keys(debugInfo.status_file_data).length > 0) {
-                        for (const [stepId, statusInfo] of Object.entries(debugInfo.status_file_data)) {
-                            debugMessage += `  • ${stepId}: Status=${statusInfo.status}, Updated=${statusInfo.updated_at}\n`;
-                        }
-                    } else {
-                        debugMessage += `  (No status data found)\n`;
-                    }
-                    
-                    // Show debug info in an alert for now (could be improved with a modal)
-                    alert(debugMessage);
-                    
                 } catch (error) {
-                    console.error('❌ Error getting debug info:', error);
-                    this.showMessage(`Error getting debug info: ${error.message}`, 'error');
+                    console.error(`❌ RESET ALL: Error resetting all steps in pipeline '${pipelineName}':`, error);
+                    this.showMessage(`Error resetting all steps: ${error.message}`, 'error');
                 }
             }
             

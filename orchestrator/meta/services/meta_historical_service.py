@@ -10,12 +10,19 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import meta_service
+import sys
+import os
+# Add project root to path to import utils
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from utils.database_utils import get_database_path
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Database file path
-DB_FILE = 'data/meta_historical_data.db'
+# Database file path - use the centralized database utilities
+def get_db_path():
+    """Get the Meta Analytics database path using the centralized database utilities"""
+    return get_database_path('meta_analytics')
 
 @dataclass
 class RequestConfig:
@@ -85,7 +92,7 @@ class MetaHistoricalService:
     
     def init_database(self):
         """Initialize the SQLite database with required tables"""
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             
             # Table for storing request configurations
@@ -178,7 +185,7 @@ class MetaHistoricalService:
         """Save a request configuration and return its hash"""
         config_hash = config.get_hash()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             
             # Insert or ignore (if already exists)
@@ -204,7 +211,7 @@ class MetaHistoricalService:
         day_request = DayRequest(date, config)
         request_key = day_request.get_key()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT 1 FROM daily_data WHERE request_key = ?', (request_key,))
             result = cursor.fetchone()
@@ -221,7 +228,7 @@ class MetaHistoricalService:
             record_count = len(meta_response.get('data', []))
             pages_fetched = meta_response.get('meta', {}).get('pages_fetched', 0)
             
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 cursor = conn.cursor()
                 
                 # Insert or update
@@ -255,7 +262,7 @@ class MetaHistoricalService:
         day_request = DayRequest(date, config)
         request_key = day_request.get_key()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT meta_response_json, record_count, pages_fetched, created_at 
@@ -342,7 +349,7 @@ class MetaHistoricalService:
         config_hash = self.save_request_config(config)
         
         # Create collection job record
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO collection_jobs 
@@ -445,7 +452,7 @@ class MetaHistoricalService:
     
     def _update_day_job_status(self, job_id: str, date: str, status: str, error_message: str = None):
         """Update status for a specific day in a job"""
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO day_job_status 
@@ -456,7 +463,7 @@ class MetaHistoricalService:
     
     def _update_collection_job_progress(self, job_id: str, progress: CollectionProgress):
         """Update collection job progress in database"""
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE collection_jobs 
@@ -500,7 +507,7 @@ class MetaHistoricalService:
         """Get summary of data coverage for a configuration"""
         config_hash = config.get_hash()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             
             # Build query with optional date filtering
@@ -549,7 +556,7 @@ class MetaHistoricalService:
         
         config_hash = config.get_hash()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT DISTINCT date 
@@ -564,7 +571,7 @@ class MetaHistoricalService:
     
     def get_all_configurations(self) -> List[Dict]:
         """Get all stored request configurations"""
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT 
@@ -599,7 +606,7 @@ class MetaHistoricalService:
         """Export stored data for a configuration and date range, optionally filtered by entity"""
         config_hash = config.get_hash()
         
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             cursor = conn.cursor()
             
             # Build query based on whether entity filtering is requested
@@ -692,7 +699,7 @@ class MetaHistoricalService:
     def delete_configuration_data(self, config_hash: str) -> bool:
         """Delete all data for a specific configuration"""
         try:
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 cursor = conn.cursor()
                 
                 # Check if the configuration exists
@@ -749,7 +756,7 @@ class MetaHistoricalService:
     
     def list_jobs(self) -> List[Dict]:
         """Get list of all collection jobs"""
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('''
@@ -810,7 +817,7 @@ class MetaHistoricalService:
     def store_daily_data(self, config_hash: str, date: str, data: Dict) -> bool:
         """Store daily data for a configuration"""
         try:
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 cursor = conn.cursor()
                 
                 # Get the configuration
@@ -976,7 +983,7 @@ class MetaHistoricalService:
     def save_action_mappings(self, mappings: Dict) -> bool:
         """Save action mappings to database"""
         try:
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 cursor = conn.cursor()
                 
                 # Create table if it doesn't exist
@@ -1005,12 +1012,548 @@ class MetaHistoricalService:
     def get_action_mappings(self) -> Dict:
         """Get the latest action mappings from database"""
         try:
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 cursor = conn.cursor()
                 return self._get_action_mappings(cursor)
         except Exception as e:
             logger.error(f"Error getting action mappings: {e}")
             return {}
+
+    def get_tables_overview(self) -> Dict:
+        """Get overview of all tables with row counts and recent activity"""
+        try:
+            with sqlite3.connect(get_db_path()) as conn:
+                cursor = conn.cursor()
+                
+                overview = {}
+                
+                # Get table info and row counts - discover all tables dynamically
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                tables = [row[0] for row in cursor.fetchall()]
+                
+                for table in tables:
+                    # Get row count
+                    cursor.execute(f'SELECT COUNT(*) FROM {table}')
+                    row_count = cursor.fetchone()[0]
+                    
+                    # Get column info
+                    cursor.execute(f'PRAGMA table_info({table})')
+                    columns = [{'name': col[1], 'type': col[2]} for col in cursor.fetchall()]
+                    
+                    # Get most recent record if any exist
+                    recent_record = None
+                    if row_count > 0:
+                        if table in ['request_configs', 'daily_data', 'collection_jobs', 'daily_business_metrics']:
+                            if 'created_at' in [col['name'] for col in columns]:
+                                cursor.execute(f'SELECT * FROM {table} ORDER BY created_at DESC LIMIT 1')
+                            else:
+                                cursor.execute(f'SELECT * FROM {table} LIMIT 1')
+                            recent_record = cursor.fetchone()
+                    
+                    # Get date range for performance tables
+                    date_range = None
+                    available_days = 0
+                    if table.startswith('ad_performance_') and row_count > 0:
+                        try:
+                            cursor.execute(f"SELECT MIN(date), MAX(date), COUNT(DISTINCT date) FROM {table}")
+                            result = cursor.fetchone()
+                            if result and result[0] and result[1]:
+                                date_range = {
+                                    'start': result[0],
+                                    'end': result[1]
+                                }
+                                available_days = result[2]
+                        except Exception as e:
+                            logger.warning(f"Could not get date range for {table}: {e}")
+                    
+                    overview[table] = {
+                        'row_count': row_count,
+                        'columns': columns,
+                        'recent_record': recent_record,
+                        'date_range': date_range,
+                        'available_days': available_days
+                    }
+                
+                return overview
+                
+        except Exception as e:
+            logger.error(f"Error getting tables overview: {e}")
+            return {}
+
+    def get_table_data(self, table_name: str, limit: int = 100, offset: int = 0) -> Optional[Dict]:
+        """Get data from a specific table"""
+        # Security check - only allow tables that exist in the database
+        try:
+            with sqlite3.connect(get_db_path()) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+                if not cursor.fetchone():
+                    return None
+        except:
+            return None
+            
+        try:
+            with sqlite3.connect(get_db_path()) as conn:
+                conn.row_factory = sqlite3.Row  # Enable column access by name
+                cursor = conn.cursor()
+                
+                # Get total count
+                cursor.execute(f'SELECT COUNT(*) FROM {table_name}')
+                total_count = cursor.fetchone()[0]
+                
+                # Get paginated data
+                cursor.execute(f'SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?', (limit, offset))
+                rows = cursor.fetchall()
+                
+                # Convert to list of dictionaries
+                data = [dict(row) for row in rows]
+                
+                # Get column info
+                cursor.execute(f'PRAGMA table_info({table_name})')
+                columns = [{'name': col[1], 'type': col[2]} for col in cursor.fetchall()]
+                
+                return {
+                    'table_name': table_name,
+                    'total_count': total_count,
+                    'limit': limit,
+                    'offset': offset,
+                    'columns': columns,
+                    'data': data
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting table data for {table_name}: {e}")
+            return None
+
+    def get_aggregated_daily_metrics(self, table_name: str, date_limit: int = None) -> Optional[Dict]:
+        """Get aggregated daily metrics from a performance table"""
+        # Only allow ad_performance tables
+        if not table_name.startswith('ad_performance_'):
+            return None
+            
+        try:
+            with sqlite3.connect(get_db_path()) as conn:
+                cursor = conn.cursor()
+                
+                # First check if table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+                if not cursor.fetchone():
+                    return None
+                
+                # Get ALL available dates
+                cursor.execute(f"SELECT DISTINCT date FROM {table_name} ORDER BY date")
+                dates = [row[0] for row in cursor.fetchall()]
+                
+                if not dates:
+                    return {'dates': [], 'metrics': {}}
+                
+                # Determine breakdown dimension (if any)
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                columns = [col[1] for col in cursor.fetchall()]
+                
+                breakdown_col = None
+                if 'country' in columns:
+                    breakdown_col = 'country'
+                elif 'device' in columns:
+                    breakdown_col = 'device'
+                elif 'region' in columns:
+                    breakdown_col = 'region'
+                
+                # Build aggregation query
+                metrics_data = {}
+                
+                for date in dates:
+                    if breakdown_col:
+                        # For breakdown tables, aggregate across the breakdown dimension
+                        query = f"""
+                        SELECT 
+                            COUNT(DISTINCT ad_id) as unique_ads,
+                            COUNT(DISTINCT adset_id) as unique_adsets,
+                            COUNT(DISTINCT campaign_id) as unique_campaigns,
+                            COUNT(DISTINCT {breakdown_col}) as unique_{breakdown_col}s,
+                            ROUND(SUM(spend), 2) as total_spend,
+                            SUM(impressions) as total_impressions,
+                            SUM(clicks) as total_clicks,
+                            SUM(meta_trials) as total_meta_trials,
+                            SUM(meta_purchases) as total_meta_purchases
+                        FROM {table_name} 
+                        WHERE date = ?
+                        """
+                    else:
+                        # For base table, no breakdown aggregation needed
+                        query = f"""
+                        SELECT 
+                            COUNT(DISTINCT ad_id) as unique_ads,
+                            COUNT(DISTINCT adset_id) as unique_adsets,
+                            COUNT(DISTINCT campaign_id) as unique_campaigns,
+                            ROUND(SUM(spend), 2) as total_spend,
+                            SUM(impressions) as total_impressions,
+                            SUM(clicks) as total_clicks,
+                            SUM(meta_trials) as total_meta_trials,
+                            SUM(meta_purchases) as total_meta_purchases
+                        FROM {table_name} 
+                        WHERE date = ?
+                        """
+                    
+                    cursor.execute(query, (date,))
+                    result = cursor.fetchone()
+                    
+                    if result:
+                        if breakdown_col:
+                            metrics_data[date] = {
+                                'unique_ads': result[0] or 0,
+                                'unique_adsets': result[1] or 0,
+                                'unique_campaigns': result[2] or 0,
+                                f'unique_{breakdown_col}s': result[3] or 0,
+                                'total_spend': result[4] or 0,
+                                'total_impressions': result[5] or 0,
+                                'total_clicks': result[6] or 0,
+                                'total_meta_trials': result[7] or 0,
+                                'total_meta_purchases': result[8] or 0
+                            }
+                        else:
+                            metrics_data[date] = {
+                                'unique_ads': result[0] or 0,
+                                'unique_adsets': result[1] or 0,
+                                'unique_campaigns': result[2] or 0,
+                                'total_spend': result[3] or 0,
+                                'total_impressions': result[4] or 0,
+                                'total_clicks': result[5] or 0,
+                                'total_meta_trials': result[6] or 0,
+                                'total_meta_purchases': result[7] or 0
+                            }
+                
+                # Analyze date range and detect issues
+                date_analysis = self._analyze_date_range(dates, metrics_data)
+                
+                # Prepare metrics list for the UI
+                if metrics_data:
+                    sample_date = next(iter(metrics_data.values()))
+                    metric_names = list(sample_date.keys())
+                else:
+                    metric_names = []
+                
+                return {
+                    'table_name': table_name,
+                    'breakdown_dimension': breakdown_col,
+                    'dates': dates,
+                    'metric_names': metric_names,
+                    'metrics_data': metrics_data,
+                    'date_analysis': date_analysis
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting aggregated metrics for {table_name}: {e}")
+            return None
+
+    def get_composite_validation_metrics(self) -> Optional[Dict]:
+        """Get composite validation metrics across all performance tables"""
+        try:
+            with sqlite3.connect(get_db_path()) as conn:
+                cursor = conn.cursor()
+                
+                # Define all performance tables
+                performance_tables = ['ad_performance_daily', 'ad_performance_daily_country', 
+                                    'ad_performance_daily_device', 'ad_performance_daily_region']
+                
+                # Get all dates from base table (ad_performance_daily)
+                cursor.execute("SELECT DISTINCT date FROM ad_performance_daily ORDER BY date")
+                base_dates = [row[0] for row in cursor.fetchall()]
+                
+                if not base_dates:
+                    return {'dates': [], 'metrics_data': {}, 'validation_errors': {}}
+                
+                # Collect data from all tables
+                table_data = {}
+                for table in performance_tables:
+                    # Check if table exists and has data
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                    if not cursor.fetchone():
+                        continue
+                        
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    if cursor.fetchone()[0] == 0:
+                        continue
+                    
+                    table_data[table] = {}
+                    
+                    # Get data for each date
+                    for date in base_dates:
+                        if table == 'ad_performance_daily':
+                            # Base table - no aggregation needed
+                            query = f"""
+                            SELECT 
+                                COUNT(DISTINCT ad_id) as unique_ads,
+                                COUNT(DISTINCT adset_id) as unique_adsets,
+                                COUNT(DISTINCT campaign_id) as unique_campaigns,
+                                ROUND(SUM(spend), 2) as total_spend,
+                                SUM(impressions) as total_impressions,
+                                SUM(clicks) as total_clicks,
+                                SUM(meta_trials) as total_meta_trials,
+                                SUM(meta_purchases) as total_meta_purchases
+                            FROM {table} WHERE date = ?
+                            """
+                        else:
+                            # Breakdown tables - aggregate across breakdown dimension
+                            query = f"""
+                            SELECT 
+                                COUNT(DISTINCT ad_id) as unique_ads,
+                                COUNT(DISTINCT adset_id) as unique_adsets,
+                                COUNT(DISTINCT campaign_id) as unique_campaigns,
+                                ROUND(SUM(spend), 2) as total_spend,
+                                SUM(impressions) as total_impressions,
+                                SUM(clicks) as total_clicks,
+                                SUM(meta_trials) as total_meta_trials,
+                                SUM(meta_purchases) as total_meta_purchases
+                            FROM {table} WHERE date = ?
+                            """
+                        
+                        cursor.execute(query, (date,))
+                        result = cursor.fetchone()
+                        
+                        if result and any(val is not None for val in result):
+                            table_data[table][date] = {
+                                'unique_ads': result[0] or 0,
+                                'unique_adsets': result[1] or 0,
+                                'unique_campaigns': result[2] or 0,
+                                'total_spend': result[3] or 0,
+                                'total_impressions': result[4] or 0,
+                                'total_clicks': result[5] or 0,
+                                'total_meta_trials': result[6] or 0,
+                                'total_meta_purchases': result[7] or 0
+                            }
+                
+                # Validate data consistency and build composite metrics
+                composite_metrics = {}
+                validation_errors = {}
+                
+                # Base metrics (shared across all tables)
+                base_metric_names = ['unique_ads', 'unique_adsets', 'unique_campaigns', 'total_spend', 
+                                   'total_impressions', 'total_clicks', 'total_meta_trials', 'total_meta_purchases']
+                
+                # Breakdown count metrics (unique to breakdown tables)
+                breakdown_count_names = ['unique_countries', 'unique_devices', 'unique_regions']
+                
+                # All metrics for the composite view
+                all_metric_names = base_metric_names + breakdown_count_names
+                
+                for date in base_dates:
+                    composite_metrics[date] = {}
+                    validation_errors[date] = {}
+                    
+                    # Get base table data for this date
+                    base_data = table_data.get('ad_performance_daily', {}).get(date)
+                    
+                    # Process base metrics (shared across all tables)
+                    for metric in base_metric_names:
+                        if not base_data:
+                            composite_metrics[date][metric] = 'MISSING_BASE'
+                            validation_errors[date][metric] = 'Base table missing data'
+                            continue
+                            
+                        base_value = base_data[metric]
+                        composite_metrics[date][metric] = base_value
+                        
+                        # Check each breakdown table INDIVIDUALLY
+                        missing_tables = []
+                        discrepancies = []
+                        
+                        for breakdown in ['country', 'device', 'region']:
+                            table_name = f'ad_performance_daily_{breakdown}'
+                            
+                            # Check if this specific table has data for this date
+                            if table_name not in table_data or not table_data[table_name].get(date):
+                                # This table is missing data - add to missing list
+                                missing_tables.append(breakdown)
+                            else:
+                                # This table has data - check for discrepancy
+                                table_date_data = table_data[table_name].get(date)
+                                breakdown_value = table_date_data[metric]
+                                
+                                # Only count as discrepancy if values differ
+                                if breakdown_value != base_value and base_value > 0:
+                                    percentage_diff = abs(breakdown_value - base_value) / base_value * 100
+                                    discrepancies.append({
+                                        'table': breakdown,
+                                        'value': breakdown_value,
+                                        'percentage_diff': percentage_diff
+                                    })
+                        
+                        # Set validation result based on what we found
+                        # Each breakdown table is treated individually - show discrepancies for tables that have data
+                        if discrepancies:
+                            # Show discrepancies for tables that have data, regardless of missing tables
+                            max_percentage = max(d['percentage_diff'] for d in discrepancies)
+                            validation_errors[date][metric] = {
+                                'type': 'mixed' if missing_tables else 'discrepancy',
+                                'base_value': base_value,
+                                'discrepancies': discrepancies,
+                                'max_percentage': max_percentage,
+                                'missing_tables': missing_tables if missing_tables else None
+                            }
+                        elif missing_tables:
+                            # Only missing data, no discrepancies - show X only if ALL tables are missing
+                            total_tables = ['country', 'device', 'region']
+                            if len(missing_tables) == len(total_tables):
+                                validation_errors[date][metric] = {
+                                    'type': 'missing',
+                                    'missing_tables': missing_tables
+                                }
+                            else:
+                                # Some tables have data with no discrepancies - no error
+                                validation_errors[date][metric] = None
+                        else:
+                            # No issues
+                            validation_errors[date][metric] = None
+                    
+                    # Process breakdown count metrics
+                    breakdown_mappings = {
+                        'unique_countries': ('ad_performance_daily_country', 'country'),
+                        'unique_devices': ('ad_performance_daily_device', 'device'), 
+                        'unique_regions': ('ad_performance_daily_region', 'region')
+                    }
+                    
+                    for count_metric, (table_name, breakdown_col) in breakdown_mappings.items():
+                        if table_name not in table_data:
+                            composite_metrics[date][count_metric] = 'MISSING_TABLE'
+                            validation_errors[date][count_metric] = 'Missing table'
+                            continue
+                            
+                        table_date_data = table_data[table_name].get(date)
+                        if not table_date_data:
+                            composite_metrics[date][count_metric] = 'MISSING_DATE'
+                            validation_errors[date][count_metric] = 'Missing date'
+                            continue
+                        
+                        # For breakdown count metrics, we need to query the actual unique count
+                        try:
+                            cursor.execute(f"SELECT COUNT(DISTINCT {breakdown_col}) FROM {table_name} WHERE date = ?", (date,))
+                            unique_count = cursor.fetchone()[0] or 0
+                            composite_metrics[date][count_metric] = unique_count
+                            validation_errors[date][count_metric] = None
+                        except Exception as e:
+                            composite_metrics[date][count_metric] = 'ERROR'
+                            validation_errors[date][count_metric] = f'Query error: {str(e)}'
+                
+                return {
+                    'table_name': 'composite_validation',
+                    'breakdown_dimension': 'validation',
+                    'dates': base_dates,
+                    'metric_names': all_metric_names,
+                    'metrics_data': composite_metrics,
+                    'validation_errors': validation_errors,
+                    'tables_analyzed': list(table_data.keys())
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting composite validation metrics: {e}")
+            return None
+
+    def delete_date_data(self, table_name: str, date: str) -> Dict:
+        """Delete all data for a specific date from a table"""
+        try:
+            # Validate table name
+            valid_tables = ['ad_performance_daily', 'ad_performance_daily_country', 
+                          'ad_performance_daily_region', 'ad_performance_daily_device']
+            
+            if table_name not in valid_tables:
+                return {'success': False, 'error': f'Invalid table name: {table_name}'}
+            
+            # Validate date format
+            from datetime import datetime
+            try:
+                datetime.strptime(date, '%Y-%m-%d')
+            except ValueError:
+                return {'success': False, 'error': f'Invalid date format: {date}. Use YYYY-MM-DD'}
+            
+            with sqlite3.connect(get_db_path()) as conn:
+                cursor = conn.cursor()
+                
+                # Check if data exists for this date
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE date = ?", (date,))
+                count_before = cursor.fetchone()[0]
+                
+                if count_before == 0:
+                    return {'success': False, 'error': f'No data found for {date} in {table_name}'}
+                
+                # Delete the data
+                cursor.execute(f"DELETE FROM {table_name} WHERE date = ?", (date,))
+                rows_deleted = cursor.rowcount
+                conn.commit()
+                
+                logger.info(f"Deleted {rows_deleted} rows for date {date} from {table_name}")
+                
+                return {
+                    'success': True, 
+                    'rows_deleted': rows_deleted,
+                    'date': date,
+                    'table_name': table_name
+                }
+                
+        except Exception as e:
+            logger.error(f"Error deleting date data: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def _analyze_date_range(self, dates, metrics_data):
+        """Analyze date range for missing dates and empty days"""
+        if not dates:
+            return {
+                'total_days': 0,
+                'date_range': None,
+                'missing_dates': [],
+                'empty_days': [],
+                'warnings': []
+            }
+        
+        from datetime import datetime, timedelta
+        
+        # Convert string dates to datetime objects for analysis
+        date_objects = [datetime.strptime(date, '%Y-%m-%d') for date in dates]
+        min_date = min(date_objects)
+        max_date = max(date_objects)
+        
+        # Generate expected date range
+        expected_dates = []
+        current_date = min_date
+        while current_date <= max_date:
+            expected_dates.append(current_date.strftime('%Y-%m-%d'))
+            current_date += timedelta(days=1)
+        
+        # Find missing dates
+        missing_dates = [date for date in expected_dates if date not in dates]
+        
+        # Find empty days (days where all metrics are 0)
+        empty_days = []
+        for date in dates:
+            if date in metrics_data:
+                day_metrics = metrics_data[date]
+                # Check if all numeric metrics are 0
+                is_empty = all(
+                    value == 0 
+                    for key, value in day_metrics.items() 
+                    if key.startswith(('total_', 'unique_')) and isinstance(value, (int, float))
+                )
+                if is_empty:
+                    empty_days.append(date)
+        
+        # Generate warnings
+        warnings = []
+        if missing_dates:
+            warnings.append(f"{len(missing_dates)} missing days in date range")
+        if empty_days:
+            warnings.append(f"{len(empty_days)} days with zero activity")
+        
+        return {
+            'total_days': len(expected_dates),
+            'available_days': len(dates),
+            'date_range': {
+                'start': min_date.strftime('%Y-%m-%d'),
+                'end': max_date.strftime('%Y-%m-%d')
+            },
+            'missing_dates': missing_dates,
+            'empty_days': empty_days,
+            'warnings': warnings
+        }
 
 # Global service instance
 meta_historical_service = MetaHistoricalService() 

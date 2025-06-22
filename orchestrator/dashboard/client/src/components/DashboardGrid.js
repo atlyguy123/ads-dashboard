@@ -1,5 +1,5 @@
 import React, { useState, Fragment, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, BarChart2, Info, Layers, Table2, Search, AlignJustify, Play, Clock, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, BarChart2, Info, Layers, Table2, Search, AlignJustify, Play, Clock, Sparkles, ChevronUp, ArrowUpDown } from 'lucide-react';
 import { AVAILABLE_COLUMNS } from './dashboard/DashboardControls';
 import ROASSparkline from './dashboard/ROASSparkline';
 
@@ -340,40 +340,9 @@ const getColumnBackgroundClass = (columnKey, isHovered = false) => {
 
 // Helper to calculate derived values for missing fields
 const calculateDerivedValues = (row) => {
-  const calculated = { ...row };
-  
-  // Calculate new fields that don't exist in the data
-  if (calculated.spend && calculated.total_trials_started && calculated.total_trials_started > 0) {
-    calculated.cost_per_trial_mixpanel = calculated.spend / calculated.total_trials_started;
-  }
-  
-  if (calculated.spend && calculated.total_conversions && calculated.total_conversions > 0) {
-    calculated.cost_per_purchase_mixpanel = calculated.spend / calculated.total_conversions;
-  }
-  
-  // Trial conversion difference percentage (what percent Mixpanel trials are of Meta trials)
-  if (calculated.meta_trials_started && calculated.total_trials_started && calculated.meta_trials_started > 0) {
-    calculated.trial_conversion_diff_pct = calculated.total_trials_started / calculated.meta_trials_started;
-  }
-  
-  // Profit calculation (Revenue - Spend)
-  if (calculated.revenue_usd !== undefined && calculated.spend !== undefined) {
-    calculated.profit = calculated.revenue_usd - calculated.spend;
-  }
-  
-  // Estimated ROAS calculation (adjusted for Meta vs Mixpanel trial difference)
-  if (calculated.estimated_revenue_usd !== undefined && calculated.spend !== undefined && calculated.spend > 0) {
-    if (calculated.trial_conversion_diff_pct && calculated.trial_conversion_diff_pct > 0) {
-      // Adjust estimated revenue by dividing by the percentage (to scale up for Meta accuracy)
-      const adjustedRevenue = calculated.estimated_revenue_usd / calculated.trial_conversion_diff_pct;
-      calculated.estimated_roas = adjustedRevenue / calculated.spend;
-    } else {
-      // Fallback to standard calculation if no diff percentage available
-      calculated.estimated_roas = calculated.estimated_revenue_usd / calculated.spend;
-    }
-  }
-  
-  return calculated;
+  // Frontend should NOT calculate values - all calculations should come from backend
+  // Simply return the row as-is since backend provides all calculated fields
+  return { ...row };
 };
 
 // Field color - use normal text colors
@@ -404,10 +373,28 @@ const roas_green_threshold = 1.5;
 const roas_yellow_threshold = 1.0;
 
 const getRoasColor = (roas) => {
-  if (roas === undefined || roas === null) return 'text-gray-500 dark:text-gray-400';
-  if (roas > roas_green_threshold) return 'text-green-600 dark:text-green-400';
-  if (roas >= roas_yellow_threshold) return 'text-amber-600 dark:text-amber-400';
+  if (roas >= 3.0) return 'text-green-600 dark:text-green-400';
+  if (roas >= 2.0) return 'text-yellow-600 dark:text-yellow-400';
+  if (roas >= 1.0) return 'text-orange-600 dark:text-orange-400';
   return 'text-red-600 dark:text-red-400';
+};
+
+// Sort indicator component
+const SortIndicator = ({ column, sortConfig }) => {
+  if (sortConfig.column !== column) {
+    return (
+      <ArrowUpDown 
+        size={12} 
+        className="ml-1 text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" 
+      />
+    );
+  }
+  
+  return sortConfig.direction === 'asc' ? (
+    <ChevronUp size={12} className="ml-1 text-gray-600 dark:text-gray-300" />
+  ) : (
+    <ChevronDown size={12} className="ml-1 text-gray-600 dark:text-gray-300" />
+  );
 };
 
 export const DashboardGrid = ({ 
@@ -422,15 +409,26 @@ export const DashboardGrid = ({
   pipelineQueue = [],
   activePipelineCount = 0,
   maxConcurrentPipelines = 8,
-  dashboardParams = null
+  dashboardParams = null,
+  sortConfig = { column: null, direction: 'asc' },
+  onSort = () => {}
 }) => {
   const [expandedRows, setExpandedRows] = useState({});
   const [expandedBreakdowns, setExpandedBreakdowns] = useState({});
   
-  // Column drag state
+  // Drag state
   const [draggedColumn, setDraggedColumn] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
-  
+  const [draggedRow, setDraggedRow] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Handle column header click for sorting (only if not dragging)
+  const handleColumnHeaderClick = (columnKey) => {
+    if (!isDragging && onSort) {
+      onSort(columnKey);
+    }
+  };
+
   // Row drag state
   const [draggedRowId, setDraggedRowId] = useState(null);
   const [dragOverRowId, setDragOverRowId] = useState(null);
@@ -496,6 +494,7 @@ export const DashboardGrid = ({
       case 'spend':
       case 'mixpanel_revenue_usd':
       case 'estimated_revenue_usd':
+      case 'mixpanel_revenue_net':
       case 'mixpanel_refunds_usd':
       case 'profit':
       case 'mixpanel_cost_per_trial':
@@ -588,7 +587,7 @@ export const DashboardGrid = ({
 
     // Add pipeline update styling for key metrics
     const pipelineUpdatedClass = isPipelineUpdated && 
-      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'estimated_revenue_usd', 'estimated_roas', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
+      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_roas', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
         ? 'font-bold text-green-600 dark:text-green-400' : '';
 
     // Special rendering for accuracy column with tooltip
@@ -607,6 +606,16 @@ export const DashboardGrid = ({
     if (columnKey === 'estimated_roas') {
       // Extract the actual ID from the row.id field (format: "campaign_123", "adset_456", "ad_789")
       const entityId = row.id ? row.id.split('_')[1] : null;
+      
+      // DEBUG: Log the row data to understand the structure
+      console.log('🔥 SPARKLINE CELL DEBUG:', {
+        rowId: row.id,
+        rowType: row.type,
+        entityId: entityId,
+        hasSpend: !!row.spend,
+        hasRevenue: !!calculatedRow.estimated_revenue_usd,
+        fullRow: row
+      });
       
       return (
         <ROASSparkline 
@@ -632,28 +641,23 @@ export const DashboardGrid = ({
   // Simple column drag handlers
   const handleColumnDragStart = (e, columnKey) => {
     setDraggedColumn(columnKey);
+    setIsDragging(true);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', columnKey);
-    
-    // Add visual feedback
-    e.target.style.opacity = '0.5';
   };
 
   const handleColumnDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
   };
 
   const handleColumnDragEnter = (e, columnKey) => {
-    e.preventDefault();
     if (draggedColumn && draggedColumn !== columnKey) {
       setDragOverColumn(columnKey);
     }
   };
 
   const handleColumnDragLeave = (e) => {
-    e.preventDefault();
-    // Only clear if we're actually leaving the column
+    // Only clear if we're leaving the th element itself
     if (!e.currentTarget.contains(e.relatedTarget)) {
       setDragOverColumn(null);
     }
@@ -662,67 +666,35 @@ export const DashboardGrid = ({
   const handleColumnDrop = (e, targetColumnKey) => {
     e.preventDefault();
     
-    if (!draggedColumn || draggedColumn === targetColumnKey) {
-      handleColumnDragEnd(e);
-      return;
-    }
-
-    // Get the visible columns order
-    const visibleColumnKeys = visibleColumns.slice(1).map(col => col.key);
-    const draggedIndex = visibleColumnKeys.indexOf(draggedColumn);
-    const targetIndex = visibleColumnKeys.indexOf(targetColumnKey);
-    
-    if (draggedIndex === -1 || targetIndex === -1) {
-      handleColumnDragEnd(e);
-      return;
-    }
-
-    // Create new visible order
-    const newVisibleOrder = [...visibleColumnKeys];
-    const [movedColumn] = newVisibleOrder.splice(draggedIndex, 1);
-    newVisibleOrder.splice(targetIndex, 0, movedColumn);
-    
-    // Reconstruct full column order
-    const fullOrder = columnOrder.length > 0 ? [...columnOrder] : AVAILABLE_COLUMNS.map(col => col.key);
-    const newFullOrder = ['name']; // Always keep name first
-    
-    // Add the reordered visible columns
-    newVisibleOrder.forEach(key => {
-      if (!newFullOrder.includes(key)) {
-        newFullOrder.push(key);
+    if (draggedColumn && draggedColumn !== targetColumnKey && onColumnOrderChange) {
+      const currentOrder = [...columnOrder];
+      const draggedIndex = currentOrder.indexOf(draggedColumn);
+      const targetIndex = currentOrder.indexOf(targetColumnKey);
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        // Remove dragged column
+        const [draggedCol] = currentOrder.splice(draggedIndex, 1);
+        
+        // Insert at target position
+        const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
+        currentOrder.splice(newTargetIndex, 0, draggedCol);
+        
+        onColumnOrderChange(currentOrder);
       }
-    });
-    
-    // Add any remaining columns that aren't visible
-    fullOrder.forEach(key => {
-      if (!newFullOrder.includes(key)) {
-        newFullOrder.push(key);
-      }
-    });
-    
-    console.log('🔄 Column drag reorder:', {
-      dragged: draggedColumn,
-      target: targetColumnKey,
-      newOrder: newFullOrder
-    });
-    
-    if (onColumnOrderChange) {
-      onColumnOrderChange(newFullOrder);
     }
     
-    handleColumnDragEnd(e);
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+    // Add delay to prevent accidental sorting after drag
+    setTimeout(() => setIsDragging(false), 100);
   };
 
   const handleColumnDragEnd = (e) => {
-    // Reset visual feedback
-    if (e.target) {
-      e.target.style.opacity = '';
-    }
     setDraggedColumn(null);
     setDragOverColumn(null);
+    // Add delay to prevent accidental sorting after drag
+    setTimeout(() => setIsDragging(false), 100);
   };
-
-
 
   // Row drag handlers
   const handleRowDragStart = (e, id) => {
@@ -1035,9 +1007,14 @@ export const DashboardGrid = ({
     return <div className="p-4 text-center text-gray-500 dark:text-gray-400">No data available.</div>;
   }
 
-  const orderedData = rowOrder.length
-    ? rowOrder.map(id => data.find(r => r.id === id)).filter(Boolean)
-    : data;
+  // Prioritize column sorting over manual row ordering
+  // If a column sort is active, use the sorted data directly
+  // Otherwise, use manual row ordering if available
+  const orderedData = (sortConfig.column && sortConfig.column !== null) 
+    ? data // Use data as-is (already sorted by Dashboard component)
+    : (rowOrder.length
+        ? rowOrder.map(id => data.find(r => r.id === id)).filter(Boolean)
+        : data);
 
   const allRows = orderedData.reduce(
     (acc, campaign) => acc.concat(renderRow(campaign, 0)),
@@ -1076,8 +1053,6 @@ export const DashboardGrid = ({
             <AlignJustify size={14} className="mr-1" /> Hide Breakdowns
           </button>
         </div>
-
-
 
         {/* Pipeline Status */}
         <div className="flex items-center space-x-4 ml-auto text-xs">
@@ -1121,11 +1096,19 @@ export const DashboardGrid = ({
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr>
               {/* Name column - always visible and not draggable */}
-              <th scope="col" className="sticky left-0 px-3 py-3 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20">
-                Name
+              <th 
+                scope="col" 
+                className={`sticky left-0 px-3 py-3 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group
+                  ${sortConfig.column === 'name' ? 'border-b-2 border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                onClick={() => handleColumnHeaderClick('name')}
+              >
+                <div className="flex items-center">
+                  <span>Name</span>
+                  <SortIndicator column="name" sortConfig={sortConfig} />
+                </div>
               </th>
               
-              {/* Dynamic columns based on visibility - draggable */}
+              {/* Dynamic columns based on visibility - draggable and sortable */}
               {visibleColumns.slice(1).map((column) => {
                 const columnType = getColumnType(column.key);
                 const backgroundClass = getColumnBackgroundClass(column.key, dragOverColumn === column.key);
@@ -1141,15 +1124,20 @@ export const DashboardGrid = ({
                     onDragLeave={handleColumnDragLeave}
                     onDrop={(e) => handleColumnDrop(e, column.key)}
                     onDragEnd={handleColumnDragEnd}
+                    onClick={() => handleColumnHeaderClick(column.key)}
                     className={`px-3 py-3 text-${column.key === 'campaign_name' || column.key === 'adset_name' ? 'left' : 'right'} text-xs font-medium uppercase tracking-wider ${getHeaderColor(column.key)} ${backgroundClass}
-                      ${!column.alwaysVisible ? 'cursor-move select-none hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors duration-150' : ''} 
+                      cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors duration-150 group
+                      ${sortConfig.column === column.key ? 'bg-blue-50 dark:bg-blue-900/20 border-b-2 border-blue-500 dark:border-blue-400' : ''}
                       ${dragOverColumn === column.key && draggedColumn !== column.key ? 'bg-blue-100 dark:bg-blue-900 border-2 border-blue-300 dark:border-blue-600' : ''}
                       ${columnType === 'trial' ? 'border-l-2 border-blue-200 dark:border-blue-800' : ''}
                       ${columnType === 'purchase' ? 'border-l-2 border-green-200 dark:border-green-800' : ''}`}
-                    title={!column.alwaysVisible ? `Drag to reorder "${column.label}" column` : ''}
+                    title={`Click to sort by "${column.label}"${!column.alwaysVisible ? '. Drag to reorder column.' : ''}`}
                   >
                   <div className="flex items-center justify-between">
-                    <span>{column.label}</span>
+                    <div className="flex items-center">
+                      <span>{column.label}</span>
+                      <SortIndicator column={column.key} sortConfig={sortConfig} />
+                    </div>
                     {!column.alwaysVisible && (
                       <span className="ml-1 text-gray-400 dark:text-gray-500 text-lg leading-none hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-150" style={{ transform: 'rotate(90deg)' }}>⋮⋮</span>
                     )}

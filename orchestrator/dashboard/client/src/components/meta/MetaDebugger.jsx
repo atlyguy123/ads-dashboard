@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import LiveApiTester from './LiveApiTester';
 import HistoricalDataManager from './HistoricalDataManager';
 import ActionMapper from './ActionMapper';
+import TableViewer from './TableViewer';
 import { DEFAULT_FIELDS } from './utils/metaConstants';
 import { compactObject } from './utils/metaApiUtils';
 
 export const MetaDebugger = () => {
   // Mode state
-  const [activeTab, setActiveTab] = useState('live'); // 'live', 'historical', 'mapping'
+  const [activeTab, setActiveTab] = useState('table-view'); // 'table-view', 'live', 'historical', 'mapping'
+  const [showDropdown, setShowDropdown] = useState(false);
   
   // Form input state
   const [startDateInput, setStartDateInput] = useState('');
@@ -63,6 +65,20 @@ export const MetaDebugger = () => {
     localStorage.setItem('metaDebugger_selectedBreakdowns', JSON.stringify(compactObject(selectedBreakdowns)));
   }, [startDateInput, endDateInput, incrementInput, selectedFields, selectedBreakdowns]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showDropdown && !event.target.closest('.relative')) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [showDropdown]);
+
   return (
     <div className="flex">
       <div className="flex-1 p-6 max-w-5xl">
@@ -70,35 +86,76 @@ export const MetaDebugger = () => {
         
         {/* Mode Toggle */}
         <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-6">
-          <div className="flex space-x-4">
-            <button
-              onClick={() => setActiveTab('live')}
-              className={`px-4 py-2 rounded ${activeTab === 'live' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-200 text-gray-700'}`}
-            >
-              Live API Testing
-            </button>
-            <button
-              onClick={() => setActiveTab('historical')}
-              className={`px-4 py-2 rounded ${activeTab === 'historical' 
-                ? 'bg-green-600 text-white' 
-                : 'bg-gray-200 text-gray-700'}`}
-            >
-              Historical Data Collection
-            </button>
-            <button
-              onClick={() => setActiveTab('mapping')}
-              className={`px-4 py-2 rounded ${activeTab === 'mapping' 
-                ? 'bg-purple-600 text-white' 
-                : 'bg-gray-200 text-gray-700'}`}
-            >
-              Action Mapping
-            </button>
+          <div className="flex justify-between items-center">
+            {/* Primary tabs (left-aligned) */}
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setActiveTab('table-view')}
+                className={`px-4 py-2 rounded ${activeTab === 'table-view' 
+                  ? 'bg-indigo-600 text-white' 
+                  : 'bg-gray-200 text-gray-700'}`}
+              >
+                Table View
+              </button>
+              <button
+                onClick={() => setActiveTab('live')}
+                className={`px-4 py-2 rounded ${activeTab === 'live' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-200 text-gray-700'}`}
+              >
+                Live API Testing
+              </button>
+            </div>
+            
+            {/* Secondary tabs dropdown (right-aligned) */}
+            <div className="relative">
+              <button
+                onClick={() => setShowDropdown(!showDropdown)}
+                className={`px-3 py-2 rounded flex items-center space-x-1 ${
+                  ['historical', 'mapping'].includes(activeTab)
+                    ? 'bg-gray-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <span>⚙️</span>
+                <span className="text-sm">More</span>
+                <span className={`transform transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`}>
+                  ▼
+                </span>
+              </button>
+              
+              {showDropdown && (
+                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-10 min-w-[200px]">
+                  <button
+                    onClick={() => {
+                      setActiveTab('historical');
+                      setShowDropdown(false);
+                    }}
+                    className={`w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 first:rounded-t-lg ${
+                      activeTab === 'historical' ? 'bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-200' : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Historical Data Collection
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('mapping');
+                      setShowDropdown(false);
+                    }}
+                    className={`w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 last:rounded-b-lg ${
+                      activeTab === 'mapping' ? 'bg-purple-50 text-purple-700 dark:bg-purple-900 dark:text-purple-200' : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Action Mapping
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Render appropriate mode component */}
+        {activeTab === 'table-view' && <TableViewer />}
         {activeTab === 'live' && (
           <LiveApiTester
             startDateInput={startDateInput}

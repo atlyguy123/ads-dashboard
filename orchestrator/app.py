@@ -16,6 +16,8 @@ from flask_cors import CORS
 from dashboard.api.dashboard_routes import dashboard_bp
 # Import debug blueprint
 from debug.api.debug_routes import debug_bp
+# Import meta blueprint
+from meta.api.meta_routes import meta_bp
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -25,6 +27,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 app.register_blueprint(dashboard_bp)
 # Register debug blueprint
 app.register_blueprint(debug_bp)
+# Register meta blueprint
+app.register_blueprint(meta_bp)
 
 # Enable CORS for all routes to handle cross-origin requests
 CORS(app, origins=['http://localhost:3000', 'http://localhost:5001', 'http://localhost:5678'], 
@@ -503,6 +507,60 @@ class PipelineRunner:
             traceback.print_exc()
             return False, f"Error resetting step: {str(e)}"
 
+    def reset_all_steps(self, pipeline_name):
+        """Reset all steps in a pipeline back to pending status"""
+        try:
+            print(f"🔄 ORCHESTRATOR: Reset all steps request for pipeline '{pipeline_name}'")
+            
+            # Check if pipeline exists
+            pipeline = self.pipelines.get(pipeline_name)
+            if not pipeline:
+                return False, f"Pipeline '{pipeline_name}' not found"
+            
+            # Cancel all running steps first
+            if pipeline_name in self.running_processes:
+                running_steps = list(self.running_processes[pipeline_name].keys())
+                print(f"   Found {len(running_steps)} running steps, cancelling them first...")
+                
+                for step_id in running_steps:
+                    success, message = self.cancel_step(pipeline_name, step_id)
+                    if not success:
+                        print(f"   Warning: Failed to cancel running step '{step_id}': {message}")
+            
+            # Remove the entire status file
+            status_file = os.path.join(pipeline['dir'], '.status.json')
+            print(f"   Looking for status file: {status_file}")
+            
+            if os.path.exists(status_file):
+                try:
+                    with open(status_file, 'r') as f:
+                        status_data = json.load(f)
+                    
+                    step_count = len(status_data)
+                    print(f"   Found {step_count} steps with status data")
+                    
+                    # Remove the entire status file
+                    os.remove(status_file)
+                    print(f"   Removed status file")
+                    
+                    print(f"✅ ORCHESTRATOR: All steps in pipeline '{pipeline_name}' reset successfully")
+                    return True, f"All {step_count} steps in pipeline '{pipeline_name}' have been reset to pending status"
+                    
+                except json.JSONDecodeError as e:
+                    print(f"   Status file was corrupted: {e}, removing it")
+                    os.remove(status_file)
+                    print(f"✅ ORCHESTRATOR: Corrupted status file removed for pipeline '{pipeline_name}'")
+                    return True, f"Corrupted status file removed, all steps reset to pending status"
+            else:
+                print(f"   No status file found, all steps already in pending state")
+                return True, f"All steps in pipeline '{pipeline_name}' are already in pending status"
+                
+        except Exception as e:
+            print(f"❌ Error resetting all steps: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error resetting all steps: {str(e)}"
+
 # Initialize the runner
 runner = PipelineRunner()
 
@@ -620,6 +678,12 @@ def debug_pipeline(pipeline_name):
 def reset_step(pipeline_name, step_id):
     """Reset a specific step's status back to pending"""
     success, message = runner.reset_step(pipeline_name, step_id)
+    return jsonify({'success': success, 'message': message})
+
+@app.route('/api/reset-all/<pipeline_name>', methods=['POST'])
+def reset_all_steps(pipeline_name):
+    """Reset all steps in a pipeline back to pending status"""
+    success, message = runner.reset_all_steps(pipeline_name)
     return jsonify({'success': success, 'message': message})
 
 @socketio.on('connect')

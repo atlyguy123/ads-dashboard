@@ -17,7 +17,9 @@ const HistoricalDataViewer = () => {
     setLoading(true);
     try {
       // Get all configurations
-      const configs = await api.getHistoricalConfigurations();
+      const response = await api.getHistoricalConfigurations();
+      // Handle both response formats: direct array or wrapped in {data: array}
+      const configs = Array.isArray(response) ? response : (response.data || []);
       setConfigurations(configs);
 
       // Load data for each configuration

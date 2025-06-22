@@ -55,7 +55,16 @@ const ROASSparkline = ({
   // Load chart data
   useEffect(() => {
     const loadChartData = async () => {
+      console.log('🔥 SPARKLINE COMPONENT DEBUG:', {
+        entityType,
+        entityId,
+        startDate,
+        endDate,
+        shouldMakeRequest: !!(entityId && startDate && endDate)
+      });
+      
       if (!entityId || !startDate || !endDate) {
+        console.log('🔥 SPARKLINE SKIPPED - Missing params:', { entityId, startDate, endDate });
         return;
       }
       
@@ -117,7 +126,7 @@ const ROASSparkline = ({
       setHoveredPoint(dataIndex);
       setTooltipPosition({ 
         x: event.clientX - 180, // Offset 180px to the left
-        y: event.clientY - 60 
+        y: event.clientY - 120  // Move tooltip much higher above cursor
       });
     }
   };
@@ -145,6 +154,16 @@ const ROASSparkline = ({
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
     parseFloat(d.daily_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
   );
+  
+  // CRITICAL DEBUG: Log what data we're actually working with
+  if (chartData.length > 0) {
+    console.log('🔥 SPARKLINE FRONTEND DEBUG:');
+    console.log('   First record:', chartData[0]);
+    console.log('   daily_roas values:', chartData.map(d => parseFloat(d.daily_roas) || 0));
+    console.log('   daily_spend values:', chartData.map(d => parseFloat(d.daily_spend) || 0));
+    console.log('   daily_estimated_revenue values:', chartData.map(d => parseFloat(d.daily_estimated_revenue) || 0));
+    console.log('   hasEnoughData:', hasEnoughData);
+  }
 
   console.log('🔥 SPARKLINE RENDER DEBUG:');
   console.log('   chartData.length:', chartData.length);
@@ -183,28 +202,49 @@ const ROASSparkline = ({
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
             
+            // CRITICAL DEBUG: Log sparkline calculation values
+            console.log('🔥 SPARKLINE SVG CALCULATION DEBUG:');
+            console.log('   values:', values);
+            console.log('   minValue:', minValue);
+            console.log('   maxValue:', maxValue);
+            console.log('   range:', range);
+            
             const points = values.map((value, index) => {
               const x = padding + (index / (values.length - 1)) * (width - 2 * padding);
               const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
               return `${x},${y}`;
             });
             
-            // Create colored segments using midpoint approach
+            // Create colored segments with each half matching its respective endpoint
             const segments = [];
             for (let i = 0; i < points.length - 1; i++) {
-              // Calculate midpoint ROAS and conversion values for segment coloring
+              const [startX, startY] = points[i].split(',').map(Number);
+              const [endX, endY] = points[i + 1].split(',').map(Number);
+              
+              // Calculate midpoint
+              const midX = (startX + endX) / 2;
+              const midY = (startY + endY) / 2;
+              const midPoint = `${midX},${midY}`;
+              
+              // Get colors for start and end points
               const startROAS = values[i];
               const endROAS = values[i + 1];
-              const midpointROAS = (startROAS + endROAS) / 2;
-              
               const startConversions = parseInt(chartData[i].daily_mixpanel_purchases) || 0;
               const endConversions = parseInt(chartData[i + 1].daily_mixpanel_purchases) || 0;
-              const midpointConversions = Math.round((startConversions + endConversions) / 2);
               
-              const segmentColor = getROASPerformanceColor(midpointROAS, midpointConversions);
+              const startColor = getROASPerformanceColor(startROAS, startConversions);
+              const endColor = getROASPerformanceColor(endROAS, endConversions);
+              
+              // First half: from start point to midpoint (colored like start point)
               segments.push({
-                path: `M ${points[i]} L ${points[i + 1]}`,
-                color: segmentColor
+                path: `M ${points[i]} L ${midPoint}`,
+                color: startColor
+              });
+              
+              // Second half: from midpoint to end point (colored like end point)
+              segments.push({
+                path: `M ${midPoint} L ${points[i + 1]}`,
+                color: endColor
               });
             }
             
@@ -269,10 +309,7 @@ const ROASSparkline = ({
                       const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
                       const backendROAS = parseFloat(dayData.daily_roas) || 0;
                       
-                      // Verify ROAS calculation
-                      const calculatedROAS = spend > 0 ? revenue / spend : 0;
-                      const roasMatch = Math.abs(backendROAS - calculatedROAS) < 0.01;
-                      
+                      // Display backend-calculated ROAS value directly
                       return (
                         <>
                           <div className="font-medium text-white">
@@ -280,11 +317,6 @@ const ROASSparkline = ({
                           </div>
                           <div className={getROASPerformanceColor(backendROAS, dayData.daily_mixpanel_purchases || 0).replace('text-', 'text-').replace('600', '400')}>
                             ROAS: {formatROAS(backendROAS)}
-                            {!roasMatch && (
-                              <span className="text-yellow-400 ml-1" title={`Calculated: ${calculatedROAS.toFixed(2)}`}>
-                                ⚠️
-                              </span>
-                            )}
                           </div>
                         </>
                       );
@@ -295,34 +327,26 @@ const ROASSparkline = ({
                           <div className="text-gray-300 text-xs">
                             Revenue: ${(parseFloat(chartData[hoveredPoint].daily_estimated_revenue) || 0).toFixed(2)}
                           </div>
-                          {(() => {
-                            const spend = parseFloat(chartData[hoveredPoint].daily_spend) || 0;
-                            const revenue = parseFloat(chartData[hoveredPoint].daily_estimated_revenue) || 0;
-                            const accuracyRatio = parseFloat(chartData[hoveredPoint].period_accuracy_ratio) || 0;
-                            
-                            if (spend > 0) {
-                              const baseROAS = (revenue / spend).toFixed(2);
-                              
-                              if (accuracyRatio > 0 && accuracyRatio !== 1.0) {
-                                const adjustedRevenue = revenue / accuracyRatio;
-                                const adjustedROAS = (adjustedRevenue / spend).toFixed(2);
-                                return (
-                                  <div className="text-gray-400 text-xs">
-                                    <div>Base: ${revenue.toFixed(2)} ÷ ${spend.toFixed(2)} = {baseROAS}</div>
-                                    <div>Ratio: {(accuracyRatio * 100).toFixed(1)}% (MP/Meta)</div>
-                                    <div>Adj: ${adjustedRevenue.toFixed(2)} ÷ ${spend.toFixed(2)} = {adjustedROAS}</div>
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div className="text-gray-400 text-xs">
-                                    Calc: ${revenue.toFixed(2)} ÷ ${spend.toFixed(2)} = {baseROAS}
-                                  </div>
-                                );
-                              }
-                            }
-                            return null;
-                          })()}
+                          {/* Display accuracy ratio using same logic as main dashboard */}
+                          {chartData[hoveredPoint].period_accuracy_ratio && chartData[hoveredPoint].period_accuracy_ratio !== 1.0 && (
+                            <div className="text-gray-400 text-xs">
+                              {(() => {
+                                const eventPriority = chartData[hoveredPoint].event_priority || 'trials';
+                                const ratioLabel = eventPriority === 'purchases' ? 'Purchase Accuracy' : 'Trial Accuracy';
+                                const accuracyRatio = (parseFloat(chartData[hoveredPoint].period_accuracy_ratio) * 100).toFixed(1);
+                                
+                                // DEBUG: Log accuracy ratio in sparkline
+                                console.log('🔥 SPARKLINE ACCURACY DEBUG:', {
+                                  eventPriority,
+                                  ratioLabel,
+                                  accuracyRatio,
+                                  rawRatio: chartData[hoveredPoint].period_accuracy_ratio
+                                });
+                                
+                                return `${ratioLabel}: ${accuracyRatio}% (MP/Meta)`;
+                              })()}
+                            </div>
+                          )}
           {/* Show conversion counts for confidence assessment */}
           <div className="text-green-300 text-xs">
             Conversions: {chartData[hoveredPoint].daily_mixpanel_purchases || 0}

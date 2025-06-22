@@ -190,7 +190,7 @@ def validate_database_schema(conn: sqlite3.Connection):
     # Check critical columns exist
     cursor.execute("PRAGMA table_info(mixpanel_user)")
     user_columns = {col[1] for col in cursor.fetchall()}
-    required_user_columns = {'distinct_id', 'valid_user', 'economic_tier', 'abi_ad_id'}
+    required_user_columns = {'distinct_id', 'valid_user', 'economic_tier', 'abi_ad_id', 'abi_campaign_id', 'abi_ad_set_id'}
     
     missing_columns = required_user_columns - user_columns
     if missing_columns:
@@ -375,8 +375,16 @@ def should_filter_user(distinct_id: str, email: str) -> Dict[str, Any]:
 def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str, Any]:
     """Prepare user record with proper data types and validation"""
     
-    # Extract attribution data (use direct ad_id, not hash)
+    # Extract attribution data (use direct values, not hash)
     abi_ad_id = user_data.get('abi_ad_id')
+    abi_campaign_id = user_data.get('abi_campaign_id')
+    abi_ad_set_id = user_data.get('abi_ad_set_id')
+    
+    # Validate attribution data extraction
+    if abi_ad_id and not abi_campaign_id:
+        logger.warning(f"User {distinct_id} has abi_ad_id but missing abi_campaign_id")
+    if abi_ad_id and not abi_ad_set_id:
+        logger.warning(f"User {distinct_id} has abi_ad_id but missing abi_ad_set_id")
     
     # Extract location data
     country = user_data.get('mp_country_code')
@@ -409,6 +417,8 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
     return {
         'distinct_id': distinct_id,
         'abi_ad_id': abi_ad_id,
+        'abi_campaign_id': abi_campaign_id,
+        'abi_ad_set_id': abi_ad_set_id,
         'country': country,
         'region': region, 
         'city': city,
@@ -430,6 +440,8 @@ def process_user_batch(cursor: sqlite3.Cursor, user_batch: List[Dict]):
         user_records.append((
             user['distinct_id'],
             user['abi_ad_id'],
+            user['abi_campaign_id'],
+            user['abi_ad_set_id'],
             user['country'],
             user['region'],
             user['city'],
@@ -445,9 +457,9 @@ def process_user_batch(cursor: sqlite3.Cursor, user_batch: List[Dict]):
     cursor.executemany(
         """
         INSERT OR REPLACE INTO mixpanel_user 
-        (distinct_id, abi_ad_id, country, region, city, has_abi_attribution, 
+        (distinct_id, abi_ad_id, abi_campaign_id, abi_ad_set_id, country, region, city, has_abi_attribution, 
          profile_json, first_seen, last_updated, valid_user, economic_tier)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         user_records
     )

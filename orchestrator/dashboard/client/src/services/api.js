@@ -816,4 +816,88 @@ export const api = {
       throw error;
     }
   },
+
+  /**
+   * Get overview of all historical data tables
+   * @returns {Promise<Object>} - Tables overview with row counts and structure
+   */
+  getTablesOverview: async () => {
+    try {
+      const response = await apiClient.get('/api/meta/historical/tables/overview');
+      return response.data;
+    } catch (error) {
+      console.error('Error getting tables overview:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get data from a specific historical table
+   * @param {string} tableName - Name of the table
+   * @param {number} [limit=100] - Number of records to fetch
+   * @param {number} [offset=0] - Offset for pagination
+   * @returns {Promise<Object>} - Table data with pagination info
+   */
+  getTableData: async (tableName, limit = 100, offset = 0) => {
+    try {
+      const response = await apiClient.get(`/api/meta/historical/tables/${tableName}`, {
+        params: { limit, offset }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting table data for ${tableName}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get aggregated daily metrics from a performance table
+   * @param {string} tableName - Name of the table
+   * @returns {Promise<Object>} - Aggregated daily metrics for all available dates
+   */
+  getTableAggregatedData: async (tableName) => {
+    try {
+      const response = await apiClient.get(`/api/meta/historical/tables/${tableName}/aggregated`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting aggregated data for ${tableName}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Update Meta table with data for a specific date range
+   * @param {Object} params - Update parameters
+   * @param {string} params.table_name - Name of the table to update
+   * @param {string} params.breakdown_type - Breakdown type (null, 'country', 'region', 'device')
+   * @param {string} params.start_date - Start date (YYYY-MM-DD)
+   * @param {string} params.end_date - End date (YYYY-MM-DD)
+   * @param {boolean} params.skip_existing - Whether to skip existing dates
+   * @returns {Promise<Object>} - Response with update status
+   */
+  updateMetaTable: async (params) => {
+    try {
+      const response = await apiClient.post('/api/meta/update-table', params);
+      return response.data;
+    } catch (error) {
+      console.error('Error updating Meta table:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Delete all data for a specific date from a table
+   * @param {string} tableName - Name of the table
+   * @param {string} date - Date to delete (YYYY-MM-DD)
+   * @returns {Promise<Object>} - Response with deletion status
+   */
+  deleteTableDate: async (tableName, date) => {
+    try {
+      const response = await apiClient.delete(`/api/meta/historical/tables/${tableName}/date/${date}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting date ${date} from table ${tableName}:`, error);
+      throw error;
+    }
+  },
 }; 

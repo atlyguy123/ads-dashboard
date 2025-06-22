@@ -39,6 +39,41 @@ const AVAILABLE_COLUMNS = [
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
 ];
 
+// Date range presets based on yesterday (not today)
+const getDatePresets = () => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const formatDate = (date) => date.toISOString().split('T')[0];
+  
+  return [
+    {
+      id: 'yesterday',
+      label: 'Yesterday',
+      start_date: formatDate(yesterday),
+      end_date: formatDate(yesterday)
+    },
+    {
+      id: '7days',
+      label: '7 Days',
+      start_date: formatDate(new Date(yesterday.getTime() - 6 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(yesterday)
+    },
+    {
+      id: '14days',
+      label: '14 Days',
+      start_date: formatDate(new Date(yesterday.getTime() - 13 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(yesterday)
+    },
+    {
+      id: '30days',
+      label: '30 Days',
+      start_date: formatDate(new Date(yesterday.getTime() - 29 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(yesterday)
+    }
+  ];
+};
+
 const DashboardControls = ({ 
   onRefresh, 
   isLoading = false, 
@@ -48,16 +83,42 @@ const DashboardControls = ({
   lastUpdated = null,
   onGetCurrentParams = null,  // New prop to get current params
   onColumnVisibilityChange = null,  // New prop to pass column visibility changes
-  onColumnOrderChange = null  // New prop to pass column order changes
+  onColumnOrderChange = null,  // New prop to pass column order changes
+  dateRange,
+  breakdown,
+  hierarchy,
+  onDateRangeChange,
+  onBreakdownChange,
+  onHierarchyChange
 }) => {
-  // Date range state with default values
-  const [dateRange, setDateRange] = useState({
-    start_date: '2025-05-01',
-    end_date: '2025-05-31'
+  const [selectedPreset, setSelectedPreset] = useState('7days'); // Default to 7 days
+  const datePresets = getDatePresets();
+  
+  // Get yesterday's date for the info note
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayFormatted = yesterday.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
   });
 
-  // Breakdown selection state for analytics API
-  const [breakdown, setBreakdown] = useState('all');
+  // Initialize with 7 days preset on mount
+  useEffect(() => {
+    const sevenDaysPreset = datePresets.find(p => p.id === '7days');
+    if (sevenDaysPreset && (!dateRange.start_date || !dateRange.end_date)) {
+      onDateRangeChange(sevenDaysPreset);
+    }
+  }, []);
+
+  // Update selected preset when date range changes externally
+  useEffect(() => {
+    const matchingPreset = datePresets.find(preset => 
+      preset.start_date === dateRange.start_date && 
+      preset.end_date === dateRange.end_date
+    );
+    setSelectedPreset(matchingPreset ? matchingPreset.id : 'custom');
+  }, [dateRange]);
 
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState({});
@@ -92,7 +153,7 @@ const DashboardControls = ({
     if (savedDateRange) {
       try {
         const parsed = JSON.parse(savedDateRange);
-        setDateRange(parsed);
+        onDateRangeChange(parsed);
       } catch (e) {
         console.warn('Failed to parse saved date range:', e);
       }
@@ -103,7 +164,7 @@ const DashboardControls = ({
   useEffect(() => {
     const savedBreakdown = localStorage.getItem('dashboard_breakdown');
     if (savedBreakdown) {
-      setBreakdown(savedBreakdown);
+      onBreakdownChange(savedBreakdown);
     }
   }, []);
 
@@ -194,21 +255,25 @@ const DashboardControls = ({
     }
   }, [dateRange, selectedConfig, breakdown]); // Remove onGetCurrentParams from dependencies
 
-  const handleDateChange = (field, value) => {
-    setDateRange(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const handlePresetChange = (presetId) => {
+    setSelectedPreset(presetId);
+    if (presetId !== 'custom') {
+      const preset = datePresets.find(p => p.id === presetId);
+      if (preset) {
+        onDateRangeChange({
+          start_date: preset.start_date,
+          end_date: preset.end_date
+        });
+      }
+    }
   };
 
-  const handleRefresh = () => {
-    if (onRefresh && selectedConfig) {
-      onRefresh({
-        ...dateRange,
-        config_key: selectedConfig,
-        breakdown: breakdown
-      });
-    }
+  const handleCustomDateChange = (field, value) => {
+    setSelectedPreset('custom');
+    onDateRangeChange({
+      ...dateRange,
+      [field]: value
+    });
   };
 
   const handleColumnToggle = (columnKey) => {
@@ -301,42 +366,66 @@ const DashboardControls = ({
       </div>
 
       {/* Controls Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-        {/* Date Range */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            <Calendar size={16} className="inline mr-2" />
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-end">
+        {/* Date Range Section - Takes up more space */}
+        <div className="xl:col-span-5">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             Date Range
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          
+          {/* Date Presets */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {datePresets.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => handlePresetChange(preset.id)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  selectedPreset === preset.id
+                    ? 'bg-blue-100 text-blue-700 border-2 border-blue-300 dark:bg-blue-900 dark:text-blue-300 dark:border-blue-600'
+                    : 'bg-gray-100 text-gray-700 border-2 border-transparent hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+            <button
+              onClick={() => handlePresetChange('custom')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                selectedPreset === 'custom'
+                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-300 dark:bg-blue-900 dark:text-blue-300 dark:border-blue-600'
+                  : 'bg-gray-100 text-gray-700 border-2 border-transparent hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+              }`}
+            >
+              Custom
+            </button>
+          </div>
+          
+          {/* Custom Date Inputs */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Start Date</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">From</label>
               <input
                 type="date"
                 value={dateRange.start_date}
-                onChange={(e) => handleDateChange('start_date', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md 
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                onChange={(e) => handleCustomDateChange('start_date', e.target.value)}
+                className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">End Date</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">To</label>
               <input
                 type="date"
                 value={dateRange.end_date}
-                onChange={(e) => handleDateChange('end_date', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md 
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                onChange={(e) => handleCustomDateChange('end_date', e.target.value)}
+                className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>
           </div>
         </div>
 
         {/* Configuration Dropdown */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <div className="xl:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             <Database size={16} className="inline mr-2" />
             Data Configuration
           </label>
@@ -379,31 +468,42 @@ const DashboardControls = ({
           )}
         </div>
 
-        {/* Breakdown Selection - NEW ANALYTICS API FEATURE */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        {/* Breakdown */}
+        <div className="xl:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             <Settings size={16} className="inline mr-2" />
             Data Breakdown
           </label>
           <select
             value={breakdown}
-            onChange={(e) => setBreakdown(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md 
-                     bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
-                     focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            onChange={(e) => onBreakdownChange(e.target.value)}
+            className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
-            <option value="all">All Data (Combined View)</option>
-            <option value="country">By Country</option>
-            <option value="region">By Region</option>
-            <option value="device">By Device Type</option>
+            <option value="all">All</option>
+            <option value="country">Country</option>
+            <option value="region">Region</option>
+            <option value="device">Device</option>
           </select>
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            <p>Controls which analytics table is used for data aggregation</p>
-          </div>
+        </div>
+
+        {/* Hierarchy */}
+        <div className="xl:col-span-3">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Hierarchy
+          </label>
+          <select
+            value={hierarchy}
+            onChange={(e) => onHierarchyChange(e.target.value)}
+            className="block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          >
+            <option value="campaign">Campaign → Ad Set → Ad</option>
+            <option value="adset">Ad Set → Ad</option>
+            <option value="ad">Ad Only</option>
+          </select>
         </div>
 
         {/* Column Selection */}
-        <div className="space-y-2 relative">
+        <div className="space-y-2 relative xl:col-span-2">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
             <Eye size={16} className="inline mr-2" />
             Column Visibility
@@ -506,21 +606,23 @@ const DashboardControls = ({
         </div>
 
         {/* Refresh Button */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Action
-          </label>
+        <div className="xl:col-span-2">
           <button
-            onClick={handleRefresh}
+            onClick={onRefresh}
             disabled={isLoading || !selectedConfig}
-            className={`w-full flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium
-                       ${(isLoading || !selectedConfig)
-                         ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                         : 'bg-blue-600 hover:bg-blue-700 text-white'
-                       } transition-colors duration-200`}
+            className={`w-full inline-flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors`}
           >
-            <RefreshCw size={16} className={`mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Refreshing...' : !selectedConfig ? 'Select Configuration' : 'Refresh Data'}
+            {(isLoading || !selectedConfig) ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh Data
+              </>
+            )}
           </button>
         </div>
       </div>
