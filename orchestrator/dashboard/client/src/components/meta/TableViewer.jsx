@@ -245,19 +245,21 @@ const TableViewer = () => {
     });
   };
 
-  const getTablesWithData = () => {
+  const getAdPerformanceTables = () => {
     if (!tablesOverview) return [];
     return Object.entries(tablesOverview)
       .filter(([tableName, tableInfo]) => 
-        tableName.startsWith('ad_performance_') && tableInfo.row_count > 0
+        tableName.startsWith('ad_performance_')
       )
       .sort(([a], [b]) => a.localeCompare(b));
   };
 
-  const getTablesWithoutData = () => {
+  const getOtherEmptyTables = () => {
     if (!tablesOverview) return [];
     return Object.entries(tablesOverview)
-      .filter(([tableName, tableInfo]) => tableInfo.row_count === 0)
+      .filter(([tableName, tableInfo]) => 
+        !tableName.startsWith('ad_performance_') && tableInfo.row_count === 0
+      )
       .sort(([a], [b]) => a.localeCompare(b));
   };
 
@@ -340,8 +342,8 @@ const TableViewer = () => {
     );
   }
 
-  const tablesWithData = getTablesWithData();
-  const tablesWithoutData = getTablesWithoutData();
+  const adPerformanceTables = getAdPerformanceTables();
+  const otherEmptyTables = getOtherEmptyTables();
 
   return (
     <div className="space-y-8">
@@ -488,7 +490,7 @@ const TableViewer = () => {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mr-3"></div>
               <span className="text-gray-600">Loading {selectedTable === 'composite_validation' ? 'all' : 'table'} metrics...</span>
             </div>
-          ) : aggregatedData ? (
+          ) : aggregatedData && aggregatedData.dates && aggregatedData.dates.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="min-w-full">
                   <thead className="bg-gray-50">
@@ -644,6 +646,16 @@ const TableViewer = () => {
                   </tbody>
                 </table>
               </div>
+            ) : aggregatedData ? (
+              <div className="flex items-center justify-center py-12 text-gray-500">
+                <div className="text-center">
+                  <div className="text-lg mb-2">📭</div>
+                  <div className="font-medium text-gray-700 mb-2">Empty Table</div>
+                  <div className="text-sm">
+                    This table contains no data yet. Use the "Fill Gaps" feature above to populate it with Meta advertising data.
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center justify-center py-12 text-gray-500">
                 <div className="text-center">
@@ -677,65 +689,79 @@ const TableViewer = () => {
         </div>
         
         <div className="p-8">
-          {/* Performance Tables with Data */}
+          {/* All Ad Performance Tables */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-            {tablesWithData.map(([tableName, tableInfo]) => (
-              <div 
-                key={tableName}
-                className={`p-6 border-2 rounded-lg cursor-pointer transition-all duration-200 ${
-                  selectedTable === tableName 
-                    ? 'border-blue-500 bg-blue-50 shadow-md' 
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
-                onClick={() => loadAggregatedData(tableName)}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <h4 className="font-semibold text-gray-900 text-sm">
-                    {tableName.replace('ad_performance_daily_', '').replace('ad_performance_daily', 'Base') || 'Base'}
-                  </h4>
-                  <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">
-                    {tableInfo.row_count.toLocaleString()} rows
-                  </span>
-                </div>
-                <div className="text-xs text-gray-600 mb-2">
-                  {tableInfo.columns.length} columns
-                </div>
-                <div className="text-xs text-gray-500 mb-2">
-                  {tableName === 'ad_performance_daily' 
-                    ? 'No breakdown dimension' 
-                    : `Breakdown by ${tableName.replace('ad_performance_daily_', '')}`
-                  }
-                </div>
-                {tableInfo.date_range && (
-                  <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                    <div className="font-medium">{tableInfo.available_days} days available</div>
-                    <div className="opacity-75">
-                      {(() => {
-                        const startDate = new Date(tableInfo.date_range.start);
-                        const endDate = new Date(tableInfo.date_range.end);
-                        const sameYear = startDate.getFullYear() === endDate.getFullYear();
-                        
-                        if (sameYear) {
-                          return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} to ${endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
-                        } else {
-                          return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
-                        }
-                      })()}
-                    </div>
+            {adPerformanceTables.map(([tableName, tableInfo]) => {
+              const isEmpty = tableInfo.row_count === 0;
+              return (
+                <div 
+                  key={tableName}
+                  className={`p-6 border-2 rounded-lg cursor-pointer transition-all duration-200 ${
+                    selectedTable === tableName 
+                      ? 'border-blue-500 bg-blue-50 shadow-md' 
+                      : isEmpty 
+                        ? 'border-orange-200 hover:border-orange-300 hover:bg-orange-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                  onClick={() => loadAggregatedData(tableName)}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h4 className="font-semibold text-gray-900 text-sm">
+                      {tableName.replace('ad_performance_daily_', '').replace('ad_performance_daily', 'Base') || 'Base'}
+                    </h4>
+                    <span className={`px-2 py-1 text-xs font-medium rounded ${
+                      isEmpty 
+                        ? 'bg-orange-100 text-orange-800' 
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {isEmpty ? 'Empty' : `${tableInfo.row_count.toLocaleString()} rows`}
+                    </span>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="text-xs text-gray-600 mb-2">
+                    {tableInfo.columns.length} columns
+                  </div>
+                  <div className="text-xs text-gray-500 mb-2">
+                    {tableName === 'ad_performance_daily' 
+                      ? 'No breakdown dimension' 
+                      : `Breakdown by ${tableName.replace('ad_performance_daily_', '')}`
+                    }
+                  </div>
+                  {isEmpty ? (
+                    <div className="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded">
+                      <div className="font-medium">No data available</div>
+                      <div className="opacity-75">Use "Fill Gaps" to populate</div>
+                    </div>
+                  ) : tableInfo.date_range ? (
+                    <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                      <div className="font-medium">{tableInfo.available_days} days available</div>
+                      <div className="opacity-75">
+                        {(() => {
+                          const startDate = new Date(tableInfo.date_range.start);
+                          const endDate = new Date(tableInfo.date_range.end);
+                          const sameYear = startDate.getFullYear() === endDate.getFullYear();
+                          
+                          if (sameYear) {
+                            return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} to ${endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+                          } else {
+                            return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+                          }
+                        })()}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Show/Hide Empty Tables */}
-          {tablesWithoutData.length > 0 && (
+          {/* Show/Hide Other Empty Tables */}
+          {otherEmptyTables.length > 0 && (
             <div className="border-t border-gray-200 pt-6">
               <button 
                 onClick={() => setShowAllTables(!showAllTables)}
                 className="flex items-center space-x-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
               >
-                <span>{showAllTables ? 'Hide' : 'Show'} empty tables ({tablesWithoutData.length})</span>
+                <span>{showAllTables ? 'Hide' : 'Show'} other empty tables ({otherEmptyTables.length})</span>
                 <span className="transform transition-transform duration-200" style={{transform: showAllTables ? 'rotate(180deg)' : 'rotate(0deg)'}}>
                   ▼
                 </span>
@@ -743,7 +769,7 @@ const TableViewer = () => {
               
               {showAllTables && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
-                  {tablesWithoutData.map(([tableName, tableInfo]) => (
+                  {otherEmptyTables.map(([tableName, tableInfo]) => (
                     <div 
                       key={tableName}
                       className="p-4 border border-gray-200 rounded-lg bg-gray-50"

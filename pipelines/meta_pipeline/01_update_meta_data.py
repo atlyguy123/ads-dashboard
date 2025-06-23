@@ -173,30 +173,56 @@ class MetaDataUpdater:
             most_recent_date: Most recent date in DB, or None if DB is empty
             
         Returns:
-            List of dates to update (including re-filling the most recent date)
+            List of dates to update (only missing dates + always yesterday)
         """
         today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
         if not most_recent_date:
             # If no data exists, start from 30 days ago
             start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             logger.info(f"📅 No existing data - will fill from {start_date} to {today}")
+            
+            # Generate all dates from start_date to today
+            dates_to_update = []
+            current_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(today, '%Y-%m-%d')
+            
+            while current_date <= end_date:
+                dates_to_update.append(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
         else:
-            # Re-fill the most recent date + fill any gaps to today
-            start_date = most_recent_date
-            logger.info(f"📅 Will re-fill from {start_date} (overwrite) to {today}")
+            logger.info(f"📅 Finding missing dates from {most_recent_date} to {today}")
+            
+            # Check existing dates in main table to find gaps
+            existing_dates = self.check_existing_dates_in_table('ad_performance_daily', most_recent_date, today)
+            
+            # Generate all dates from most_recent_date to today
+            all_dates = []
+            current_date = datetime.strptime(most_recent_date, '%Y-%m-%d')
+            end_date = datetime.strptime(today, '%Y-%m-%d')
+            
+            while current_date <= end_date:
+                all_dates.append(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+            
+            # Find missing dates
+            existing_dates_set = set(existing_dates)
+            missing_dates = [date for date in all_dates if date not in existing_dates_set]
+            
+            # Ensure yesterday is always included (but only once)
+            dates_to_update = list(set(missing_dates + [yesterday]))
+            dates_to_update.sort()  # Keep chronological order
+            
+            logger.info(f"📊 Missing dates found: {len(missing_dates)}")
+            if yesterday in missing_dates:
+                logger.info(f"📅 Yesterday ({yesterday}) is already missing and will be included")
+            else:
+                logger.info(f"📅 Yesterday ({yesterday}) exists but will be re-run to refresh data")
         
-        # Generate date list
-        dates_to_update = []
-        current_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(today, '%Y-%m-%d')
-        
-        while current_date <= end_date:
-            dates_to_update.append(current_date.strftime('%Y-%m-%d'))
-            current_date += timedelta(days=1)
-        
-        logger.info(f"📊 Dates to update: {len(dates_to_update)} days")
-        logger.debug(f"📋 Date range: {dates_to_update[0]} to {dates_to_update[-1]}")
+        logger.info(f"📊 Total dates to update: {len(dates_to_update)} days")
+        if dates_to_update:
+            logger.debug(f"📋 Date range: {dates_to_update[0]} to {dates_to_update[-1]}")
         
         return dates_to_update
     
@@ -580,7 +606,7 @@ class MetaDataUpdater:
                 logger.info(f"📊 Will process {len(dates_to_update)} dates (overwrite mode)")
             
             # Step 2: Process dates in chunks
-            chunk_size = 3
+            chunk_size = 1
             total_success = 0
             total_requests = 0
             
@@ -718,8 +744,8 @@ class MetaDataUpdater:
                 logger.info(f"🔍 Breakdown: {description}")
                 logger.info("-" * 50)
                 
-                # Process dates in chunks of 3 days to manage API rate limits
-                chunk_size = 3
+                # Process dates in chunks of 1 day to manage API rate limits
+                chunk_size = 1
                 
                 for i in range(0, len(dates_to_update), chunk_size):
                     chunk_dates = dates_to_update[i:i+chunk_size]
