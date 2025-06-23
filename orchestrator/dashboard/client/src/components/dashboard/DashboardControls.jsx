@@ -33,7 +33,8 @@ const AVAILABLE_COLUMNS = [
   { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
   { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
   { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue', defaultVisible: true },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
+  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }

@@ -284,6 +284,48 @@ CREATE TABLE continent_country (
     sub_region TEXT
 );
 
+-- ========================================
+-- BREAKDOWN MAPPING TABLES
+-- ========================================
+
+-- Meta-to-Mixpanel Country Mapping
+-- Maps Meta's country names to Mixpanel's ISO 3166-1 alpha-2 codes
+CREATE TABLE meta_country_mapping (
+    meta_country_name TEXT PRIMARY KEY,
+    mixpanel_country_code CHAR(2) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_seen_date DATE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mixpanel_country_code) REFERENCES continent_country(country_code)
+);
+
+-- Meta-to-Mixpanel Device Mapping
+-- Maps Meta's impression device types to Mixpanel's store categories
+CREATE TABLE meta_device_mapping (
+    meta_device_type TEXT PRIMARY KEY,
+    mixpanel_store_category TEXT NOT NULL,
+    device_category TEXT, -- 'mobile', 'tablet', 'desktop'
+    platform TEXT, -- 'ios', 'android', 'web'
+    is_active BOOLEAN DEFAULT TRUE,
+    last_seen_date DATE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Breakdown Data Cache
+-- Stores computed breakdown aggregations for faster dashboard loading
+CREATE TABLE breakdown_cache (
+    cache_key TEXT PRIMARY KEY,
+    breakdown_type TEXT NOT NULL, -- 'country', 'device', 'region'
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    meta_data TEXT, -- JSON blob of Meta breakdown data
+    mixpanel_data TEXT, -- JSON blob of Mixpanel breakdown data
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+);
+
 -- Saved Analysis Views
 -- Status: EXISTS - No changes needed
 CREATE TABLE saved_views (
@@ -354,6 +396,11 @@ CREATE INDEX idx_currency_fx_date ON currency_fx (date_day);
 CREATE INDEX idx_etl_job_status ON etl_job_control (status);
 CREATE INDEX idx_pipeline_history_name_time ON refresh_pipeline_history (pipeline_name, start_time);
 CREATE INDEX idx_dashboard_cache_expires ON dashboard_refresh_cache (expires_timestamp);
+
+-- Breakdown Mapping Performance Indexes
+CREATE INDEX idx_meta_country_mapping_active ON meta_country_mapping(is_active, meta_country_name);
+CREATE INDEX idx_meta_device_mapping_active ON meta_device_mapping(is_active, meta_device_type);
+CREATE INDEX idx_breakdown_cache_expires ON breakdown_cache(expires_at, cache_key);
 
 -- ========================================
 -- MERGE BENEFITS & RELATIONSHIPS

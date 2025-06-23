@@ -20,6 +20,9 @@ sys.path.insert(0, str(project_root))
 
 from utils.database_utils import get_database_path
 
+# Import the breakdown mapping service
+from .breakdown_mapping_service import BreakdownMappingService, BreakdownData
+
 # Import the modular calculator system
 from ..calculators import (
     CalculationInput, 
@@ -42,6 +45,7 @@ class QueryConfig:
     end_date: str
     group_by: Optional[str] = None  # 'campaign', 'adset', 'ad'
     include_mixpanel: bool = True
+    enable_breakdown_mapping: bool = True  # New: Enable Meta-Mixpanel mapping
 
 
 class AnalyticsQueryService:
@@ -61,6 +65,9 @@ class AnalyticsQueryService:
         self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
         self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_database_path('mixpanel_data')
         
+        # Initialize breakdown mapping service
+        self.breakdown_service = BreakdownMappingService(self.mixpanel_db_path)
+        
         # Table mapping based on breakdown parameter
         self.table_mapping = {
             'all': 'ad_performance_daily',
@@ -76,12 +83,17 @@ class AnalyticsQueryService:
     def execute_analytics_query(self, config: QueryConfig) -> Dict[str, Any]:
         """
         Execute analytics query with comprehensive error handling and fallback logic
+        Enhanced with breakdown mapping support
         """
         try:
-            logger.info(f"🔍 EXECUTE_ANALYTICS_QUERY CALLED - NEW CODE VERSION")
+            logger.info(f"🔍 EXECUTE_ANALYTICS_QUERY CALLED - BREAKDOWN MAPPING VERSION")
             # Get the appropriate table name based on breakdown
             table_name = self.get_table_name(config.breakdown)
-            logger.info(f"🔍 Table name: {table_name}")
+            logger.info(f"🔍 Table name: {table_name}, Breakdown: {config.breakdown}")
+            
+            # Check if this is a breakdown query that needs mapping
+            if config.enable_breakdown_mapping and config.breakdown in ['country', 'device']:
+                return self._execute_breakdown_query_with_mapping(config)
             
             # Check if Meta ad performance tables have data
             meta_data_count = self._get_meta_data_count(table_name)
@@ -107,7 +119,8 @@ class AnalyticsQueryService:
                     'table_used': table_name,
                     'record_count': len(structured_data),
                     'date_range': f"{config.start_date} to {config.end_date}",
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': datetime.now().isoformat(),
+                    'breakdown_mapping_enabled': config.enable_breakdown_mapping
                 }
             }
             
@@ -121,6 +134,107 @@ class AnalyticsQueryService:
                     'generated_at': datetime.now().isoformat()
                 }
             }
+    
+    def _execute_breakdown_query_with_mapping(self, config: QueryConfig) -> Dict[str, Any]:
+        """
+        Execute breakdown query with Meta-Mixpanel mapping
+        This provides unified breakdown data with proper mapping between platforms
+        """
+        try:
+            logger.info(f"🔍 Executing breakdown query with mapping: {config.breakdown}")
+            
+            # Get breakdown data using the mapping service
+            breakdown_data = self.breakdown_service.get_breakdown_data(
+                breakdown_type=config.breakdown,
+                start_date=config.start_date,
+                end_date=config.end_date,
+                group_by=config.group_by or 'campaign'
+            )
+            
+            # Convert BreakdownData objects to dashboard-compatible format
+            structured_data = []
+            
+            for bd in breakdown_data:
+                # Group by campaign/adset/ad and then by breakdown value
+                base_entity = {
+                    'id': f"{config.group_by}_{bd.meta_data.get('campaign_id', 'unknown')}",
+                    'entity_type': config.group_by,
+                    'campaign_id': bd.meta_data.get('campaign_id'),
+                    'campaign_name': bd.meta_data.get('campaign_name', 'Unknown Campaign'),
+                    'name': bd.meta_data.get('campaign_name', 'Unknown Campaign'),
+                    
+                    # Meta metrics
+                    'spend': bd.meta_data.get('spend', 0),
+                    'impressions': bd.meta_data.get('impressions', 0),
+                    'clicks': bd.meta_data.get('clicks', 0),
+                    'meta_trials_started': bd.meta_data.get('meta_trials', 0),
+                    'meta_purchases': bd.meta_data.get('meta_purchases', 0),
+                    
+                    # Mixpanel metrics
+                    'mixpanel_trials_started': bd.mixpanel_data.get('mixpanel_trials', 0),
+                    'mixpanel_purchases': bd.mixpanel_data.get('mixpanel_purchases', 0),
+                    'mixpanel_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
+                    
+                    # Combined metrics
+                    'estimated_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
+                    'estimated_roas': bd.combined_metrics.get('estimated_roas', 0),
+                    'trial_accuracy_ratio': bd.combined_metrics.get('trial_accuracy_ratio', 0),
+                    'purchase_accuracy_ratio': bd.combined_metrics.get('purchase_accuracy_ratio', 0),
+                    
+                    # Breakdown-specific data
+                    'breakdowns': [{
+                        'type': config.breakdown,
+                        'values': [{
+                            'name': bd.breakdown_value,
+                            'meta_value': bd.meta_data.get(config.breakdown),
+                            'mixpanel_value': bd.breakdown_value,
+                            **bd.meta_data,
+                            **bd.mixpanel_data,
+                            **bd.combined_metrics
+                        }]
+                    }],
+                    
+                    # Additional metadata
+                    'total_users': bd.mixpanel_data.get('total_users', 0),
+                    'children': []
+                }
+                
+                structured_data.append(base_entity)
+            
+            return {
+                'success': True,
+                'data': structured_data,
+                'metadata': {
+                    'query_config': config.__dict__,
+                    'table_used': f'breakdown_mapping_{config.breakdown}',
+                    'record_count': len(structured_data),
+                    'date_range': f"{config.start_date} to {config.end_date}",
+                    'generated_at': datetime.now().isoformat(),
+                    'breakdown_mapping_enabled': True,
+                    'breakdown_type': config.breakdown
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing breakdown query with mapping: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'metadata': {
+                    'query_config': config.__dict__,
+                    'generated_at': datetime.now().isoformat()
+                }
+            }
+    
+    def discover_breakdown_mappings(self) -> Dict[str, Any]:
+        """
+        Discover unmapped breakdown values and return mapping suggestions
+        """
+        try:
+            return self.breakdown_service.discover_and_update_mappings()
+        except Exception as e:
+            logger.error(f"Error discovering breakdown mappings: {e}")
+            return {'unmapped_countries': [], 'unmapped_devices': []}
     
     def _get_meta_data_count(self, table_name: str) -> int:
         """Check if Meta ad performance table has any data"""

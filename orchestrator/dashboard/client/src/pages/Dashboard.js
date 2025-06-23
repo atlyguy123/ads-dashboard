@@ -47,7 +47,8 @@ const AVAILABLE_COLUMNS = [
   { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
   { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
   { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Predictions)', defaultVisible: true },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
+  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
   { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
@@ -135,6 +136,7 @@ export const Dashboard = () => {
       mixpanel_purchases: true,
       mixpanel_revenue_usd: true,
       mixpanel_revenue_net: true,
+      estimated_revenue_adjusted: true,
       estimated_roas: true,
       profit: true,
       trial_accuracy_ratio: true
@@ -299,7 +301,7 @@ export const Dashboard = () => {
           'mixpanel_revenue_net', 'mixpanel_conversions_net_refunds', 'mixpanel_cost_per_trial', 'mixpanel_cost_per_purchase',
           'meta_cost_per_trial', 'meta_cost_per_purchase', 'click_to_trial_rate',
           'trial_conversion_rate', 'avg_trial_refund_rate', 'purchase_accuracy_ratio',
-          'purchase_refund_rate', 'estimated_revenue_usd', 'profit', 'estimated_roas'
+          'purchase_refund_rate', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'profit', 'estimated_roas'
         ];
         
         return {
@@ -531,8 +533,8 @@ export const Dashboard = () => {
         acc.totalSpend += item.spend || 0;
         acc.totalImpressions += item.impressions || 0;
         acc.totalClicks += item.clicks || 0;
-        // FIX: Use actual Mixpanel revenue instead of estimated revenue for dashboard summary
-        acc.totalRevenue += item.mixpanel_revenue_usd || 0;
+        // UPDATED: Use accuracy-adjusted estimated revenue for dashboard summary
+        acc.totalRevenue += item.estimated_revenue_adjusted || item.estimated_revenue_usd || 0;
         acc.totalProfit += item.profit || 0;
         return acc;
       }, {
@@ -728,7 +730,7 @@ export const Dashboard = () => {
                 <div className="flex items-center">
                   <TrendingUp className="h-8 w-8 text-green-500" />
                   <div className="ml-4">
-                                         <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Revenue</p>
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Estimated Revenue</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                       ${stats.totalRevenue.toLocaleString()}
                     </p>

@@ -494,6 +494,7 @@ export const DashboardGrid = ({
       case 'spend':
       case 'mixpanel_revenue_usd':
       case 'estimated_revenue_usd':
+      case 'estimated_revenue_adjusted':
       case 'mixpanel_revenue_net':
       case 'mixpanel_refunds_usd':
       case 'profit':
@@ -780,31 +781,110 @@ export const DashboardGrid = ({
     if (!row.breakdowns) return breakdownNodes;
     
     row.breakdowns.forEach(breakdown => {
+      // Enhanced breakdown header with mapping info
       breakdownNodes.push(
-        <tr key={`${row.id}-${breakdown.type}-header`} className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50">
-          <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/50 dark:bg-gray-900/50 z-10">
+        <tr key={`${row.id}-${breakdown.type}-header`} className="border-b border-gray-200 dark:border-gray-700 bg-blue-50/50 dark:bg-blue-900/50">
+          <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-900/50 z-10">
             <div className="flex items-center">
               <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
-              <span style={{ paddingLeft: `${(level + 1) * 20}px` }} className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {breakdown.type.charAt(0).toUpperCase() + breakdown.type.slice(1)}
+              <span style={{ paddingLeft: `${(level + 1) * 20}px` }} className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                📊 {breakdown.type.charAt(0).toUpperCase() + breakdown.type.slice(1)} Breakdown
+                {breakdown.values && breakdown.values.length > 0 && (
+                  <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                    ({breakdown.values.length} segments)
+                  </span>
+                )}
               </span>
             </div>
           </td>
           {visibleColumns.slice(1).map((column) => (
-            <td key={column.key} colSpan={1}></td>
+            <td key={column.key} className="px-3 py-1 text-center text-xs text-blue-600 dark:text-blue-400">
+              {column.key === 'name' ? 'Segment' : ''}
+            </td>
           ))}
         </tr>
       );
 
       breakdown.values.forEach((value, index) => {
         const calculatedValue = calculateDerivedValues(value);
+        
+        // Determine if this is a mapped breakdown value
+        const isMapped = value.meta_value && value.mixpanel_value && value.meta_value !== value.mixpanel_value;
+        const mappingInfo = isMapped ? `${value.meta_value} → ${value.mixpanel_value}` : value.name;
+        
         breakdownNodes.push(
-          <tr key={`${row.id}-${breakdown.type}-${index}`} className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-900/30 text-xs">
+          <tr key={`${row.id}-${breakdown.type}-${index}`} className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-900/30 text-xs hover:bg-blue-50/20 dark:hover:bg-blue-900/20">
             <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/30 dark:bg-gray-900/30 z-10">
               <div className="flex items-center">
                 <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
-                <span style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="text-gray-500 italic">
-                  {value.name}
+                <div style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="flex items-center space-x-2">
+                  <span className="text-gray-700 dark:text-gray-300">
+                    {mappingInfo}
+                  </span>
+                  {isMapped && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200" title="Meta-Mixpanel Mapping Applied">
+                      🔗
+                    </span>
+                  )}
+                  {value.total_users && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      ({value.total_users.toLocaleString()} users)
+                    </span>
+                  )}
+                </div>
+              </div>
+            </td>
+            {visibleColumns.slice(1).map((column) => {
+              if (column.key === 'campaign_name' || column.key === 'adset_name') {
+                return <td key={column.key} className="px-3 py-1"></td>;
+              }
+              
+              // Enhanced breakdown value rendering with mapping awareness
+              return (
+                <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right">
+                  <div className="flex flex-col">
+                    <span className={`${getFieldColor(column.key, calculatedValue[column.key])}`}>
+                      {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue))}
+                    </span>
+                    {/* Show accuracy ratios for trial/purchase metrics */}
+                    {(column.key === 'mixpanel_trials_started' && value.trial_accuracy_ratio !== undefined) && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {(value.trial_accuracy_ratio * 100).toFixed(1)}% accuracy
+                      </span>
+                    )}
+                    {(column.key === 'mixpanel_purchases' && value.purchase_accuracy_ratio !== undefined) && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {(value.purchase_accuracy_ratio * 100).toFixed(1)}% accuracy
+                      </span>
+                    )}
+                  </div>
+                </td>
+              );
+            })}
+          </tr>
+        );
+      });
+      
+      // Add summary row for breakdown if multiple values
+      if (breakdown.values && breakdown.values.length > 1) {
+        const summaryData = breakdown.values.reduce((acc, value) => {
+          Object.keys(value).forEach(key => {
+            if (typeof value[key] === 'number') {
+              acc[key] = (acc[key] || 0) + value[key];
+            }
+          });
+          return acc;
+        }, {});
+        
+        const calculatedSummary = calculateDerivedValues(summaryData);
+        
+        breakdownNodes.push(
+          <tr key={`${row.id}-${breakdown.type}-summary`} className="border-b border-gray-300 dark:border-gray-600 bg-blue-100/50 dark:bg-blue-800/50 text-xs font-medium">
+            <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-blue-100/50 dark:bg-blue-800/50 z-10">
+              <div className="flex items-center">
+                <span className="opacity-0 w-8"></span>
+                <span style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="text-blue-700 dark:text-blue-300 italic">
+                  📋 {breakdown.type} Total ({breakdown.values.length} segments)
                 </span>
               </div>
             </td>
@@ -813,14 +893,14 @@ export const DashboardGrid = ({
                 return <td key={column.key} className="px-3 py-1"></td>;
               }
               return (
-                <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right">
-                  {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue))}
+                <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right font-medium text-blue-700 dark:text-blue-300">
+                  {renderCellValue(calculatedSummary, column.key, false, getEventPriority(calculatedSummary))}
                 </td>
               );
             })}
           </tr>
         );
-      });
+      }
     });
     
     return breakdownNodes;

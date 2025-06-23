@@ -75,3 +75,8 @@ data/users/
 config.ini
 secrets.json orchestrator/dashboard/client/node_modules/.cache/
 orchestrator/dashboard/client/node_modules/.cache/
+# Database files - exclude from version control
+database/*.db-wal
+database/*.db-shm
+database/mixpanel_data.db-wal
+database/mixpanel_data.db-shm

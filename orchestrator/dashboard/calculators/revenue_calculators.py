@@ -129,7 +129,7 @@ class RevenueCalculators(BaseCalculator):
     @staticmethod
     def calculate_profit(calc_input: CalculationInput) -> float:
         """
-        Calculate profit (estimated revenue - spend).
+        Calculate profit (accuracy-adjusted estimated revenue - spend).
         
         Args:
             calc_input: Standardized calculation input containing raw record data
@@ -140,7 +140,65 @@ class RevenueCalculators(BaseCalculator):
         if not RevenueCalculators.validate_input(calc_input):
             return 0.0
             
-        estimated_revenue = RevenueCalculators.calculate_estimated_revenue_usd(calc_input)
+        # Use accuracy-adjusted estimated revenue for profit calculation
+        estimated_revenue = RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(calc_input)
         spend = calc_input.spend
         
-        return RevenueCalculators.safe_subtract(estimated_revenue, spend) 
+        return RevenueCalculators.safe_subtract(estimated_revenue, spend)
+    
+    @staticmethod
+    def calculate_estimated_revenue_with_accuracy_adjustment(calc_input: CalculationInput) -> float:
+        """
+        Calculate estimated revenue with accuracy ratio adjustment based on event priority.
+        
+        Logic:
+        1. Get base estimated revenue from user_product_metrics
+        2. Determine event priority (trials vs purchases dominance)
+        3. Apply appropriate accuracy ratio adjustment:
+           - If trials dominant: use trial accuracy ratio
+           - If purchases dominant: use purchase accuracy ratio
+           - If equal: default to trial accuracy ratio
+        4. Adjust revenue by dividing by (accuracy_ratio / 100) to compensate for Meta/Mixpanel dropoff
+        
+        Args:
+            calc_input: Standardized calculation input containing raw record data
+            
+        Returns:
+            float: Accuracy-adjusted estimated revenue in USD (rounded to 2 decimal places)
+        """
+        if not RevenueCalculators.validate_input(calc_input):
+            return 0.0
+            
+        # Import here to avoid circular imports
+        from .accuracy_calculators import AccuracyCalculators
+        
+        # Get base estimated revenue
+        estimated_revenue = RevenueCalculators.calculate_estimated_revenue_usd(calc_input)
+        
+        # Determine event priority based on which metric is dominant
+        mixpanel_trials = calc_input.mixpanel_trials_started
+        mixpanel_purchases = calc_input.mixpanel_purchases
+        
+        # Determine which accuracy ratio to use based on event priority
+        if mixpanel_trials == 0 and mixpanel_purchases == 0:
+            # Default to trial accuracy when both are zero
+            accuracy_ratio = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)
+        elif mixpanel_trials > mixpanel_purchases:
+            # Trials are dominant - use trial accuracy ratio
+            accuracy_ratio = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)
+        elif mixpanel_purchases > mixpanel_trials:
+            # Purchases are dominant - use purchase accuracy ratio
+            accuracy_ratio = AccuracyCalculators.calculate_purchase_accuracy_ratio(calc_input)
+        else:
+            # Equal or tie - default to trial accuracy ratio
+            accuracy_ratio = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)
+        
+        # Apply accuracy ratio adjustment if available and not 100%
+        if accuracy_ratio > 0 and accuracy_ratio != 100.0:
+            # Adjust estimated revenue by dividing by accuracy ratio (to account for Meta/Mixpanel dropoff)
+            # This compensates for the difference between Meta and Mixpanel event counts
+            adjusted_revenue = estimated_revenue / (accuracy_ratio / 100)
+            return RevenueCalculators.safe_round(adjusted_revenue)
+        else:
+            # No adjustment needed if accuracy ratio is 100% or unavailable
+            return estimated_revenue 

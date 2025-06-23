@@ -74,20 +74,31 @@ This folder contains a **modular calculation system** for all dashboard metrics.
 
 **🚨 CRITICAL: Clear Separation of Actual vs Estimated Revenue**
 
-| Function | Purpose | Source Data | Type |
-|----------|---------|-------------|------|
-| `calculate_mixpanel_revenue_usd()` | **ACTUAL** revenue from purchase events | `mixpanel_event.revenue_usd` from 'RC Initial purchase', 'RC Trial converted' | **ACTUAL** |
-| `calculate_mixpanel_refunds_usd()` | **ACTUAL** refunds from cancellation events | `mixpanel_event.revenue_usd` (cancellations) | **ACTUAL** |
-| `calculate_mixpanel_revenue_net()` | **ACTUAL** net revenue (actual revenue - actual refunds) | Calculated from actual values above | **ACTUAL** |
-| `calculate_estimated_revenue_usd()` | **ESTIMATED** revenue from predictions | `user_product_metrics.current_value` | **ESTIMATED** |
-| `calculate_profit()` | Profit calculation | `estimated_revenue - spend` | **CALCULATED** |
+| Function | Purpose | Logic |
+|----------|---------|-------|
+| `calculate_mixpanel_revenue_usd()` | ACTUAL revenue from events | Real Mixpanel purchase events (with 8-day logic) |
+| `calculate_mixpanel_refunds_usd()` | ACTUAL refunds from events | Real Mixpanel cancellation events |
+| `calculate_mixpanel_revenue_net()` | Net actual revenue | `actual_revenue - actual_refunds` |
+| `calculate_estimated_revenue_usd()` | Base estimated revenue | From `user_product_metrics.current_value` |
+| `calculate_estimated_revenue_with_accuracy_adjustment()` | **NEW**: Accuracy-adjusted estimated revenue | Base estimated revenue adjusted by trial/purchase accuracy ratio based on event priority |
+| `calculate_profit()` | Profit calculation | `accuracy_adjusted_estimated_revenue - spend` |
 
-**Key Differences:**
+#### **Key Changes to Revenue Calculation**
+- **Dashboard Summary**: Now uses `estimated_revenue_adjusted` instead of `mixpanel_revenue_usd`
+- **Profit Calculation**: Now uses accuracy-adjusted estimated revenue
+- **Event Priority Logic**: Determines whether to use trial or purchase accuracy ratio:
+  - If `mixpanel_trials > mixpanel_purchases`: Use trial accuracy ratio
+  - If `mixpanel_purchases > mixpanel_trials`: Use purchase accuracy ratio
+  - If equal or both zero: Default to trial accuracy ratio
+
+#### **Revenue Types Explained**
 - **ACTUAL**: Real money from events that actually happened
-- **ESTIMATED**: Predicted money based on user lifecycle models
+- **ESTIMATED (Base)**: Predicted money based on user lifecycle models
+- **ESTIMATED (Adjusted)**: **NEW**: Base estimated revenue adjusted by accuracy ratio to compensate for Meta/Mixpanel dropoff
 - **Dashboard Labels**: 
   - "Actual Revenue (Events)" = Real Mixpanel purchase events
-  - "Estimated Revenue (Predictions)" = Lifecycle-based predictions
+  - "Estimated Revenue (Base)" = Raw lifecycle-based predictions
+  - "Estimated Revenue (Adjusted)" = **NEW**: Accuracy-adjusted predictions (now used for dashboard summary)
   - "Net Actual Revenue" = Actual revenue minus actual refunds
 
 ### **ROAS Calculators** (`roas_calculators.py`)

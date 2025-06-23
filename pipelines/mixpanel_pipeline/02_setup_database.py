@@ -244,6 +244,34 @@ EXPECTED_TABLES = {
         'region': 'TEXT',
         'sub_region': 'TEXT'
     },
+    'meta_country_mapping': {
+        'meta_country_name': 'TEXT',
+        'mixpanel_country_code': 'CHAR',
+        'is_active': 'BOOLEAN',
+        'last_seen_date': 'DATE',
+        'created_at': 'DATETIME',
+        'updated_at': 'DATETIME'
+    },
+    'meta_device_mapping': {
+        'meta_device_type': 'TEXT',
+        'mixpanel_store_category': 'TEXT',
+        'device_category': 'TEXT',
+        'platform': 'TEXT',
+        'is_active': 'BOOLEAN',
+        'last_seen_date': 'DATE',
+        'created_at': 'DATETIME',
+        'updated_at': 'DATETIME'
+    },
+    'breakdown_cache': {
+        'cache_key': 'TEXT',
+        'breakdown_type': 'TEXT',
+        'start_date': 'DATE',
+        'end_date': 'DATE',
+        'meta_data': 'TEXT',
+        'mixpanel_data': 'TEXT',
+        'computed_at': 'DATETIME',
+        'expires_at': 'DATETIME'
+    },
     'saved_views': {
         'view_id': 'INTEGER',
         'view_name': 'TEXT',
@@ -410,8 +438,6 @@ def initialize_database_from_schema(conn: sqlite3.Connection):
             pass  # Connection might be in a bad state
         logger.error(f"Failed to initialize database schema: {e}")
         raise
-
-
 
 def get_current_database_structure(cursor: sqlite3.Cursor) -> Dict[str, Dict[str, str]]:
     """Get current database structure for comparison"""
