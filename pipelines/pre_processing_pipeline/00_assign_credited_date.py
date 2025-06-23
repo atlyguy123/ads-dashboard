@@ -71,6 +71,16 @@ def main():
         logger.info("🔄 Processing user-product combinations...")
         credited_dates = calculate_credited_dates(starter_events)
         
+        # Step 2b: Handle edge cases - users with conversions but no start events
+        logger.info("🔄 Handling edge cases (conversions without start events)...")
+        conversion_fallbacks = handle_conversion_fallbacks()
+        
+        # Merge the results (real start events take priority)
+        # Only add fallbacks for user-product pairs that don't have real start events
+        for key, fallback_date in conversion_fallbacks.items():
+            if key not in credited_dates:
+                credited_dates[key] = fallback_date
+        
         if not credited_dates:
             logger.warning("⚠️  No credited dates calculated. Nothing to update.")
             return True
@@ -174,6 +184,83 @@ def calculate_credited_dates(starter_events_df: pd.DataFrame) -> Dict[Tuple[str,
     
     logger.info(f"✅ Calculated credited dates for {len(credited_dates):,} user-product combinations")
     return credited_dates
+
+
+def handle_conversion_fallbacks() -> Dict[Tuple[str, str], str]:
+    """
+    Handle edge cases where users have RC Trial converted events but no start events.
+    For these cases, set credited_date to 8 days before the conversion event.
+    
+    Returns:
+        Dictionary mapping (distinct_id, product_id) tuples to credited_date strings for fallback cases
+    """
+    logger.info("🔄 Looking for conversions without start events...")
+    
+    # Query to find conversions that don't have corresponding start events
+    query = """
+    WITH conversion_events AS (
+        SELECT 
+            me.distinct_id,
+            CASE 
+                WHEN JSON_VALID(me.event_json) = 1 
+                THEN JSON_EXTRACT(me.event_json, '$.properties.product_id')
+                ELSE NULL
+            END as product_id,
+            me.event_time,
+            DATE(me.event_time, '-8 days') as calculated_credited_date
+        FROM mixpanel_event me 
+        WHERE me.event_name = 'RC Trial converted'
+        AND JSON_VALID(me.event_json) = 1
+        AND JSON_EXTRACT(me.event_json, '$.properties.product_id') IS NOT NULL
+        AND JSON_EXTRACT(me.event_json, '$.properties.product_id') != ''
+    ),
+    start_events AS (
+        SELECT DISTINCT
+            me.distinct_id,
+            JSON_EXTRACT(me.event_json, '$.properties.product_id') as product_id
+        FROM mixpanel_event me 
+        WHERE me.event_name IN ('RC Trial started', 'RC Initial purchase')
+        AND JSON_VALID(me.event_json) = 1
+        AND JSON_EXTRACT(me.event_json, '$.properties.product_id') IS NOT NULL
+    )
+    SELECT 
+        ce.distinct_id,
+        ce.product_id,
+        ce.calculated_credited_date
+    FROM conversion_events ce
+    LEFT JOIN start_events se ON ce.distinct_id = se.distinct_id AND ce.product_id = se.product_id
+    WHERE se.distinct_id IS NULL  -- Only conversions without start events
+    ORDER BY ce.distinct_id, ce.product_id, ce.event_time
+    """
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if df.empty:
+            logger.info("   No conversion fallbacks needed")
+            return {}
+        
+        fallback_dates = {}
+        
+        # Group by user-product and take earliest conversion (in case of multiple)
+        for (distinct_id, product_id), group in df.groupby(['distinct_id', 'product_id']):
+            earliest_fallback = group.iloc[0]  # Already ordered by event_time
+            credited_date = earliest_fallback['calculated_credited_date']
+            
+            fallback_dates[(distinct_id, product_id)] = credited_date
+            
+            # Log first few for debugging
+            if len(fallback_dates) <= 3:
+                logger.info(f"   FALLBACK: {distinct_id[:8]}... + {product_id} → {credited_date} (8 days before conversion)")
+        
+        logger.info(f"✅ Found {len(fallback_dates):,} conversion fallback cases")
+        return fallback_dates
+        
+    except Exception as e:
+        logger.error(f"❌ Error retrieving conversion fallbacks: {str(e)}")
+        return {}
 
 
 def update_credited_dates_in_db(credited_dates: Dict[Tuple[str, str], str]) -> bool:

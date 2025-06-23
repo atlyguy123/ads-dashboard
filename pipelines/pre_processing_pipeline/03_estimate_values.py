@@ -480,11 +480,26 @@ class ValueEstimator:
         try:
             # Find subscription start event - use the LAST conversion event (trial start OR initial purchase)
             # This handles complex user journeys like: trial → cancel → initial purchase
+            # NOTE: Edge cases (conversions without start events) are handled by 00_assign_credited_date.py
             start_event = None
             for event in reversed(events):  # Go backwards to find the last conversion event
                 if event['event_name'] in ['RC Trial started', 'RC Initial purchase']:
                     start_event = event
                     break
+            
+            # EDGE CASE: If no start event found, but we have a credited_date (from fallback logic)
+            # Create a synthetic start event based on the credited_date
+            if not start_event:
+                credited_date = self._get_credited_date_from_db(distinct_id, product_id)
+                if credited_date and credited_date != 'PLACEHOLDER_DATE':
+                    # Create synthetic start event based on credited date
+                    start_event = {
+                        'event_name': 'RC Trial started',  # Treat fallback as trial start
+                        'event_time': credited_date + 'T00:00:00Z',  # Use credited date as start time
+                        'revenue_usd': 0,
+                        'event_json': json.dumps({'properties': {'product_id': product_id}})
+                    }
+                    logger.debug(f"Created synthetic start event for {distinct_id} based on credited_date {credited_date}")
             
             if not start_event:
                 self.error_counts['no_subscription_start_event'] += 1
@@ -575,7 +590,18 @@ class ValueEstimator:
                 return 'trial_pending'  # Fallback if date parsing fails
                 
         elif event_name == 'RC Trial cancelled':
-            return 'trial_cancelled'
+            # FIX: Check if user converted before cancelling
+            # If they converted, treat this as a subscription cancellation, not trial cancellation
+            has_converted = any(event['event_name'] == 'RC Trial converted' for event in sorted_events)
+            
+            if has_converted:
+                # Check if this cancellation has negative revenue (refund)
+                revenue = last_event.get('revenue_usd', 0)
+                is_refund = revenue and float(revenue) < 0
+                return 'trial_converted_refunded' if is_refund else 'trial_converted_cancelled'
+            else:
+                # They cancelled before converting
+                return 'trial_cancelled'
         elif event_name == 'RC Trial converted':
             return 'trial_converted'
         elif event_name == 'RC Renewal':
@@ -786,6 +812,27 @@ class ValueEstimator:
             return event_json.get('properties', {}).get('product_id', '')
         except (json.JSONDecodeError, KeyError):
             return ''
+
+    def _get_credited_date_from_db(self, distinct_id: str, product_id: str) -> Optional[str]:
+        """Get credited_date from database for a specific user-product pair"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT credited_date
+                FROM user_product_metrics 
+                WHERE distinct_id = ? AND product_id = ?
+            """, (distinct_id, product_id))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            return row[0] if row and row[0] else None
+                
+        except Exception as e:
+            logger.error(f"Error getting credited date for {distinct_id}: {e}")
+            return None
 
     def _get_price_bucket_from_database(self, distinct_id: str, product_id: str) -> float:
         """

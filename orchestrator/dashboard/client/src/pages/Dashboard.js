@@ -35,8 +35,8 @@ const AVAILABLE_COLUMNS = [
   { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
   { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
   { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_refunds_usd', label: 'Refunds (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_revenue_usd', label: 'Revenue (Mixpanel)', defaultVisible: true },
+  { key: 'mixpanel_refunds_usd', label: 'Actual Refunds (Events)', defaultVisible: true },
+  { key: 'mixpanel_revenue_usd', label: 'Actual Revenue (Events)', defaultVisible: true },
   { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
   { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
   { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
@@ -47,8 +47,8 @@ const AVAILABLE_COLUMNS = [
   { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
   { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
   { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue', defaultVisible: true },
-  { key: 'mixpanel_revenue_net', label: 'Mixpanel Revenue', defaultVisible: true },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Predictions)', defaultVisible: true },
+  { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
@@ -343,24 +343,8 @@ export const Dashboard = () => {
     });
   };
 
-  // Filter and sort data
-  const processedData = useMemo(() => {
-    if (!dashboardData || dashboardData.length === 0) return [];
-    
-    // Apply text filter first
-    const filteredData = textFilter ? 
-      dashboardData.filter(row => 
-        filterRecursive([row]).length > 0
-      ) : dashboardData;
-    
-    // Apply sorting
-    const sortedData = sortData(filteredData, sortConfig);
-    
-    return sortedData;
-  }, [dashboardData, textFilter, sortConfig]);
-
   // Filter data based on text input
-  const filterRecursive = (items) => {
+  const filterRecursive = useCallback((items) => {
     if (!textFilter.trim()) return items;
     
     const filterText = textFilter.toLowerCase();
@@ -387,7 +371,23 @@ export const Dashboard = () => {
       
       return acc;
     }, []);
-  };
+  }, [textFilter]);
+
+  // Filter and sort data
+  const processedData = useMemo(() => {
+    if (!dashboardData || dashboardData.length === 0) return [];
+    
+    // Apply text filter first
+    const filteredData = textFilter ? 
+      dashboardData.filter(row => 
+        filterRecursive([row]).length > 0
+      ) : dashboardData;
+    
+    // Apply sorting
+    const sortedData = sortData(filteredData, sortConfig);
+    
+    return sortedData;
+  }, [dashboardData, textFilter, sortConfig, filterRecursive]);
 
   // Handle background data refresh (doesn't show main loading state)
   const handleBackgroundRefresh = useCallback(async () => {
@@ -531,7 +531,8 @@ export const Dashboard = () => {
         acc.totalSpend += item.spend || 0;
         acc.totalImpressions += item.impressions || 0;
         acc.totalClicks += item.clicks || 0;
-        acc.totalRevenue += item.estimated_revenue_usd || 0;
+        // FIX: Use actual Mixpanel revenue instead of estimated revenue for dashboard summary
+        acc.totalRevenue += item.mixpanel_revenue_usd || 0;
         acc.totalProfit += item.profit || 0;
         return acc;
       }, {

@@ -40,19 +40,55 @@ This folder contains a **modular calculation system** for all dashboard metrics.
 - [x] Test all calculations work correctly
 - [x] Error handling and input validation implemented
 
+### ✅ Phase 3: Revenue Clarity Fix Complete
+- [x] **FIXED CRITICAL ISSUE**: Separated actual vs estimated revenue
+- [x] Updated analytics service to use actual Mixpanel events for `mixpanel_revenue_usd`
+- [x] Updated frontend labels to be crystal clear:
+  - "Actual Revenue (Events)" vs "Estimated Revenue (Predictions)"
+  - "Net Actual Revenue" vs "Actual Refunds (Events)"
+- [x] Updated all documentation to reflect the separation
+- [x] No more confusion between "Revenue (Mixpanel)" and "Mixpanel Revenue"
+
+---
+
+## 🎯 **Revenue Metrics - What Each One Means**
+
+### **For Dashboard Users (Non-Technical)**
+
+| **Dashboard Column** | **What It Represents** | **Source** |
+|---------------------|-------------------------|------------|
+| **"Actual Revenue (Events)"** | Real money you received from customers who purchased | 'RC Initial purchase' + 'RC Trial converted' events |
+| **"Actual Refunds (Events)"** | Real money you refunded to customers who cancelled | Mixpanel cancellation events |
+| **"Net Actual Revenue"** | Real profit after refunds (Actual Revenue - Actual Refunds) | Calculated |
+| **"Estimated Revenue (Predictions)"** | Expected money based on current user behaviors | AI predictions |
+
+### **Key Difference:**
+- **ACTUAL** = Money that has already changed hands ✅
+- **ESTIMATED** = Money we predict will change hands based on user lifecycle 🔮
+
 ---
 
 ## 📊 Calculator Functions Reference
 
 ### **Revenue Calculators** (`revenue_calculators.py`)
 
-| Function | Purpose | Source Data |
-|----------|---------|-------------|
-| `calculate_mixpanel_revenue_usd()` | Revenue from Mixpanel events | `mixpanel_event.revenue_usd` with 8-day logic |
-| `calculate_mixpanel_refunds_usd()` | Refunds from cancellation events | `mixpanel_event.revenue_usd` (cancellations) |
-| `calculate_mixpanel_revenue_net()` | Net revenue (revenue - refunds) | Calculated from above |
-| `calculate_estimated_revenue_usd()` | Estimated revenue | `user_product_metrics.current_value` |
-| `calculate_profit()` | Profit calculation | `estimated_revenue - spend` |
+**🚨 CRITICAL: Clear Separation of Actual vs Estimated Revenue**
+
+| Function | Purpose | Source Data | Type |
+|----------|---------|-------------|------|
+| `calculate_mixpanel_revenue_usd()` | **ACTUAL** revenue from purchase events | `mixpanel_event.revenue_usd` from 'RC Initial purchase', 'RC Trial converted' | **ACTUAL** |
+| `calculate_mixpanel_refunds_usd()` | **ACTUAL** refunds from cancellation events | `mixpanel_event.revenue_usd` (cancellations) | **ACTUAL** |
+| `calculate_mixpanel_revenue_net()` | **ACTUAL** net revenue (actual revenue - actual refunds) | Calculated from actual values above | **ACTUAL** |
+| `calculate_estimated_revenue_usd()` | **ESTIMATED** revenue from predictions | `user_product_metrics.current_value` | **ESTIMATED** |
+| `calculate_profit()` | Profit calculation | `estimated_revenue - spend` | **CALCULATED** |
+
+**Key Differences:**
+- **ACTUAL**: Real money from events that actually happened
+- **ESTIMATED**: Predicted money based on user lifecycle models
+- **Dashboard Labels**: 
+  - "Actual Revenue (Events)" = Real Mixpanel purchase events
+  - "Estimated Revenue (Predictions)" = Lifecycle-based predictions
+  - "Net Actual Revenue" = Actual revenue minus actual refunds
 
 ### **ROAS Calculators** (`roas_calculators.py`)
 
