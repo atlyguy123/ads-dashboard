@@ -5,10 +5,12 @@ const ROASSparkline = ({
   entityType, 
   entityId, 
   currentROAS,
+  currentPerformanceImpact = null,
   conversionCount = 0,
   breakdown = 'all',
   startDate,
-  endDate 
+  endDate,
+  type = 'roas' // 'roas' or 'performance_impact'
 }) => {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -30,6 +32,27 @@ const ROASSparkline = ({
     }
     // >= 1.5
     return hasSignificantData ? 'text-green-600' : 'text-green-400';
+  };
+
+  // Get Performance Impact Score color (7-tier system matching main column)
+  const getPerformanceImpactColor = (score) => {
+    const value = parseFloat(score) || 0;
+    
+    if (value >= 7500) {
+      return 'text-purple-600'; // Purple
+    } else if (value >= 2500) {
+      return 'text-blue-600'; // Blue  
+    } else if (value >= 1000) {
+      return 'text-green-600'; // Green
+    } else if (value >= 500) {
+      return 'text-yellow-600'; // Yellow
+    } else if (value >= 200) {
+      return 'text-orange-600'; // Orange
+    } else if (value >= 50) {
+      return 'text-red-600'; // Red
+    } else {
+      return 'text-gray-600'; // Grey
+    }
   };
 
   // Load chart data
@@ -108,8 +131,22 @@ const ROASSparkline = ({
     return roas.toFixed(2);
   };
 
-  // Calculate current ROAS color (using conversionCount passed as prop)
-  const colorClass = getROASPerformanceColor(currentROAS, conversionCount);
+  // Format Performance Impact Score value
+  const formatPerformanceImpact = (value) => {
+    const score = parseFloat(value) || 0;
+    return score.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+
+  // Get formatted value based on type
+  const getFormattedValue = (value) => {
+    return type === 'performance_impact' ? formatPerformanceImpact(value) : formatROAS(value);
+  };
+
+  // Calculate current value and color based on type
+  const currentValue = type === 'performance_impact' ? currentPerformanceImpact : currentROAS;
+  const colorClass = type === 'performance_impact' 
+    ? getPerformanceImpactColor(currentValue)
+    : getROASPerformanceColor(currentROAS, conversionCount);
   
   // Check if we have enough valid data for sparkline
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
@@ -118,9 +155,9 @@ const ROASSparkline = ({
 
   return (
     <div className="flex items-center space-x-3 min-w-[120px] relative">
-      {/* ROAS Value */}
+      {/* Current Value Display */}
       <span className={`font-medium text-sm ${colorClass}`}>
-        {formatROAS(currentROAS)}
+        {getFormattedValue(currentValue)}
       </span>
       
       {/* Sparkline Area */}
@@ -140,7 +177,15 @@ const ROASSparkline = ({
             const height = 20;
             const padding = 2;
             
-            const values = chartData.map(d => parseFloat(d.daily_roas) || 0);
+            // Calculate values based on type
+            const values = chartData.map(d => {
+              if (type === 'performance_impact') {
+                const spend = parseFloat(d.daily_spend) || 0;
+                const roas = parseFloat(d.daily_roas) || 0;
+                return spend * (roas * roas); // spend × ROAS²
+              }
+              return parseFloat(d.daily_roas) || 0;
+            });
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
@@ -162,9 +207,9 @@ const ROASSparkline = ({
               const midY = (startY + endY) / 2;
               const midPoint = `${midX},${midY}`;
               
-              // Get colors for start and end points
-              const startROAS = values[i];
-              const endROAS = values[i + 1];
+              // Get colors for start and end points based on type
+              const startValue = values[i];
+              const endValue = values[i + 1];
               const startConversions = parseInt(chartData[i].daily_mixpanel_purchases) || 0;
               const endConversions = parseInt(chartData[i + 1].daily_mixpanel_purchases) || 0;
               
@@ -174,10 +219,10 @@ const ROASSparkline = ({
               
               const startColor = startIsInactive ? 
                 'text-gray-300 dark:text-gray-600' : 
-                getROASPerformanceColor(startROAS, startConversions);
+                (type === 'performance_impact' ? getPerformanceImpactColor(startValue) : getROASPerformanceColor(startValue, startConversions));
               const endColor = endIsInactive ? 
                 'text-gray-300 dark:text-gray-600' : 
-                getROASPerformanceColor(endROAS, endConversions);
+                (type === 'performance_impact' ? getPerformanceImpactColor(endValue) : getROASPerformanceColor(endValue, endConversions));
               
               // First half: from start point to midpoint (colored like start point)
               segments.push({
@@ -238,7 +283,7 @@ const ROASSparkline = ({
                     const isInactive = chartData[index].is_inactive || false;
                     const dayColor = isInactive ? 
                       'text-gray-300 dark:text-gray-600' : 
-                      getROASPerformanceColor(value, dayConversions);
+                      (type === 'performance_impact' ? getPerformanceImpactColor(value) : getROASPerformanceColor(value, dayConversions));
                     
                     return (
                       <circle
@@ -271,18 +316,28 @@ const ROASSparkline = ({
                     {(() => {
                       const dayData = chartData[hoveredPoint];
                       const spend = parseFloat(dayData.daily_spend) || 0;
-                      const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
                       const backendROAS = parseFloat(dayData.daily_roas) || 0;
+                      const performanceImpact = spend * (backendROAS * backendROAS);
                       
-                      // Display backend-calculated ROAS value directly
                       return (
                         <>
                           <div className="font-medium text-white">
                             {formatDate(dayData.date)}
                           </div>
-                          <div className={getROASPerformanceColor(backendROAS, dayData.daily_mixpanel_purchases || 0).replace('text-', 'text-').replace('600', '400')}>
-                            ROAS: {formatROAS(backendROAS)}
-                          </div>
+                          {type === 'performance_impact' ? (
+                            <div className={getPerformanceImpactColor(performanceImpact).replace('text-', 'text-').replace('600', '400')}>
+                              Performance Impact: {formatPerformanceImpact(performanceImpact)}
+                            </div>
+                          ) : (
+                            <div className={getROASPerformanceColor(backendROAS, dayData.daily_mixpanel_purchases || 0).replace('text-', 'text-').replace('600', '400')}>
+                              ROAS: {formatROAS(backendROAS)}
+                            </div>
+                          )}
+                          {type === 'performance_impact' && (
+                            <div className="text-gray-300 text-xs">
+                              ROAS: {formatROAS(backendROAS)} × Spend: ${spend.toFixed(2)}
+                            </div>
+                          )}
                         </>
                       );
                     })()}

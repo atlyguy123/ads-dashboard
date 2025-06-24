@@ -577,13 +577,7 @@ export const DashboardGrid = ({
       case 'estimated_roas':
         formattedValue = formatNumber(value, 2);
         break;
-      case 'performance_impact_score':
-        if (value !== undefined && value !== null && value > 0) {
-          formattedValue = formatNumber(value, 0);
-        } else {
-          formattedValue = '0';
-        }
-        break;
+
       case 'segment_accuracy_average':
         formattedValue = value || 'N/A';
         break;
@@ -660,6 +654,26 @@ export const DashboardGrid = ({
           breakdown={dashboardParams?.breakdown || 'all'}
           startDate={dashboardParams?.start_date || '2025-04-01'}
           endDate={dashboardParams?.end_date || '2025-04-10'}
+          type="roas"
+        />
+      );
+    }
+
+    // Special rendering for performance impact score column with sparkline
+    if (columnKey === 'performance_impact_score') {
+      // Extract the actual ID from the row.id field (format: "campaign_123", "adset_456", "ad_789")
+      const entityId = row.id ? row.id.split('_')[1] : null;
+      
+      return (
+        <ROASSparkline 
+          entityType={row.type}
+          entityId={entityId}
+          currentPerformanceImpact={value}
+          conversionCount={calculatedRow.mixpanel_purchases || 0}
+          breakdown={dashboardParams?.breakdown || 'all'}
+          startDate={dashboardParams?.start_date || '2025-04-01'}
+          endDate={dashboardParams?.end_date || '2025-04-10'}
+          type="performance_impact"
         />
       );
     }
