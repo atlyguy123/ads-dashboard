@@ -305,30 +305,51 @@ export const Dashboard = () => {
   const sortData = (data, sortConfig) => {
     if (!sortConfig.column) return data;
     
-    return [...data].sort((a, b) => {
-      let aValue = a[sortConfig.column];
-      let bValue = b[sortConfig.column];
+    // Hierarchical sorting: Sort not just the top level, but all children recursively
+    // This ensures that when sorting by Performance Impact Score (or any metric):
+    // - Campaigns are sorted by the metric
+    // - Adsets within each campaign are also sorted by the metric  
+    // - Ads within each adset are also sorted by the metric
+    // This provides consistent sorting throughout the entire hierarchy
+    const sortRecursively = (items) => {
+      const sorted = [...items].sort((a, b) => {
+        let aValue = a[sortConfig.column];
+        let bValue = b[sortConfig.column];
+        
+        // Handle undefined/null values
+        if (aValue == null && bValue == null) return 0;
+        if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
+        
+        // Handle numeric comparisons
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+        }
+        
+        // Handle string comparisons
+        const aStr = String(aValue).toLowerCase();
+        const bStr = String(bValue).toLowerCase();
+        
+        if (sortConfig.direction === 'asc') {
+          return aStr.localeCompare(bStr);
+        } else {
+          return bStr.localeCompare(aStr);
+        }
+      });
       
-      // Handle undefined/null values
-      if (aValue == null && bValue == null) return 0;
-      if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
-      
-      // Handle numeric comparisons
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
-      }
-      
-      // Handle string comparisons
-      const aStr = String(aValue).toLowerCase();
-      const bStr = String(bValue).toLowerCase();
-      
-      if (sortConfig.direction === 'asc') {
-        return aStr.localeCompare(bStr);
-      } else {
-        return bStr.localeCompare(aStr);
-      }
-    });
+      // Recursively sort children arrays
+      return sorted.map(item => {
+        if (item.children && item.children.length > 0) {
+          return {
+            ...item,
+            children: sortRecursively(item.children)
+          };
+        }
+        return item;
+      });
+    };
+    
+    return sortRecursively(data);
   };
 
   // Filter data based on text input

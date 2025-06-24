@@ -694,7 +694,7 @@ class AnalyticsQueryService:
                 # Format ads and add required fields
                 formatted_ads = []
                 for ad in ads:
-                    formatted_ad = self._format_record(ad, 'ad')
+                    formatted_ad = self._format_record(ad, 'ad', config)
                     formatted_ads.append(formatted_ad)
                 
                 adset['children'] = formatted_ads
@@ -719,7 +719,7 @@ class AnalyticsQueryService:
                     adset['estimated_revenue_usd'] += ad.get('estimated_revenue_usd', 0)
                     adset['total_attributed_users'] += ad.get('total_attributed_users', 0)
                 
-                formatted_adset = self._format_record(adset, 'adset')
+                formatted_adset = self._format_record(adset, 'adset', config)
                 if 'children' not in formatted_adset:
                     formatted_adset['children'] = []
                 formatted_adsets.append(formatted_adset)
@@ -748,7 +748,7 @@ class AnalyticsQueryService:
         # Format campaigns (now with aggregated Mixpanel data from children)
         formatted_campaigns = []
         for campaign in campaigns:
-            formatted_campaign = self._format_record(campaign, 'campaign')
+            formatted_campaign = self._format_record(campaign, 'campaign', config)
             if 'children' not in formatted_campaign:
                 formatted_campaign['children'] = []
             formatted_campaigns.append(formatted_campaign)
@@ -813,7 +813,7 @@ class AnalyticsQueryService:
             # Format ads
             formatted_ads = []
             for ad in ads:
-                formatted_ad = self._format_record(ad, 'ad')
+                formatted_ad = self._format_record(ad, 'ad', config)
                 formatted_ads.append(formatted_ad)
             
             adset['children'] = formatted_ads
@@ -840,7 +840,7 @@ class AnalyticsQueryService:
         # Format adsets (now with aggregated Mixpanel data from children)
         formatted_adsets = []
         for adset in adsets:
-            formatted_adset = self._format_record(adset, 'adset')
+            formatted_adset = self._format_record(adset, 'adset', config)
             if 'children' not in formatted_adset:
                 formatted_adset['children'] = []
             formatted_adsets.append(formatted_adset)
@@ -879,7 +879,7 @@ class AnalyticsQueryService:
         # Format ads
         formatted_ads = []
         for ad in ads:
-            formatted_ad = self._format_record(ad, 'ad')
+            formatted_ad = self._format_record(ad, 'ad', config)
             formatted_ads.append(formatted_ad)
         
         return formatted_ads
@@ -1213,7 +1213,7 @@ class AnalyticsQueryService:
         total_estimated_revenue = sum(record.get('estimated_revenue_usd', 0) for record in records)
         logger.info(f"🎯 FINAL: Added Mixpanel data totaling {total_trials} trials, {total_purchases} purchases, ACTUAL: ${total_actual_revenue:.2f}, ESTIMATED: ${total_estimated_revenue:.2f} (FIXED SEPARATION)")
     
-    def _format_record(self, record: Dict[str, Any], entity_type: str) -> Dict[str, Any]:
+    def _format_record(self, record: Dict[str, Any], entity_type: str, config: QueryConfig = None) -> Dict[str, Any]:
         """Format a record with the expected structure for the frontend"""
         
         # Create unique ID based on entity type
@@ -1282,7 +1282,12 @@ class AnalyticsQueryService:
         
         # === USE MODULAR CALCULATOR SYSTEM ===
         # Create standardized input for all calculations
-        calc_input = CalculationInput(raw_record=record)
+        calc_input = CalculationInput(
+            raw_record=record,
+            config=config.__dict__ if config else None,
+            start_date=config.start_date if config else None,
+            end_date=config.end_date if config else None
+        )
         
         # Calculate all derived metrics using the calculator functions
         formatted['trial_accuracy_ratio'] = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)

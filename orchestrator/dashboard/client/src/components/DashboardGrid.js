@@ -380,6 +380,8 @@ const getRoasColor = (roas) => {
   return 'text-red-600 dark:text-red-400';
 };
 
+
+
 // Sort indicator component
 const SortIndicator = ({ column, sortConfig }) => {
   if (sortConfig.column !== column) {
@@ -577,7 +579,13 @@ export const DashboardGrid = ({
       case 'estimated_roas':
         formattedValue = formatNumber(value, 2);
         break;
-
+      case 'performance_impact_score':
+        if (value !== undefined && value !== null && value > 0) {
+          formattedValue = formatNumber(value, 0);
+        } else {
+          formattedValue = '0';
+        }
+        break;
       case 'segment_accuracy_average':
         formattedValue = value || 'N/A';
         break;
@@ -590,21 +598,22 @@ export const DashboardGrid = ({
     if (columnKey === 'estimated_roas') {
       colorClass = getRoasColor(value);
     } else if (columnKey === 'performance_impact_score') {
-      // 7-tier performance impact score color system
+      // Static performance impact score color system (thresholds are always the same)
+      // Note: The score values themselves are time-scaled in the backend
       if (value >= 7500) {
-        colorClass = 'text-purple-600 dark:text-purple-400 font-bold'; // 10000+ Purple
+        colorClass = 'text-purple-600 dark:text-purple-400 font-bold'; // Exceptional
       } else if (value >= 2500) {
-        colorClass = 'text-blue-600 dark:text-blue-400 font-semibold'; // 5000-10000 Blue
+        colorClass = 'text-blue-600 dark:text-blue-400 font-semibold'; // Strong
       } else if (value >= 1000) {
-        colorClass = 'text-green-600 dark:text-green-400 font-semibold'; // 1000-5000 Green
+        colorClass = 'text-green-600 dark:text-green-400 font-semibold'; // Good
       } else if (value >= 500) {
-        colorClass = 'text-yellow-600 dark:text-yellow-400'; // 500-1000 Yellow
+        colorClass = 'text-yellow-600 dark:text-yellow-400'; // Moderate
       } else if (value >= 200) {
-        colorClass = 'text-orange-600 dark:text-orange-400'; // 200-500 Orange
+        colorClass = 'text-orange-600 dark:text-orange-400'; // Low
       } else if (value >= 50) {
-        colorClass = 'text-red-600 dark:text-red-400'; // 50-200 Red
+        colorClass = 'text-red-600 dark:text-red-400'; // Poor
       } else {
-        colorClass = 'text-gray-600 dark:text-gray-400'; // 0-50 Grey
+        colorClass = 'text-gray-600 dark:text-gray-400'; // Minimal
       }
     }
 
@@ -654,26 +663,6 @@ export const DashboardGrid = ({
           breakdown={dashboardParams?.breakdown || 'all'}
           startDate={dashboardParams?.start_date || '2025-04-01'}
           endDate={dashboardParams?.end_date || '2025-04-10'}
-          type="roas"
-        />
-      );
-    }
-
-    // Special rendering for performance impact score column with sparkline
-    if (columnKey === 'performance_impact_score') {
-      // Extract the actual ID from the row.id field (format: "campaign_123", "adset_456", "ad_789")
-      const entityId = row.id ? row.id.split('_')[1] : null;
-      
-      return (
-        <ROASSparkline 
-          entityType={row.type}
-          entityId={entityId}
-          currentPerformanceImpact={value}
-          conversionCount={calculatedRow.mixpanel_purchases || 0}
-          breakdown={dashboardParams?.breakdown || 'all'}
-          startDate={dashboardParams?.start_date || '2025-04-01'}
-          endDate={dashboardParams?.end_date || '2025-04-10'}
-          type="performance_impact"
         />
       );
     }

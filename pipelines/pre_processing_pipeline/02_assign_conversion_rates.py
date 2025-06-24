@@ -216,6 +216,12 @@ class ConversionRateProcessor:
             if all_updates:
                 self._batch_update_metrics(all_updates)
             
+            # Stage 5: CLEANUP - Assign default rates to any valid users still missing rates
+            logger.info("="*60)
+            logger.info("🧹 STARTING CLEANUP: Assigning default rates to missed valid users")
+            logger.info("="*60)
+            self._assign_default_rates_to_missed_users()
+            
             return True
         except Exception as e:
             logger.error(f"Error during user processing: {e}", exc_info=True)
@@ -620,6 +626,102 @@ class ConversionRateProcessor:
             logger.info(f"Successfully updated {cursor.rowcount} records.")
         except sqlite3.Error as e:
             logger.error(f"Database error during batch update: {e}")
+            self.conn.rollback()
+
+    def _assign_default_rates_to_missed_users(self) -> None:
+        """
+        CLEANUP PHASE: Assign default conversion rates to valid users who were missed.
+        This ensures ALL valid users have conversion rates, regardless of lifecycle validity.
+        """
+        cursor = self.conn.cursor()
+        
+        # Find valid users without conversion rates
+        cursor.execute("""
+            SELECT 
+                upm.user_product_id,
+                upm.distinct_id,
+                upm.product_id,
+                upm.valid_lifecycle
+            FROM user_product_metrics upm
+            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+            WHERE u.valid_user = TRUE 
+            AND upm.trial_conversion_rate IS NULL
+            ORDER BY upm.user_product_id
+        """)
+        
+        missed_users = cursor.fetchall()
+        
+        if not missed_users:
+            logger.info("🎉 No missed users found! All valid users already have conversion rates.")
+            return
+        
+        logger.info(f"🔍 Found {len(missed_users):,} valid users without conversion rates")
+        
+        # Analyze characteristics
+        cursor.execute("""
+            SELECT 
+                upm.valid_lifecycle,
+                COUNT(*) as count
+            FROM user_product_metrics upm
+            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+            WHERE u.valid_user = TRUE 
+            AND upm.trial_conversion_rate IS NULL
+            GROUP BY upm.valid_lifecycle
+        """)
+        
+        lifecycle_breakdown = cursor.fetchall()
+        logger.info(f"📊 Lifecycle validity breakdown:")
+        for row in lifecycle_breakdown:
+            logger.info(f"   valid_lifecycle={row['valid_lifecycle']}: {row['count']:,} users")
+        
+        # Assign default rates
+        accuracy_score = 'invalid_lifecycle_autoset_to_default'
+        logger.info(f"🔧 Assigning default rates with accuracy_score: '{accuracy_score}'")
+        logger.info(f"   Default rates: {DEFAULT_RATES}")
+        
+        try:
+            # Prepare batch update
+            updates = []
+            for user in missed_users:
+                updates.append((
+                    DEFAULT_RATES['trial_conversion_rate'],
+                    DEFAULT_RATES['trial_converted_to_refund_rate'], 
+                    DEFAULT_RATES['initial_purchase_to_refund_rate'],
+                    accuracy_score,
+                    user['user_product_id']
+                ))
+            
+            # Execute batch update
+            cursor.executemany("""
+                UPDATE user_product_metrics 
+                SET 
+                    trial_conversion_rate = ?,
+                    trial_converted_to_refund_rate = ?,
+                    initial_purchase_to_refund_rate = ?,
+                    accuracy_score = ?
+                WHERE user_product_id = ?
+            """, updates)
+            
+            self.conn.commit()
+            logger.info(f"✅ Successfully assigned default rates to {cursor.rowcount:,} missed users")
+            
+            # Final verification
+            cursor.execute("""
+                SELECT COUNT(*) as remaining
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE 
+                AND upm.trial_conversion_rate IS NULL
+            """)
+            
+            remaining = cursor.fetchone()['remaining']
+            if remaining == 0:
+                logger.info(f"🎉 SUCCESS! All valid users now have conversion rates!")
+            else:
+                logger.warning(f"⚠️  Still have {remaining:,} valid users without conversion rates!")
+                
+        except sqlite3.Error as e:
+            logger.error(f"❌ Database error during cleanup: {e}")
             self.conn.rollback()
 
 
