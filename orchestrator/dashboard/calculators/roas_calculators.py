@@ -51,8 +51,8 @@ class ROASCalculators(BaseCalculator):
         Calculate Performance Impact Score (spend × ROAS²) with time-frame scaling.
         
         This metric prioritizes campaigns with both high efficiency (ROAS) and meaningful scale (spend).
-        The ROAS is squared to exponentially reward exceptional performance while the spend component
-        ensures campaigns have meaningful scale worth optimizing.
+        The ROAS is capped at 4.0 before squaring to prevent over-weighting of extremely high ROAS values.
+        The spend component ensures campaigns have meaningful scale worth optimizing.
         
         The score is then scaled based on the time frame to maintain consistent thresholds:
         - 1 day: score × (7/1) = score × 7 (normalize up for less data)
@@ -60,7 +60,7 @@ class ROASCalculators(BaseCalculator):
         - 14 days: score × (7/14) = score × 0.5 (normalize down for more data)
         - etc.
         
-        Formula: (spend × ROAS²) × (7 / days)
+        Formula: (spend × min(ROAS, 4.0)²) × (7 / days)
         
         Args:
             calc_input: Standardized calculation input containing raw record data
@@ -78,8 +78,11 @@ class ROASCalculators(BaseCalculator):
         if spend <= 0:
             return 0.0
         
+        # Cap ROAS at 4.0 before squaring to prevent over-weighting
+        capped_roas = min(roas, 4.0)
+        
         # Calculate base impact score
-        base_impact_score = spend * (roas ** 2)
+        base_impact_score = spend * (capped_roas ** 2)
         
         # Calculate time frame scaling factor
         time_scale_factor = ROASCalculators._calculate_time_scale_factor(calc_input)

@@ -9,7 +9,8 @@ const ROASSparkline = ({
   breakdown = 'all',
   startDate,
   endDate,
-  isBreakdownEntity = false
+  isBreakdownEntity = false,
+  calculationTooltip = null
 }) => {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -128,9 +129,17 @@ const ROASSparkline = ({
   return (
     <div className="flex items-center space-x-3 min-w-[120px] relative">
       {/* ROAS Value */}
-      <span className={`font-medium text-sm ${colorClass}`}>
-        {formatROAS(currentROAS)}
-      </span>
+      {calculationTooltip ? (
+        React.cloneElement(calculationTooltip, {}, 
+          <span className={`font-medium text-sm ${colorClass}`}>
+            {formatROAS(currentROAS)}
+          </span>
+        )
+      ) : (
+        <span className={`font-medium text-sm ${colorClass}`}>
+          {formatROAS(currentROAS)}
+        </span>
+      )}
       
       {/* Sparkline Area */}
       <div className="min-w-[60px] relative">

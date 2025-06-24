@@ -73,6 +73,24 @@ export const Dashboard = () => {
     return localStorage.getItem('dashboard_text_filter') || '';
   });
 
+  // Breakdown filtering state
+  const [breakdownFilters, setBreakdownFilters] = useState(() => {
+    const saved = localStorage.getItem('dashboard_breakdown_filters');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved breakdown filters:', e);
+      }
+    }
+    return {
+      enabled: false,
+      type: 'limit', // 'limit' or 'spend'
+      limitCount: 10,
+      minSpend: 100
+    };
+  });
+
   
 
   
@@ -199,6 +217,10 @@ export const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('dashboard_text_filter', textFilter);
   }, [textFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_breakdown_filters', JSON.stringify(breakdownFilters));
+  }, [breakdownFilters]);
 
   useEffect(() => {
     localStorage.setItem('dashboard_column_order', JSON.stringify(columnOrder));
@@ -403,6 +425,55 @@ export const Dashboard = () => {
     }, []);
   }, [textFilter]);
 
+  // Apply breakdown filtering to data
+  const applyBreakdownFiltering = useCallback((data) => {
+    if (!breakdownFilters.enabled || breakdown === 'all') {
+      return data;
+    }
+
+    return data.map(row => {
+      if (!row.breakdowns || row.breakdowns.length === 0) {
+        return row;
+      }
+
+      const filteredBreakdowns = row.breakdowns.map(breakdownSection => {
+        let filteredValues = breakdownSection.values;
+
+        if (breakdownFilters.type === 'spend') {
+          // Filter by minimum spend
+          filteredValues = filteredValues.filter(value => 
+            (value.spend || 0) >= breakdownFilters.minSpend
+          );
+        } else if (breakdownFilters.type === 'limit') {
+          // Sort by current sort config and limit to top N
+          const sortColumn = sortConfig.column || 'spend';
+          const sortDirection = sortConfig.direction || 'desc';
+          
+          filteredValues = [...filteredValues].sort((a, b) => {
+            const aVal = a[sortColumn] || 0;
+            const bVal = b[sortColumn] || 0;
+            
+            if (sortDirection === 'desc') {
+              return bVal - aVal;
+            } else {
+              return aVal - bVal;
+            }
+          }).slice(0, breakdownFilters.limitCount);
+        }
+
+        return {
+          ...breakdownSection,
+          values: filteredValues
+        };
+      });
+
+      return {
+        ...row,
+        breakdowns: filteredBreakdowns
+      };
+    });
+  }, [breakdownFilters, breakdown, sortConfig]);
+
   // Filter and sort data
   const processedData = useMemo(() => {
     if (!dashboardData || dashboardData.length === 0) return [];
@@ -413,11 +484,14 @@ export const Dashboard = () => {
         filterRecursive([row]).length > 0
       ) : dashboardData;
     
+    // Apply breakdown filtering
+    const breakdownFilteredData = applyBreakdownFiltering(filteredData);
+    
     // Apply sorting
-    const sortedData = sortData(filteredData, sortConfig);
+    const sortedData = sortData(breakdownFilteredData, sortConfig);
     
     return sortedData;
-  }, [dashboardData, textFilter, sortConfig, filterRecursive]);
+  }, [dashboardData, textFilter, sortConfig, filterRecursive, applyBreakdownFiltering]);
 
   // Handle background data refresh (doesn't show main loading state)
   const handleBackgroundRefresh = useCallback(async () => {
@@ -698,9 +772,11 @@ export const Dashboard = () => {
             dateRange={dateRange}
             breakdown={breakdown}
             hierarchy={hierarchy}
+            breakdownFilters={breakdownFilters}
             onDateRangeChange={setDateRange}
             onBreakdownChange={setBreakdown}
             onHierarchyChange={setHierarchy}
+            onBreakdownFiltersChange={setBreakdownFilters}
             onRefresh={() => {
               // Use background refresh if we have existing data, otherwise regular refresh
               if (dashboardData && dashboardData.length > 0) {

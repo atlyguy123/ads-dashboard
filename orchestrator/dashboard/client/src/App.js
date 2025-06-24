@@ -10,6 +10,7 @@ import CohortAnalyzerV3RefactoredPage from './pages/CohortAnalyzerV3RefactoredPa
 import CohortPipelineDebugPage from './pages/CohortPipelineDebugPage';
 import ConversionProbabilityPage from './pages/ConversionProbabilityPageRefactored';
 import PricingManagementPage from './pages/PricingManagementPage';
+import DataPipelinePage from './pages/DataPipelinePage';
 
 // Debug pages
 import PipelineDebugPage from './pages/debug/PipelineDebugPage';
@@ -21,6 +22,7 @@ function App() {
   const [isDebugDropdownOpen, setIsDebugDropdownOpen] = useState(false);
 
   const debugItems = [
+    { path: '/data-pipeline', label: 'Data Pipeline', icon: '🔧' },
     { path: '/debug/conversion-rates', label: 'Conversion Rates Debug', icon: '📈' },
     { path: '/debug/price-bucket', label: 'Price Bucket Debug', icon: '💰' },
     { path: '/debug/value-estimation', label: 'Value Estimation Debug', icon: '📊' },
@@ -88,6 +90,7 @@ function App() {
           <Route path="/conversion-probability" element={<ConversionProbabilityPage />} />
           <Route path="/pricing-management" element={<PricingManagementPage />} />
           <Route path="/cohort-pipeline" element={<CohortPipelineDebugPage />} />
+          <Route path="/data-pipeline" element={<DataPipelinePage />} />
           
           {/* Pipeline Debug Routes */}
           <Route path="/pipeline-debug" element={<PipelineDebugPage />} />

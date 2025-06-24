@@ -40,9 +40,11 @@ const ImprovedDashboardControls = ({
   dateRange,
   breakdown,
   hierarchy,
+  breakdownFilters,
   onDateRangeChange,
   onBreakdownChange,
   onHierarchyChange,
+  onBreakdownFiltersChange,
   onRefresh,
   loading,
   backgroundLoading
@@ -229,6 +231,125 @@ const ImprovedDashboardControls = ({
             </button>
           </div>
         </div>
+
+        {/* Breakdown Filtering Section */}
+        {breakdown !== 'all' && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Breakdown Filtering
+              </label>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="breakdown-filter-enabled"
+                  checked={breakdownFilters?.enabled || false}
+                  onChange={(e) => onBreakdownFiltersChange({
+                    ...breakdownFilters,
+                    enabled: e.target.checked
+                  })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="breakdown-filter-enabled" className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                  Enable filtering
+                </label>
+              </div>
+            </div>
+
+            {breakdownFilters?.enabled && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Filter Type */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    Filter Type
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="breakdown-filter-type"
+                        value="limit"
+                        checked={breakdownFilters?.type === 'limit'}
+                        onChange={(e) => onBreakdownFiltersChange({
+                          ...breakdownFilters,
+                          type: e.target.value
+                        })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      />
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                        Limit to top results
+                      </span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="breakdown-filter-type"
+                        value="spend"
+                        checked={breakdownFilters?.type === 'spend'}
+                        onChange={(e) => onBreakdownFiltersChange({
+                          ...breakdownFilters,
+                          type: e.target.value
+                        })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      />
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                        Minimum spend filter
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Limit Count Input */}
+                {breakdownFilters?.type === 'limit' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Limit to top
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={breakdownFilters?.limitCount || 10}
+                      onChange={(e) => onBreakdownFiltersChange({
+                        ...breakdownFilters,
+                        limitCount: parseInt(e.target.value) || 10
+                      })}
+                      className="block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-2"
+                      placeholder="10"
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Show top {breakdownFilters?.limitCount || 10} results based on current sort
+                    </p>
+                  </div>
+                )}
+
+                {/* Minimum Spend Input */}
+                {breakdownFilters?.type === 'spend' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Minimum spend ($)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="10"
+                      value={breakdownFilters?.minSpend || 100}
+                      onChange={(e) => onBreakdownFiltersChange({
+                        ...breakdownFilters,
+                        minSpend: parseFloat(e.target.value) || 100
+                      })}
+                      className="block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-2"
+                      placeholder="100"
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Hide breakdown values with spend below ${breakdownFilters?.minSpend || 100}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

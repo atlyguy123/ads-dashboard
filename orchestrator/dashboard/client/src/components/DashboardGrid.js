@@ -390,6 +390,90 @@ const SortIndicator = ({ column, sortConfig }) => {
   );
 };
 
+// ROAS Calculation Tooltip Component
+const ROASCalculationTooltip = ({ row, roas, children }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+
+  const handleMouseEnter = (e) => {
+    setShowTooltip(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltipPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top - 10
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setShowTooltip(false);
+  };
+
+  // Calculate values for the tooltip
+  const calculatedRow = calculateDerivedValues(row);
+  const spend = calculatedRow.spend || 0;
+  const estimatedRevenue = calculatedRow.estimated_revenue_usd || 0;
+  const estimatedRevenueAdjusted = calculatedRow.estimated_revenue_adjusted || 0;
+  
+  // Event counts for accuracy calculation
+  const mixpanelTrials = calculatedRow.mixpanel_trials_started || 0;
+  const metaTrials = calculatedRow.meta_trials_started || 0;
+  const mixpanelPurchases = calculatedRow.mixpanel_purchases || 0;
+  const metaPurchases = calculatedRow.meta_purchases || 0;
+  
+  // Determine event priority and active accuracy ratio
+  const eventPriority = mixpanelTrials === 0 && mixpanelPurchases === 0 ? 'trials' :
+                       mixpanelTrials > mixpanelPurchases ? 'trials' :
+                       mixpanelPurchases > mixpanelTrials ? 'purchases' : 'equal';
+  
+  const trialAccuracyRatio = metaTrials > 0 ? (mixpanelTrials / metaTrials) * 100 : 0;
+  const purchaseAccuracyRatio = metaPurchases > 0 ? (mixpanelPurchases / metaPurchases) * 100 : 0;
+  const activeAccuracyRatio = eventPriority === 'purchases' ? purchaseAccuracyRatio : trialAccuracyRatio;
+  const activeAccuracyType = eventPriority === 'purchases' ? 'Purchase' : 'Trial';
+  
+  // Adjustment calculation
+  const adjustmentFactor = activeAccuracyRatio > 0 && activeAccuracyRatio !== 100 ? (activeAccuracyRatio / 100) : 1;
+
+  return (
+    <div className="relative">
+      <div 
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {children}
+      </div>
+      
+      {showTooltip && (
+        <div 
+          className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-4 min-w-80"
+          style={{
+            left: tooltipPosition.x - 160, // Center the tooltip
+            top: tooltipPosition.y - 10,
+            transform: 'translateY(-100%)'
+          }}
+        >
+          <div className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3 border-b border-gray-200 dark:border-gray-600 pb-2">
+            🎯 ROAS Calculation
+          </div>
+          
+          <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+            <div>1. Base Estimated Revenue: <span className="font-mono">{formatCurrency(estimatedRevenue)}</span></div>
+            <div>2. Active Accuracy Ratio ({activeAccuracyType}): <span className="font-mono">{formatNumber(activeAccuracyRatio, 2)}%</span></div>
+            <div>3. Adjustment Factor: <span className="font-mono">{formatNumber(adjustmentFactor, 3)}</span></div>
+            <div>4. Adjusted Revenue: <span className="font-mono">{formatCurrency(estimatedRevenueAdjusted)}</span></div>
+            <div>5. Spend: <span className="font-mono">{formatCurrency(spend)}</span></div>
+            
+            <div className="border-t border-gray-300 dark:border-gray-500 pt-2 mt-3 font-medium text-blue-600 dark:text-blue-400">
+              <div className="text-base">
+                🎯 ROAS: {formatCurrency(estimatedRevenueAdjusted)} ÷ {formatCurrency(spend)} = {formatNumber(roas, 2)}x
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const DashboardGrid = ({ 
   data = [], 
   rowOrder = [],
@@ -462,9 +546,42 @@ export const DashboardGrid = ({
 
 
 
-  // Helper function to render a cell value with proper formatting and coloring
-  // 📋 ADDING NEW COLUMN FORMATTING? Read: src/config/Column README.md for instructions
-  const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriority = null) => {
+  // Helper function to get country flag emoji
+const getCountryFlag = (countryCode) => {
+  const countryFlags = {
+    'AD': '🇦🇩', 'AE': '🇦🇪', 'AF': '🇦🇫', 'AG': '🇦🇬', 'AI': '🇦🇮', 'AL': '🇦🇱', 'AM': '🇦🇲', 'AO': '🇦🇴', 'AQ': '🇦🇶', 'AR': '🇦🇷', 'AS': '🇦🇸', 'AT': '🇦🇹', 'AU': '🇦🇺', 'AW': '🇦🇼', 'AX': '🇦🇽', 'AZ': '🇦🇿',
+    'BA': '🇧🇦', 'BB': '🇧🇧', 'BD': '🇧🇩', 'BE': '🇧🇪', 'BF': '🇧🇫', 'BG': '🇧🇬', 'BH': '🇧🇭', 'BI': '🇧🇮', 'BJ': '🇧🇯', 'BL': '🇧🇱', 'BM': '🇧🇲', 'BN': '🇧🇳', 'BO': '🇧🇴', 'BQ': '🇧🇶', 'BR': '🇧🇷', 'BS': '🇧🇸', 'BT': '🇧🇹', 'BV': '🇧🇻', 'BW': '🇧🇼', 'BY': '🇧🇾', 'BZ': '🇧🇿',
+    'CA': '🇨🇦', 'CC': '🇨🇨', 'CD': '🇨🇩', 'CF': '🇨🇫', 'CG': '🇨🇬', 'CH': '🇨🇭', 'CI': '🇨🇮', 'CK': '🇨🇰', 'CL': '🇨🇱', 'CM': '🇨🇲', 'CN': '🇨🇳', 'CO': '🇨🇴', 'CR': '🇨🇷', 'CU': '🇨🇺', 'CV': '🇨🇻', 'CW': '🇨🇼', 'CX': '🇨🇽', 'CY': '🇨🇾', 'CZ': '🇨🇿',
+    'DE': '🇩🇪', 'DJ': '🇩🇯', 'DK': '🇩🇰', 'DM': '🇩🇲', 'DO': '🇩🇴', 'DZ': '🇩🇿',
+    'EC': '🇪🇨', 'EE': '🇪🇪', 'EG': '🇪🇬', 'EH': '🇪🇭', 'ER': '🇪🇷', 'ES': '🇪🇸', 'ET': '🇪🇹',
+    'FI': '🇫🇮', 'FJ': '🇫🇯', 'FK': '🇫🇰', 'FM': '🇫🇲', 'FO': '🇫🇴', 'FR': '🇫🇷',
+    'GA': '🇬🇦', 'GB': '🇬🇧', 'GD': '🇬🇩', 'GE': '🇬🇪', 'GF': '🇬🇫', 'GG': '🇬🇬', 'GH': '🇬🇭', 'GI': '🇬🇮', 'GL': '🇬🇱', 'GM': '🇬🇲', 'GN': '🇬🇳', 'GP': '🇬🇵', 'GQ': '🇬🇶', 'GR': '🇬🇷', 'GS': '🇬🇸', 'GT': '🇬🇹', 'GU': '🇬🇺', 'GW': '🇬🇼', 'GY': '🇬🇾',
+    'HK': '🇭🇰', 'HM': '🇭🇲', 'HN': '🇭🇳', 'HR': '🇭🇷', 'HT': '🇭🇹', 'HU': '🇭🇺',
+    'ID': '🇮🇩', 'IE': '🇮🇪', 'IL': '🇮🇱', 'IM': '🇮🇲', 'IN': '🇮🇳', 'IO': '🇮🇴', 'IQ': '🇮🇶', 'IR': '🇮🇷', 'IS': '🇮🇸', 'IT': '🇮🇹',
+    'JE': '🇯🇪', 'JM': '🇯🇲', 'JO': '🇯🇴', 'JP': '🇯🇵',
+    'KE': '🇰🇪', 'KG': '🇰🇬', 'KH': '🇰🇭', 'KI': '🇰🇮', 'KM': '🇰🇲', 'KN': '🇰🇳', 'KP': '🇰🇵', 'KR': '🇰🇷', 'KW': '🇰🇼', 'KY': '🇰🇾', 'KZ': '🇰🇿',
+    'LA': '🇱🇦', 'LB': '🇱🇧', 'LC': '🇱🇨', 'LI': '🇱🇮', 'LK': '🇱🇰', 'LR': '🇱🇷', 'LS': '🇱🇸', 'LT': '🇱🇹', 'LU': '🇱🇺', 'LV': '🇱🇻', 'LY': '🇱🇾',
+    'MA': '🇲🇦', 'MC': '🇲🇨', 'MD': '🇲🇩', 'ME': '🇲🇪', 'MF': '🇲🇫', 'MG': '🇲🇬', 'MH': '🇲🇭', 'MK': '🇲🇰', 'ML': '🇲🇱', 'MM': '🇲🇲', 'MN': '🇲🇳', 'MO': '🇲🇴', 'MP': '🇲🇵', 'MQ': '🇲🇶', 'MR': '🇲🇷', 'MS': '🇲🇸', 'MT': '🇲🇹', 'MU': '🇲🇺', 'MV': '🇲🇻', 'MW': '🇲🇼', 'MX': '🇲🇽', 'MY': '🇲🇾', 'MZ': '🇲🇿',
+    'NA': '🇳🇦', 'NC': '🇳🇨', 'NE': '🇳🇪', 'NF': '🇳🇫', 'NG': '🇳🇬', 'NI': '🇳🇮', 'NL': '🇳🇱', 'NO': '🇳🇴', 'NP': '🇳🇵', 'NR': '🇳🇷', 'NU': '🇳🇺', 'NZ': '🇳🇿',
+    'OM': '🇴🇲',
+    'PA': '🇵🇦', 'PE': '🇵🇪', 'PF': '🇵🇫', 'PG': '🇵🇬', 'PH': '🇵🇭', 'PK': '🇵🇰', 'PL': '🇵🇱', 'PM': '🇵🇲', 'PN': '🇵🇳', 'PR': '🇵🇷', 'PS': '🇵🇸', 'PT': '🇵🇹', 'PW': '🇵🇼', 'PY': '🇵🇾',
+    'QA': '🇶🇦',
+    'RE': '🇷🇪', 'RO': '🇷🇴', 'RS': '🇷🇸', 'RU': '🇷🇺', 'RW': '🇷🇼',
+    'SA': '🇸🇦', 'SB': '🇸🇧', 'SC': '🇸🇨', 'SD': '🇸🇩', 'SE': '🇸🇪', 'SG': '🇸🇬', 'SH': '🇸🇭', 'SI': '🇸🇮', 'SJ': '🇸🇯', 'SK': '🇸🇰', 'SL': '🇸🇱', 'SM': '🇸🇲', 'SN': '🇸🇳', 'SO': '🇸🇴', 'SR': '🇸🇷', 'SS': '🇸🇸', 'ST': '🇸🇹', 'SV': '🇸🇻', 'SX': '🇸🇽', 'SY': '🇸🇾', 'SZ': '🇸🇿',
+    'TC': '🇹🇨', 'TD': '🇹🇩', 'TF': '🇹🇫', 'TG': '🇹🇬', 'TH': '🇹🇭', 'TJ': '🇹🇯', 'TK': '🇹🇰', 'TL': '🇹🇱', 'TM': '🇹🇲', 'TN': '🇹🇳', 'TO': '🇹🇴', 'TR': '🇹🇷', 'TT': '🇹🇹', 'TV': '🇹🇻', 'TW': '🇹🇼', 'TZ': '🇹🇿',
+    'UA': '🇺🇦', 'UG': '🇺🇬', 'UM': '🇺🇲', 'US': '🇺🇸', 'UY': '🇺🇾', 'UZ': '🇺🇿',
+    'VA': '🇻🇦', 'VC': '🇻🇨', 'VE': '🇻🇪', 'VG': '🇻🇬', 'VI': '🇻🇮', 'VN': '🇻🇳', 'VU': '🇻🇺',
+    'WF': '🇼🇫', 'WS': '🇼🇸',
+    'XK': '🇽🇰',
+    'YE': '🇾🇪', 'YT': '🇾🇹',
+    'ZA': '🇿🇦', 'ZM': '🇿🇲', 'ZW': '🇿🇼'
+  };
+  return countryFlags[countryCode?.toUpperCase()] || '';
+};
+
+// Helper function to render a cell value with proper formatting and coloring
+// 📋 ADDING NEW COLUMN FORMATTING? Read: src/config/Column README.md for instructions
+const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriority = null) => {
     const calculatedRow = calculateDerivedValues(row);
     let value = calculatedRow[columnKey];
     let formattedValue = 'N/A';
@@ -648,6 +765,15 @@ export const DashboardGrid = ({
       const isBreakdownRow = row.id && row.id.includes('_') && !row.id.startsWith('campaign_') && !row.id.startsWith('adset_') && !row.id.startsWith('ad_');
       
       if (isBreakdownRow) {
+        // DEBUG: Log breakdown row detection
+        console.log('🔥 SPARKLINE CELL DEBUG (BREAKDOWN):', {
+          rowId: row.id,
+          entityType: row.entity_type,
+          currentROAS: value,
+          isBreakdownDetected: true,
+          breakdown: dashboardParams?.breakdown
+        });
+        
         // For breakdown rows, show sparkline with breakdown entity info
         const [breakdownValue, parentEntityId] = row.id.split('_', 2);
         return (
@@ -660,18 +786,19 @@ export const DashboardGrid = ({
             startDate={dashboardParams?.start_date || '2025-04-01'}
             endDate={dashboardParams?.end_date || '2025-04-10'}
             isBreakdownEntity={true}  // Flag to indicate this is a breakdown entity
+            calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
           />
         );
       }
       
       // DEBUG: Log the row data to understand the structure
-      console.log('🔥 SPARKLINE CELL DEBUG:', {
+      console.log('🔥 SPARKLINE CELL DEBUG (REGULAR):', {
         rowId: row.id,
         rowType: row.type,
         entityId: entityId,
         hasSpend: !!row.spend,
         hasRevenue: !!calculatedRow.estimated_revenue_usd,
-        fullRow: row
+        isBreakdownDetected: false
       });
       
       return (
@@ -683,6 +810,7 @@ export const DashboardGrid = ({
           breakdown={dashboardParams?.breakdown || 'all'}
           startDate={dashboardParams?.start_date || '2025-04-01'}
           endDate={dashboardParams?.end_date || '2025-04-10'}
+          calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
         />
       );
     }
@@ -854,7 +982,7 @@ export const DashboardGrid = ({
                 <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
                 <div style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="flex items-center space-x-2">
                   <span className="text-gray-700 dark:text-gray-300">
-                    {mappingInfo}
+                    {getCountryFlag(value.name)} {mappingInfo}
                   </span>
                   {isMapped && (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200" title="Meta-Mixpanel Mapping Applied">
