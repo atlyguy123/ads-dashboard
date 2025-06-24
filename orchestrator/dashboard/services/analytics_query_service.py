@@ -65,8 +65,9 @@ class AnalyticsQueryService:
         self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
         self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_database_path('mixpanel_data')
         
-        # Initialize breakdown mapping service
-        self.breakdown_service = BreakdownMappingService(self.mixpanel_db_path)
+        # 🔥 CRITICAL FIX: Initialize breakdown mapping service with the CORRECT Meta database path
+        # The breakdown service needs meta_analytics.db for Meta data, not mixpanel_data.db!
+        self.breakdown_service = BreakdownMappingService(self.mixpanel_db_path, meta_db_path=self.meta_db_path)
         
         # Table mapping based on breakdown parameter
         self.table_mapping = {
@@ -155,13 +156,14 @@ class AnalyticsQueryService:
             structured_data = []
             
             for bd in breakdown_data:
-                # Group by campaign/adset/ad and then by breakdown value
+                # Map each breakdown data to our standard format
                 base_entity = {
-                    'id': f"{config.group_by}_{bd.meta_data.get('campaign_id', 'unknown')}",
-                    'entity_type': config.group_by,
+                    'id': f"{config.breakdown}_{bd.breakdown_value}_{bd.meta_data.get('campaign_id', 'unknown')}",
+                    'entity_type': config.breakdown,
                     'campaign_id': bd.meta_data.get('campaign_id'),
-                    'campaign_name': bd.meta_data.get('campaign_name', 'Unknown Campaign'),
-                    'name': bd.meta_data.get('campaign_name', 'Unknown Campaign'),
+                    'campaign_name': bd.meta_data.get('campaign_name'),
+                    'name': bd.breakdown_value,  # This is the breakdown value (country name, device type, etc.)
+                    'breakdown_value': bd.breakdown_value,  # 🔥 CRITICAL FIX: Add breakdown_value to top level
                     
                     # Meta metrics
                     'spend': bd.meta_data.get('spend', 0),
@@ -174,9 +176,11 @@ class AnalyticsQueryService:
                     'mixpanel_trials_started': bd.mixpanel_data.get('mixpanel_trials', 0),
                     'mixpanel_purchases': bd.mixpanel_data.get('mixpanel_purchases', 0),
                     'mixpanel_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
+                    'mixpanel_revenue_net': bd.mixpanel_data.get('mixpanel_revenue', 0),  # Same as gross for now
+                    'estimated_revenue_adjusted': bd.mixpanel_data.get('mixpanel_revenue', 0),  # Use actual revenue
+                    'profit': bd.mixpanel_data.get('mixpanel_revenue', 0) - bd.meta_data.get('spend', 0),
                     
-                    # Combined metrics
-                    'estimated_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
+                    # Calculated metrics
                     'estimated_roas': bd.combined_metrics.get('estimated_roas', 0),
                     'trial_accuracy_ratio': bd.combined_metrics.get('trial_accuracy_ratio', 0),
                     'purchase_accuracy_ratio': bd.combined_metrics.get('purchase_accuracy_ratio', 0),
@@ -1286,6 +1290,7 @@ class AnalyticsQueryService:
         
         # ROAS calculation with accuracy adjustment
         formatted['estimated_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
+        formatted['performance_impact_score'] = ROASCalculators.calculate_performance_impact_score(calc_input)
         
         # Cost calculations
         formatted['mixpanel_cost_per_trial'] = CostCalculators.calculate_mixpanel_cost_per_trial(calc_input)

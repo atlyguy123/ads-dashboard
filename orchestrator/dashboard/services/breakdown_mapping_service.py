@@ -27,8 +27,9 @@ class BreakdownData:
 class BreakdownMappingService:
     """Service for handling Meta-to-Mixpanel breakdown mapping and aggregation"""
     
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or get_database_path('mixpanel_data')
+    def __init__(self, mixpanel_db_path: str = None, meta_db_path: str = None):
+        self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
+        self.meta_db_path = meta_db_path or get_database_path('meta_analytics')
         
         # Initialize default mappings
         self._initialize_default_mappings()
@@ -36,7 +37,7 @@ class BreakdownMappingService:
     def _initialize_default_mappings(self):
         """Initialize default mapping tables with known mappings"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 
                 # Country mappings (common Meta → Mixpanel mappings)
@@ -126,7 +127,7 @@ class BreakdownMappingService:
     def get_country_mapping(self, meta_country: str) -> Optional[str]:
         """Get Mixpanel country code for Meta country name"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT mixpanel_country_code 
@@ -144,7 +145,7 @@ class BreakdownMappingService:
     def get_device_mapping(self, meta_device: str) -> Optional[Dict[str, str]]:
         """Get Mixpanel store category mapping for Meta device type"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT mixpanel_store_category, device_category, platform
@@ -168,36 +169,46 @@ class BreakdownMappingService:
     def discover_unmapped_values(self) -> Dict[str, List[str]]:
         """Discover unmapped countries and devices from actual Meta breakdown data"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.meta_db_path) as meta_conn:  # 🔥 CRITICAL FIX: Use Meta database
+                meta_cursor = meta_conn.cursor()
                 
-                # Find unmapped countries
-                cursor.execute("""
+                # Find unmapped countries from Meta data
+                meta_cursor.execute("""
                     SELECT DISTINCT country
                     FROM ad_performance_daily_country
-                    WHERE country NOT IN (
-                        SELECT meta_country_name 
-                        FROM meta_country_mapping 
-                        WHERE is_active = 1
-                    )
-                    AND country IS NOT NULL
+                    WHERE country IS NOT NULL
                     AND country != ''
                 """)
-                unmapped_countries = [row[0] for row in cursor.fetchall()]
+                meta_countries = [row[0] for row in meta_cursor.fetchall()]
                 
-                # Find unmapped devices  
-                cursor.execute("""
+                # Find unmapped devices from Meta data  
+                meta_cursor.execute("""
                     SELECT DISTINCT device
                     FROM ad_performance_daily_device
-                    WHERE device NOT IN (
-                        SELECT meta_device_type
-                        FROM meta_device_mapping
-                        WHERE is_active = 1
-                    )
-                    AND device IS NOT NULL
+                    WHERE device IS NOT NULL
                     AND device != ''
                 """)
-                unmapped_devices = [row[0] for row in cursor.fetchall()]
+                meta_devices = [row[0] for row in meta_cursor.fetchall()]
+            
+            # Check which ones are unmapped by querying the mapping tables in Mixpanel DB
+            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+                mixpanel_cursor = mixpanel_conn.cursor()
+                
+                # Get existing country mappings
+                mixpanel_cursor.execute("""
+                    SELECT meta_country_name FROM meta_country_mapping WHERE is_active = 1
+                """)
+                mapped_countries = {row[0] for row in mixpanel_cursor.fetchall()}
+                
+                # Get existing device mappings
+                mixpanel_cursor.execute("""
+                    SELECT meta_device_type FROM meta_device_mapping WHERE is_active = 1
+                """)
+                mapped_devices = {row[0] for row in mixpanel_cursor.fetchall()}
+                
+                # Find unmapped values
+                unmapped_countries = [c for c in meta_countries if c not in mapped_countries]
+                unmapped_devices = [d for d in meta_devices if d not in mapped_devices]
                 
                 return {
                     'countries': unmapped_countries,
@@ -211,7 +222,7 @@ class BreakdownMappingService:
     def discover_and_update_mappings(self):
         """Discover new breakdown values from Meta data and suggest mappings"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 
                 # Discover new countries
@@ -288,15 +299,15 @@ class BreakdownMappingService:
     def _get_country_breakdown_data(self, start_date: str, end_date: str, group_by: str) -> List[BreakdownData]:
         """Get country breakdown data with Meta-Mixpanel mapping"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            # 🔥 CRITICAL FIX: Query Meta data from the correct database
+            with sqlite3.connect(self.meta_db_path) as meta_conn:
+                meta_cursor = meta_conn.cursor()
                 
-                # Get Meta data with country mapping
+                # Get Meta data with country info
                 if group_by == 'campaign':
                     meta_query = """
                         SELECT 
                             m.country as meta_country,
-                            mcm.mixpanel_country_code as mixpanel_country,
                             m.campaign_id,
                             m.campaign_name,
                             SUM(m.spend) as spend,
@@ -305,73 +316,85 @@ class BreakdownMappingService:
                             SUM(m.meta_trials) as meta_trials,
                             SUM(m.meta_purchases) as meta_purchases
                         FROM ad_performance_daily_country m
-                        LEFT JOIN meta_country_mapping mcm ON m.country = mcm.meta_country_name
                         WHERE m.date BETWEEN ? AND ?
-                        GROUP BY m.country, mcm.mixpanel_country_code, m.campaign_id, m.campaign_name
+                        GROUP BY m.country, m.campaign_id, m.campaign_name
                         ORDER BY SUM(m.spend) DESC
                     """
                     
-                    cursor.execute(meta_query, (start_date, end_date))
-                    meta_results = cursor.fetchall()
+                    meta_cursor.execute(meta_query, (start_date, end_date))
+                    meta_results = meta_cursor.fetchall()
+            
+            # Query mapping tables and Mixpanel data from the correct database
+            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+                mixpanel_cursor = mixpanel_conn.cursor()
+                
+                breakdown_data = []
+                
+                for row in meta_results:
+                    meta_country, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
                     
-                    breakdown_data = []
+                    # Get country mapping
+                    mixpanel_cursor.execute("""
+                        SELECT mixpanel_country_code FROM meta_country_mapping 
+                        WHERE meta_country_name = ? AND is_active = 1
+                    """, (meta_country,))
                     
-                    for row in meta_results:
-                        meta_country, mixpanel_country, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
-                        
-                        if not mixpanel_country:
-                            logger.warning(f"No mapping found for Meta country: {meta_country}")
-                            continue
-                        
-                        # Get corresponding Mixpanel data
-                        mixpanel_query = """
-                            SELECT 
-                                COUNT(DISTINCT u.distinct_id) as total_users,
-                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
-                            FROM mixpanel_user u
-                            LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
-                            WHERE u.country = ? AND e.abi_campaign_id = ?
-                        """
-                        
-                        cursor.execute(mixpanel_query, (
-                            start_date, end_date, start_date, end_date, start_date, end_date,
-                            mixpanel_country, campaign_id
-                        ))
-                        
-                        mixpanel_result = cursor.fetchone()
-                        total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
-                        
-                        # Create breakdown data object
-                        breakdown_data.append(BreakdownData(
-                            breakdown_type='country',
-                            breakdown_value=mixpanel_country,
-                            meta_data={
-                                'country': meta_country,
-                                'campaign_id': campaign_id,
-                                'campaign_name': campaign_name,
-                                'spend': float(spend or 0),
-                                'impressions': int(impressions or 0),
-                                'clicks': int(clicks or 0),
-                                'meta_trials': int(meta_trials or 0),
-                                'meta_purchases': int(meta_purchases or 0)
-                            },
-                            mixpanel_data={
-                                'country': mixpanel_country,
-                                'total_users': int(total_users or 0),
-                                'mixpanel_trials': int(mixpanel_trials or 0),
-                                'mixpanel_purchases': int(mixpanel_purchases or 0),
-                                'mixpanel_revenue': float(mixpanel_revenue or 0)
-                            },
-                            combined_metrics={
-                                'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
-                                'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
-                                'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
-                            }
-                        ))
+                    mapping_result = mixpanel_cursor.fetchone()
+                    if not mapping_result:
+                        logger.warning(f"No mapping found for Meta country: {meta_country}")
+                        continue
                     
-                    return breakdown_data
+                    mixpanel_country = mapping_result[0]
+                    
+                    # Get corresponding Mixpanel data
+                    mixpanel_query = """
+                        SELECT 
+                            COUNT(DISTINCT u.distinct_id) as total_users,
+                            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                        FROM mixpanel_user u
+                        LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+                        WHERE u.country = ? AND u.abi_campaign_id = ?
+                    """
+                    
+                    mixpanel_cursor.execute(mixpanel_query, (
+                        start_date, end_date, start_date, end_date, start_date, end_date,
+                        mixpanel_country, campaign_id
+                    ))
+                    
+                    mixpanel_result = mixpanel_cursor.fetchone()
+                    total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
+                    
+                    # Create breakdown data object
+                    breakdown_data.append(BreakdownData(
+                        breakdown_type='country',
+                        breakdown_value=mixpanel_country,
+                        meta_data={
+                            'country': meta_country,
+                            'campaign_id': campaign_id,
+                            'campaign_name': campaign_name,
+                            'spend': float(spend or 0),
+                            'impressions': int(impressions or 0),
+                            'clicks': int(clicks or 0),
+                            'meta_trials': int(meta_trials or 0),
+                            'meta_purchases': int(meta_purchases or 0)
+                        },
+                        mixpanel_data={
+                            'country': mixpanel_country,
+                            'total_users': int(total_users or 0),
+                            'mixpanel_trials': int(mixpanel_trials or 0),
+                            'mixpanel_purchases': int(mixpanel_purchases or 0),
+                            'mixpanel_revenue': float(mixpanel_revenue or 0)
+                        },
+                        combined_metrics={
+                            'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
+                            'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
+                            'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
+                        }
+                    ))
+                
+                return breakdown_data
                 
         except Exception as e:
             logger.error(f"Error getting country breakdown data: {e}")
@@ -380,17 +403,15 @@ class BreakdownMappingService:
     def _get_device_breakdown_data(self, start_date: str, end_date: str, group_by: str) -> List[BreakdownData]:
         """Get device breakdown data with Meta-Mixpanel mapping"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            # 🔥 CRITICAL FIX: Query Meta data from the correct database
+            with sqlite3.connect(self.meta_db_path) as meta_conn:
+                meta_cursor = meta_conn.cursor()
                 
-                # Get Meta data with device mapping
+                # Get Meta data with device info
                 if group_by == 'campaign':
                     meta_query = """
                         SELECT 
                             m.device as meta_device,
-                            mdm.mixpanel_store_category as mixpanel_store,
-                            mdm.device_category,
-                            mdm.platform,
                             m.campaign_id,
                             m.campaign_name,
                             SUM(m.spend) as spend,
@@ -399,77 +420,91 @@ class BreakdownMappingService:
                             SUM(m.meta_trials) as meta_trials,
                             SUM(m.meta_purchases) as meta_purchases
                         FROM ad_performance_daily_device m
-                        LEFT JOIN meta_device_mapping mdm ON m.device = mdm.meta_device_type
                         WHERE m.date BETWEEN ? AND ?
-                        GROUP BY m.device, mdm.mixpanel_store_category, mdm.device_category, mdm.platform, m.campaign_id, m.campaign_name
+                        GROUP BY m.device, m.campaign_id, m.campaign_name
                         ORDER BY SUM(m.spend) DESC
                     """
                     
-                    cursor.execute(meta_query, (start_date, end_date))
-                    meta_results = cursor.fetchall()
+                    meta_cursor.execute(meta_query, (start_date, end_date))
+                    meta_results = meta_cursor.fetchall()
+            
+            # Query mapping tables and Mixpanel data from the correct database
+            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+                mixpanel_cursor = mixpanel_conn.cursor()
+                
+                breakdown_data = []
+                
+                for row in meta_results:
+                    meta_device, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
                     
-                    breakdown_data = []
+                    # Get device mapping
+                    mixpanel_cursor.execute("""
+                        SELECT mixpanel_store_category, device_category, platform
+                        FROM meta_device_mapping 
+                        WHERE meta_device_type = ? AND is_active = 1
+                    """, (meta_device,))
                     
-                    for row in meta_results:
-                        meta_device, mixpanel_store, device_category, platform, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
-                        
-                        if not mixpanel_store:
-                            logger.warning(f"No mapping found for Meta device: {meta_device}")
-                            continue
-                        
-                        # Get corresponding Mixpanel data
-                        mixpanel_query = """
-                            SELECT 
-                                COUNT(DISTINCT upm.distinct_id) as total_users,
-                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
-                            FROM user_product_metrics upm
-                            LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
-                            WHERE upm.store = ? AND e.abi_campaign_id = ?
-                        """
-                        
-                        cursor.execute(mixpanel_query, (
-                            start_date, end_date, start_date, end_date, start_date, end_date,
-                            mixpanel_store, campaign_id
-                        ))
-                        
-                        mixpanel_result = cursor.fetchone()
-                        total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
-                        
-                        # Create breakdown data object
-                        breakdown_data.append(BreakdownData(
-                            breakdown_type='device',
-                            breakdown_value=mixpanel_store,
-                            meta_data={
-                                'device': meta_device,
-                                'device_category': device_category,
-                                'platform': platform,
-                                'campaign_id': campaign_id,
-                                'campaign_name': campaign_name,
-                                'spend': float(spend or 0),
-                                'impressions': int(impressions or 0),
-                                'clicks': int(clicks or 0),
-                                'meta_trials': int(meta_trials or 0),
-                                'meta_purchases': int(meta_purchases or 0)
-                            },
-                            mixpanel_data={
-                                'store': mixpanel_store,
-                                'device_category': device_category,
-                                'platform': platform,
-                                'total_users': int(total_users or 0),
-                                'mixpanel_trials': int(mixpanel_trials or 0),
-                                'mixpanel_purchases': int(mixpanel_purchases or 0),
-                                'mixpanel_revenue': float(mixpanel_revenue or 0)
-                            },
-                            combined_metrics={
-                                'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
-                                'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
-                                'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
-                            }
-                        ))
+                    mapping_result = mixpanel_cursor.fetchone()
+                    if not mapping_result:
+                        logger.warning(f"No mapping found for Meta device: {meta_device}")
+                        continue
                     
-                    return breakdown_data
+                    mixpanel_store, device_category, platform = mapping_result
+                    
+                    # Get corresponding Mixpanel data
+                    mixpanel_query = """
+                        SELECT 
+                            COUNT(DISTINCT upm.distinct_id) as total_users,
+                            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                        FROM user_product_metrics upm
+                        LEFT JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                        LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
+                        WHERE upm.store = ? AND u.abi_campaign_id = ?
+                    """
+                    
+                    mixpanel_cursor.execute(mixpanel_query, (
+                        start_date, end_date, start_date, end_date, start_date, end_date,
+                        mixpanel_store, campaign_id
+                    ))
+                    
+                    mixpanel_result = mixpanel_cursor.fetchone()
+                    total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
+                    
+                    # Create breakdown data object
+                    breakdown_data.append(BreakdownData(
+                        breakdown_type='device',
+                        breakdown_value=mixpanel_store,
+                        meta_data={
+                            'device': meta_device,
+                            'device_category': device_category,
+                            'platform': platform,
+                            'campaign_id': campaign_id,
+                            'campaign_name': campaign_name,
+                            'spend': float(spend or 0),
+                            'impressions': int(impressions or 0),
+                            'clicks': int(clicks or 0),
+                            'meta_trials': int(meta_trials or 0),
+                            'meta_purchases': int(meta_purchases or 0)
+                        },
+                        mixpanel_data={
+                            'store': mixpanel_store,
+                            'device_category': device_category,
+                            'platform': platform,
+                            'total_users': int(total_users or 0),
+                            'mixpanel_trials': int(mixpanel_trials or 0),
+                            'mixpanel_purchases': int(mixpanel_purchases or 0),
+                            'mixpanel_revenue': float(mixpanel_revenue or 0)
+                        },
+                        combined_metrics={
+                            'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
+                            'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
+                            'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
+                        }
+                    ))
+                
+                return breakdown_data
                 
         except Exception as e:
             logger.error(f"Error getting device breakdown data: {e}")
@@ -478,7 +513,7 @@ class BreakdownMappingService:
     def _get_cached_breakdown(self, cache_key: str) -> Optional[List[BreakdownData]]:
         """Get cached breakdown data if valid"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT meta_data, mixpanel_data, computed_at, expires_at
@@ -501,7 +536,7 @@ class BreakdownMappingService:
                             end_date: str, breakdown_data: List[BreakdownData]):
         """Cache breakdown data for faster subsequent requests"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 
                 # Cache for 1 hour

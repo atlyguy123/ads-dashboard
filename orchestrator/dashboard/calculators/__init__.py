@@ -19,6 +19,7 @@ Each calculator is standalone and handles specific types of calculations.
 
 📈 ROAS_CALCULATORS.PY
 - calculate_estimated_roas: ROAS with trial accuracy ratio adjustment
+- calculate_performance_impact_score: Performance Impact Score (spend × ROAS²)
 
 🎯 ACCURACY_CALCULATORS.PY
 - calculate_trial_accuracy_ratio: (Mixpanel trials / Meta trials) * 100

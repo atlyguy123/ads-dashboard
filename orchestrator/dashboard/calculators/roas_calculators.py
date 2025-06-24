@@ -43,4 +43,34 @@ class ROASCalculators(BaseCalculator):
             return 0.0
         
         roas = adjusted_revenue / spend
-        return ROASCalculators.safe_round(roas, 2) 
+        return ROASCalculators.safe_round(roas, 2)
+    
+    @staticmethod
+    def calculate_performance_impact_score(calc_input: CalculationInput) -> float:
+        """
+        Calculate Performance Impact Score (spend × ROAS²).
+        
+        This metric prioritizes campaigns with both high efficiency (ROAS) and meaningful scale (spend).
+        The ROAS is squared to exponentially reward exceptional performance while the spend component
+        ensures campaigns have meaningful scale worth optimizing.
+        
+        Formula: spend × ROAS²
+        
+        Args:
+            calc_input: Standardized calculation input containing raw record data
+            
+        Returns:
+            float: Performance Impact Score (spend × ROAS²)
+        """
+        if not ROASCalculators.validate_input(calc_input):
+            return 0.0
+            
+        spend = calc_input.spend
+        roas = ROASCalculators.calculate_estimated_roas(calc_input)
+        
+        # Can't calculate impact without spend
+        if spend <= 0:
+            return 0.0
+        
+        impact_score = spend * (roas ** 2)
+        return ROASCalculators.safe_round(impact_score, 2) 

@@ -577,6 +577,13 @@ export const DashboardGrid = ({
       case 'estimated_roas':
         formattedValue = formatNumber(value, 2);
         break;
+      case 'performance_impact_score':
+        if (value !== undefined && value !== null && value > 0) {
+          formattedValue = formatNumber(value, 0);
+        } else {
+          formattedValue = '0';
+        }
+        break;
       case 'segment_accuracy_average':
         formattedValue = value || 'N/A';
         break;
@@ -584,10 +591,27 @@ export const DashboardGrid = ({
         formattedValue = value || 'N/A';
     }
 
-    // Apply special styling for ROAS columns
+    // Apply special styling for ROAS and performance columns
     let colorClass = getFieldColor(columnKey, value);
     if (columnKey === 'estimated_roas') {
       colorClass = getRoasColor(value);
+    } else if (columnKey === 'performance_impact_score') {
+      // 7-tier performance impact score color system
+      if (value >= 7500) {
+        colorClass = 'text-purple-600 dark:text-purple-400 font-bold'; // 10000+ Purple
+      } else if (value >= 2500) {
+        colorClass = 'text-blue-600 dark:text-blue-400 font-semibold'; // 5000-10000 Blue
+      } else if (value >= 1000) {
+        colorClass = 'text-green-600 dark:text-green-400 font-semibold'; // 1000-5000 Green
+      } else if (value >= 500) {
+        colorClass = 'text-yellow-600 dark:text-yellow-400'; // 500-1000 Yellow
+      } else if (value >= 200) {
+        colorClass = 'text-orange-600 dark:text-orange-400'; // 200-500 Orange
+      } else if (value >= 50) {
+        colorClass = 'text-red-600 dark:text-red-400'; // 50-200 Red
+      } else {
+        colorClass = 'text-gray-600 dark:text-gray-400'; // 0-50 Grey
+      }
     }
 
     // Check if this column should be grayed out based on event priority
@@ -597,7 +621,7 @@ export const DashboardGrid = ({
 
     // Add pipeline update styling for key metrics
     const pipelineUpdatedClass = isPipelineUpdated && 
-      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'estimated_roas', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
+      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'estimated_roas', 'performance_impact_score', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
         ? 'font-bold text-green-600 dark:text-green-400' : '';
 
     // Special rendering for accuracy column with tooltip

@@ -287,7 +287,7 @@ export const Dashboard = () => {
           'mixpanel_revenue_net', 'mixpanel_conversions_net_refunds', 'mixpanel_cost_per_trial', 'mixpanel_cost_per_purchase',
           'meta_cost_per_trial', 'meta_cost_per_purchase', 'click_to_trial_rate',
           'trial_conversion_rate', 'avg_trial_refund_rate', 'purchase_accuracy_ratio',
-          'purchase_refund_rate', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'profit', 'estimated_roas'
+          'purchase_refund_rate', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'profit', 'estimated_roas', 'performance_impact_score'
         ];
         
         return {
@@ -393,7 +393,8 @@ export const Dashboard = () => {
         start_date: dateRange.start_date,
         end_date: dateRange.end_date,
         breakdown: breakdown,
-        group_by: hierarchy
+        group_by: hierarchy,
+        enable_breakdown_mapping: true
       });
       
       if (response.success) {
@@ -433,7 +434,8 @@ export const Dashboard = () => {
         start_date: dateRange.start_date,
         end_date: dateRange.end_date,
         breakdown: breakdown,
-        group_by: hierarchy  // Fix parameter name to match backend API
+        group_by: hierarchy,
+        enable_breakdown_mapping: true
       });
       
       if (response.success) {

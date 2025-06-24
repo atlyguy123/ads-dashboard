@@ -45,6 +45,7 @@ export const AVAILABLE_COLUMNS = [
   { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
+  { key: 'performance_impact_score', label: 'Performance Impact Score', defaultVisible: true },
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
 ];
 
