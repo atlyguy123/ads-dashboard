@@ -11,6 +11,7 @@ import CohortPipelineDebugPage from './pages/CohortPipelineDebugPage';
 import ConversionProbabilityPage from './pages/ConversionProbabilityPageRefactored';
 import PricingManagementPage from './pages/PricingManagementPage';
 import DataPipelinePage from './pages/DataPipelinePage';
+import DataPipelineDebugPage from './pages/DataPipelineDebugPage';
 
 // Debug pages
 import PipelineDebugPage from './pages/debug/PipelineDebugPage';
@@ -91,6 +92,7 @@ function App() {
           <Route path="/pricing-management" element={<PricingManagementPage />} />
           <Route path="/cohort-pipeline" element={<CohortPipelineDebugPage />} />
           <Route path="/data-pipeline" element={<DataPipelinePage />} />
+          <Route path="/data-pipeline/debug" element={<DataPipelineDebugPage />} />
           
           {/* Pipeline Debug Routes */}
           <Route path="/pipeline-debug" element={<PipelineDebugPage />} />

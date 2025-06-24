@@ -1,10 +1,17 @@
 {
-  "name": "repo-to-prompt",
+  "name": "analytics-dashboard",
   "version": "1.0.0",
-  "type": "module",
-  "description": "A utility to generate documentation from a codebase",
-  "main": "repo-to-prompt.js",
+  "description": "Full-stack analytics dashboard with background job processing",
+  "main": "orchestrator/app.py",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
-    "generate": "node repo-to-prompt.js"
-  }
+    "build": "./heroku-build.sh",
+    "start": "cd orchestrator && python app.py",
+    "postinstall": "cd orchestrator/dashboard/client && npm install"
+  },
+  "dependencies": {},
+  "devDependencies": {}
 } 

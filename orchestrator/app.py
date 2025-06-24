@@ -34,7 +34,17 @@ app.register_blueprint(debug_bp)
 app.register_blueprint(meta_bp)
 
 # Enable CORS for all routes to handle cross-origin requests
-CORS(app, origins=['http://localhost:3000', 'http://localhost:5001', 'http://localhost:5678'], 
+# Allow Heroku domains in production
+allowed_origins = ['http://localhost:3000', 'http://localhost:5001', 'http://localhost:5678']
+if os.getenv('FLASK_ENV') == 'production':
+    heroku_app_name = os.getenv('HEROKU_APP_NAME')
+    if heroku_app_name:
+        allowed_origins.extend([
+            f'https://{heroku_app_name}.herokuapp.com',
+            f'http://{heroku_app_name}.herokuapp.com'
+        ])
+
+CORS(app, origins=allowed_origins, 
      allow_headers=['Content-Type', 'Authorization'], 
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
@@ -1477,6 +1487,14 @@ def mixpanel_debug_user_events():
 # The dashboard blueprint handles /api/dashboard/analytics/chart-data properly
 
 if __name__ == '__main__':
+    # Initialize database structure if needed (especially for Heroku)
+    if os.getenv('FLASK_ENV') == 'production':
+        try:
+            from database_init import init_all_databases
+            init_all_databases()
+        except Exception as e:
+            print(f"Warning: Database initialization failed: {e}")
+    
     init_db()
     runner = PipelineRunner()
     host = os.getenv('HOST', '0.0.0.0')

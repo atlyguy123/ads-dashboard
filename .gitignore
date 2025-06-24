@@ -23,11 +23,83 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
 venv/
-env/
 ENV/
+env/
 .venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# React build (we'll build this on deployment)
+orchestrator/dashboard/client/build/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Database temporary files (keep schema.sql but exclude temp db files)
+*.db-journal
+*.db-wal
+*.db-shm
+last_daily_run.json
+
+# Environment files (these should be set via Heroku config)
+.env
+.env.local
+.env.production
+
+# Exclude large database files (will be recreated from schema)
+database/*.db
+database/*.db.backup
+database/*copy.db
+
+# Keep database schema and structure files
+!database/schema.sql
+!database/*.sql
 
 # Environment Variables
 .env
@@ -43,13 +115,6 @@ ENV/
 # Logs
 *.log
 logs/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
