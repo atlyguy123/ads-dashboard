@@ -127,32 +127,41 @@ class DatabaseManager:
         if not path.exists():
             return False
             
-        # Check for database directory
-        database_dir = path / "database"
-        if not database_dir.exists():
-            return False
-            
-        # Check for at least one expected database file
-        for config in self.DATABASE_CONFIGS.values():
-            db_path = database_dir / config['filename']
-            if db_path.exists():
-                return True
-                
-        return False
+        # In production environments (like Heroku), database directory may not exist initially
+        # Check for other project indicators instead
+        required_indicators = [
+            "orchestrator",  # Main app directory
+            "utils",         # Utils directory
+            "requirements.txt"  # Requirements file
+        ]
+        
+        indicators_found = 0
+        for indicator in required_indicators:
+            if (path / indicator).exists():
+                indicators_found += 1
+        
+        # If we find at least 2 indicators, consider it valid
+        # This is more flexible than requiring the database directory
+        return indicators_found >= 2
     
     def _discover_databases(self) -> None:
         """
         Discover and validate all database paths.
         
         Populates the internal database paths cache.
+        In production, creates database directory if it doesn't exist.
         """
         database_dir = self._project_root / "database"
         
+        # Create database directory if it doesn't exist (for production deployments)
         if not database_dir.exists():
-            raise DatabasePathError(
-                f"Database directory not found at {database_dir}. "
-                f"Project root: {self._project_root}"
-            )
+            try:
+                database_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created database directory at {database_dir}")
+            except Exception as e:
+                logger.warning(f"Could not create database directory: {e}")
+                # Don't raise error here, databases will be created on-demand
+                return
         
         for db_key, config in self.DATABASE_CONFIGS.items():
             db_path = database_dir / config['filename']
@@ -160,7 +169,10 @@ class DatabaseManager:
                 self._database_paths[db_key] = db_path
                 logger.debug(f"Found database: {db_key} at {db_path}")
             else:
-                logger.warning(f"Database not found: {db_key} at {db_path}")
+                # In production, we'll create databases on-demand
+                # Store the expected path even if file doesn't exist yet
+                self._database_paths[db_key] = db_path
+                logger.info(f"Database path registered for on-demand creation: {db_key} at {db_path}")
     
     def get_database_path(self, database_key: str) -> Path:
         """
@@ -173,7 +185,7 @@ class DatabaseManager:
             Path object to the database file
             
         Raises:
-            DatabasePathError: If database is not found or key is invalid
+            DatabasePathError: If database key is invalid
         """
         if database_key not in self.DATABASE_CONFIGS:
             valid_keys = ", ".join(self.DATABASE_CONFIGS.keys())
@@ -182,15 +194,16 @@ class DatabaseManager:
                 f"Valid keys: {valid_keys}"
             )
             
-        if database_key not in self._database_paths:
+        # Return the path even if the database doesn't exist yet
+        # It will be created on first connection attempt
+        if database_key in self._database_paths:
+            return self._database_paths[database_key]
+        else:
+            # Fallback: construct path manually
             config = self.DATABASE_CONFIGS[database_key]
-            raise DatabasePathError(
-                f"Database '{database_key}' ({config['description']}) "
-                f"not found at expected location: "
-                f"{self._project_root}/database/{config['filename']}"
-            )
-            
-        return self._database_paths[database_key]
+            db_path = self._project_root / "database" / config['filename']
+            self._database_paths[database_key] = db_path
+            return db_path
     
     def get_database_path_str(self, database_key: str) -> str:
         """
@@ -208,6 +221,7 @@ class DatabaseManager:
     def get_connection(self, database_key: str, **kwargs):
         """
         Get a database connection with automatic cleanup.
+        Creates database file if it doesn't exist.
         
         Args:
             database_key: Key for the database
@@ -223,9 +237,19 @@ class DatabaseManager:
                 result = cursor.fetchone()
         """
         db_path = self.get_database_path(database_key)
+        
+        # Ensure database directory exists
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
         conn = None
         
         try:
+            # Create database file if it doesn't exist
+            if not db_path.exists():
+                logger.info(f"Creating new database: {database_key} at {db_path}")
+                # Touch the file to create it
+                db_path.touch()
+            
             conn = sqlite3.connect(str(db_path), **kwargs)
             # Enable foreign key constraints
             conn.execute("PRAGMA foreign_keys = ON")
@@ -233,7 +257,7 @@ class DatabaseManager:
         except Exception as e:
             if conn:
                 conn.rollback()
-            raise DatabasePathError(f"Database connection error: {e}")
+            raise DatabasePathError(f"Database connection error for {database_key}: {e}")
         finally:
             if conn:
                 conn.close()

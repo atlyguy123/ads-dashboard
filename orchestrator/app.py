@@ -11,10 +11,14 @@ import glob
 from pathlib import Path
 import time
 from flask_cors import CORS
+import logging
 
 # Import configuration and authentication
 from config import config
 from auth import requires_auth
+
+# Import database initialization
+from database_init import initialize_all_databases, check_database_health
 
 # Import dashboard blueprint
 from dashboard.api.dashboard_routes import dashboard_bp
@@ -23,9 +27,29 @@ from debug.api.debug_routes import debug_bp
 # Import meta blueprint
 from meta.api.meta_routes import meta_bp
 
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Initialize databases on startup
+logger.info("🚀 Initializing databases on startup...")
+try:
+    if initialize_all_databases():
+        if check_database_health():
+            logger.info("✅ Database initialization completed successfully")
+        else:
+            logger.warning("⚠️ Database initialization completed but health check failed")
+    else:
+        logger.error("❌ Database initialization failed - app may not function properly")
+except Exception as e:
+    logger.error(f"❌ Database initialization error: {e}")
 
 # Register dashboard blueprint
 app.register_blueprint(dashboard_bp)
