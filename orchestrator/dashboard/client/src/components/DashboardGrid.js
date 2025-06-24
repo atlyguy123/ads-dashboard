@@ -617,6 +617,38 @@ export const DashboardGrid = ({
       }
     }
 
+    // Special accuracy ratio color coding logic
+    // Only apply if:
+    // 1. Column is trial_accuracy_ratio or purchase_accuracy_ratio
+    // 2. Column would NOT be grayed out (is the active column)
+    // 3. Corresponding Meta count > 5
+    if ((columnKey === 'trial_accuracy_ratio' || columnKey === 'purchase_accuracy_ratio') && 
+        value !== undefined && value !== null) {
+      
+      // Check if this column would be grayed out - if so, don't apply special coloring
+      const wouldBeGrayedOut = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+      
+      if (!wouldBeGrayedOut) {
+        // Get the corresponding Meta count
+        const metaCount = columnKey === 'trial_accuracy_ratio' 
+          ? (calculatedRow.meta_trials_started || 0)
+          : (calculatedRow.meta_purchases || 0);
+        
+        // Only apply color coding if Meta count > 5
+        if (metaCount > 5) {
+          // Apply color thresholds
+          if (value < 10) {
+            colorClass = 'text-red-600 dark:text-red-400 font-semibold'; // < 10%: Red
+          } else if (value < 20) {
+            colorClass = 'text-orange-600 dark:text-orange-400 font-semibold'; // < 20%: Orange
+          } else if (value <= 30) {
+            colorClass = 'text-yellow-600 dark:text-yellow-400 font-semibold'; // ≤ 30%: Yellow
+          }
+          // > 30%: Keep normal color (no special coloring)
+        }
+      }
+    }
+
     // Check if this column should be grayed out based on event priority
     if (eventPriority && shouldGrayOutColumn(columnKey, eventPriority)) {
       colorClass = 'text-gray-500 dark:text-gray-500';

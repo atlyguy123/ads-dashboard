@@ -1554,6 +1554,30 @@ class AnalyticsQueryService:
                 
                 chart_data.append(day_data)
             
+            # Calculate rolling 7-day ROAS for each day
+            for i, day_data in enumerate(chart_data):
+                # Calculate rolling window (this day + up to 6 days back)
+                rolling_start_idx = max(0, i - 6)  # Don't go before array start
+                rolling_days = chart_data[rolling_start_idx:i + 1]
+                
+                # Sum spend and revenue for the rolling window
+                rolling_spend = sum(d['daily_spend'] for d in rolling_days)
+                rolling_revenue = sum(d['daily_estimated_revenue'] for d in rolling_days)
+                rolling_conversions = sum(d['daily_mixpanel_purchases'] for d in rolling_days)
+                
+                # Calculate rolling ROAS
+                if rolling_spend > 0:
+                    rolling_roas = rolling_revenue / rolling_spend
+                else:
+                    rolling_roas = 0.0
+                
+                # Add rolling metrics to day data
+                day_data['rolling_7d_roas'] = round(rolling_roas, 2)
+                day_data['rolling_7d_spend'] = rolling_spend
+                day_data['rolling_7d_revenue'] = rolling_revenue
+                day_data['rolling_7d_conversions'] = rolling_conversions
+                day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
+            
             logger.info(f"📊 CHART RESULT: {len(chart_data)} days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
             
             return {

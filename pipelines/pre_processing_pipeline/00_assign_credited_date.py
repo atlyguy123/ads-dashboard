@@ -17,6 +17,32 @@ Starter Events Priority:
 - credited_date is just the date (YYYY-MM-DD) extracted from event_time
 """
 
+# ========================================
+# CRITICAL ISSUE: PRODUCT ID MISMATCHES
+# ========================================
+# PROBLEM: This module fails to assign credited_date for many users due to 
+# product_id mismatches between mixpanel_event and user_product_metrics tables
+#
+# ANALYSIS FINDINGS:
+# - 380 users have starter events but 100% have mismatched product_ids
+# - 27 users have conversion events for fallback logic, but 100% mismatch
+# - Examples of mismatches:
+#   * Event: "gluten.free.eats.2.monthly" vs Metrics: "glutenfree_map.CwX3l0tJjXE.12m"
+#   * Event: "gluten_free_subscription:gluten-free-map-yearly" vs Metrics: "gluten_free_subscription:gluten-free-map-monthly"
+#
+# ROOT CAUSE: user_product_metrics records were created with product_ids that 
+# don't exactly match the product_ids in the actual events users performed
+#
+# IMPACT: These users remain with PLACEHOLDER_DATE and cannot be processed 
+# by downstream modules (03_estimate_values.py)
+#
+# SOLUTIONS TO CONSIDER:
+# - Create product_id mapping table for variations/aliases
+# - Implement fuzzy matching logic for related products (monthly/yearly variants)
+# - Add data quality validation during initial user_product_metrics creation
+# - Review how user-product relationships are initially established
+# ========================================
+
 import os
 import sys
 import sqlite3

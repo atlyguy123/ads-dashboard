@@ -13,6 +13,35 @@ core value calculation logic for:
 Ported from mixpanel_processing_stage.py but adapted for the new consolidated schema.
 """
 
+# ========================================
+# CRITICAL ISSUE: PLACEHOLDER VALUES FOUND
+# ========================================
+# STATUS: 3,547 records (8.03% of database) still have placeholder values
+# 
+# ROOT CAUSES IDENTIFIED:
+# 1. PRODUCT ID MISMATCHES (601 users): 100% mismatch between event product_ids 
+#    and user_product_metrics product_ids prevents credited date assignment
+#    Example: Event has "gluten.free.eats.2.monthly" but metrics has "glutenfree_map.CwX3l0tJjXE.12m"
+#
+# 2. HISTORICAL DATA GAPS (3,111 users): Users with only downstream events 
+#    (RC Renewal, RC Cancellation) but no starter events - subscriptions began 
+#    before data collection period
+#
+# 3. INVALID LIFECYCLE CLASSIFICATION: ALL placeholder records are marked 
+#    valid_lifecycle = 0, indicating problematic user-product relationships
+#
+# IMPACT: These users cannot be processed by current pipeline logic due to:
+# - Over-strict product_id matching requirements in Module 00 (credited date assignment)
+# - Missing starter events for historical subscriptions
+# - Inconsistent lifecycle validation filtering
+#
+# SOLUTIONS TO CONSIDER:
+# - Implement product_id mapping/fuzzy matching for variations
+# - Create fallback logic for historical subscriptions (use earliest available event)
+# - Review lifecycle validation logic for consistency
+# - Add data quality audit for initial user_product_metrics creation
+# ========================================
+
 import os
 import sys
 from typing import Dict, Any, List, Optional, Tuple
@@ -263,6 +292,17 @@ class ValueEstimator:
             
             # TEMPORARILY REMOVED FILTERING - Processing ALL users for testing
             # Original filtering was: u.has_abi_attribution = 1 AND u.valid_user = 1 AND upm.valid_lifecycle = 1
+            # 
+            # NOTE: The 3,547 placeholder records that remain unprocessed are ALL marked as 
+            # valid_lifecycle = 0, indicating they represent problematic user-product relationships.
+            # These include:
+            # - Users with product_id mismatches between events and metrics (601 users)
+            # - Users with only historical downstream events, no starter events (3,111 users)
+            # 
+            # Even with filters removed, these records cannot be processed because:
+            # - No valid starter events found due to product_id mismatches
+            # - No conversion events for fallback logic (also product_id mismatches)
+            # - Missing credited_date assignments from Module 00 (prerequisite failure)
             query = """
                 SELECT DISTINCT u.distinct_id, u.profile_json
                 FROM mixpanel_user u

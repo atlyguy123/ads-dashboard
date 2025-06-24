@@ -17,19 +17,27 @@ const ROASSparkline = ({
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const svgRef = useRef(null);
 
-  // Get ROAS performance color with intensity based on conversion count
+  // Get ROAS performance color based on thresholds
   const getROASPerformanceColor = (roas, conversions = 0) => {
     const roasValue = parseFloat(roas) || 0;
-    const hasSignificantData = conversions >= 5; // 5+ conversions = darker, <5 = lighter
     
-    if (roasValue < 1.0) {
-      return hasSignificantData ? 'text-red-600' : 'text-red-400';
+    if (roasValue < 0.5) {
+      return 'text-red-400';
     }
-    if (roasValue >= 1.0 && roasValue < 1.5) {
-      return hasSignificantData ? 'text-yellow-600' : 'text-yellow-400';
+    if (roasValue >= 0.5 && roasValue < 0.75) {
+      return 'text-orange-400';
+    }
+    if (roasValue >= 0.75 && roasValue < 1.0) {
+      return 'text-yellow-400';
+    }
+    if (roasValue >= 1.0 && roasValue < 1.25) {
+      return 'text-green-400';
+    }
+    if (roasValue >= 1.25 && roasValue < 1.5) {
+      return 'text-blue-400';
     }
     // >= 1.5
-    return hasSignificantData ? 'text-green-600' : 'text-green-400';
+    return 'text-purple-400';
   };
 
   // Load chart data
@@ -87,7 +95,7 @@ const ROASSparkline = ({
       setHoveredPoint(dataIndex);
       setTooltipPosition({ 
         x: event.clientX - 180, // Offset 180px to the left
-        y: event.clientY - 120  // Move tooltip much higher above cursor
+        y: event.clientY - 160  // Move tooltip much higher above cursor
       });
     }
   };
@@ -113,7 +121,7 @@ const ROASSparkline = ({
   
   // Check if we have enough valid data for sparkline
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
-    parseFloat(d.daily_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
+    parseFloat(d.rolling_7d_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
   );
 
   return (
@@ -140,7 +148,7 @@ const ROASSparkline = ({
             const height = 20;
             const padding = 2;
             
-            const values = chartData.map(d => parseFloat(d.daily_roas) || 0);
+            const values = chartData.map(d => parseFloat(d.rolling_7d_roas) || 0);
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
@@ -272,25 +280,28 @@ const ROASSparkline = ({
                       const dayData = chartData[hoveredPoint];
                       const spend = parseFloat(dayData.daily_spend) || 0;
                       const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
-                      const backendROAS = parseFloat(dayData.daily_roas) || 0;
+                      const backendROAS = parseFloat(dayData.rolling_7d_roas) || 0;
                       
-                      // Display backend-calculated ROAS value directly
+                      // Display backend-calculated rolling ROAS value directly
                       return (
                         <>
                           <div className="font-medium text-white">
                             {formatDate(dayData.date)}
                           </div>
-                          <div className={getROASPerformanceColor(backendROAS, dayData.daily_mixpanel_purchases || 0).replace('text-', 'text-').replace('600', '400')}>
-                            ROAS: {formatROAS(backendROAS)}
+                          <div className={getROASPerformanceColor(backendROAS, dayData.rolling_7d_conversions || 0).replace('text-', 'text-').replace('600', '400')}>
+                            Rolling ROAS: {formatROAS(backendROAS)}
+                          </div>
+                          <div className="text-gray-400 text-xs">
+                            7-day window ({dayData.rolling_window_days} days)
                           </div>
                         </>
                       );
                     })()}
                           <div className="text-gray-300 text-xs">
-                            Spend: ${(parseFloat(chartData[hoveredPoint].daily_spend) || 0).toFixed(2)}
+                            Rolling Spend: ${(parseFloat(chartData[hoveredPoint].rolling_7d_spend) || 0).toFixed(2)}
                           </div>
                           <div className="text-gray-300 text-xs">
-                            Revenue: ${(parseFloat(chartData[hoveredPoint].daily_estimated_revenue) || 0).toFixed(2)}
+                            Rolling Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_7d_revenue) || 0).toFixed(2)}
                           </div>
                           {/* Display accuracy ratio using same logic as main dashboard */}
                           {chartData[hoveredPoint].period_accuracy_ratio && chartData[hoveredPoint].period_accuracy_ratio !== 1.0 && (
@@ -306,7 +317,7 @@ const ROASSparkline = ({
                           )}
           {/* Show conversion counts for confidence assessment */}
           <div className="text-green-300 text-xs">
-            Conversions: {chartData[hoveredPoint].daily_mixpanel_purchases || 0}
+            Rolling Conversions: {chartData[hoveredPoint].rolling_7d_conversions || 0}
           </div>
           <div className="text-blue-300 text-xs">
             Trials: {chartData[hoveredPoint].daily_mixpanel_trials || 0}
