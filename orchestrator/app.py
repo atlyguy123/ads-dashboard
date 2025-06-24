@@ -1513,11 +1513,29 @@ if __name__ == '__main__':
     # Initialize database structure if needed (especially for Heroku)
     if config.is_production:
         try:
-            from database_init import init_all_databases
-            init_all_databases()
+            from database_init import initialize_all_databases
+            initialize_all_databases()
         except Exception as e:
             print(f"Warning: Database initialization failed: {e}")
     
     init_db()
     runner = PipelineRunner()
-    socketio.run(app, debug=config.FLASK_DEBUG, host=config.HOST, port=config.PORT) 
+    
+    # Configure for production vs development
+    if config.is_production:
+        # Production configuration for Heroku
+        socketio.run(
+            app, 
+            debug=False, 
+            host=config.HOST, 
+            port=config.PORT,
+            allow_unsafe_werkzeug=True  # Allow in production for Heroku
+        )
+    else:
+        # Development configuration
+        socketio.run(
+            app, 
+            debug=config.FLASK_DEBUG, 
+            host=config.HOST, 
+            port=config.PORT
+        ) 

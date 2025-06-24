@@ -152,17 +152,40 @@ def initialize_database_from_schema(database_key: str):
                 with open(schema_path, 'r') as f:
                     schema_sql = f.read()
                 
-                # Execute schema in chunks to handle complex SQL
+                # Split schema into table creation and index creation
                 statements = schema_sql.split(';')
+                table_statements = []
+                index_statements = []
+                
                 for statement in statements:
                     statement = statement.strip()
                     if statement and not statement.startswith('--'):
-                        try:
-                            conn.execute(statement)
-                        except sqlite3.Error as e:
-                            # Log but don't fail on individual statement errors
-                            logger.warning(f"Schema statement failed (continuing): {e}")
-                            logger.debug(f"Failed statement: {statement[:100]}...")
+                        if statement.upper().startswith('CREATE INDEX'):
+                            index_statements.append(statement)
+                        else:
+                            table_statements.append(statement)
+                
+                # First, create all tables
+                logger.info(f"Creating tables for {database_key}...")
+                for statement in table_statements:
+                    try:
+                        conn.execute(statement)
+                    except sqlite3.Error as e:
+                        # Log but don't fail on individual statement errors
+                        logger.warning(f"Table creation statement failed (continuing): {e}")
+                        logger.debug(f"Failed statement: {statement[:100]}...")
+                
+                conn.commit()
+                
+                # Then, create all indexes
+                logger.info(f"Creating indexes for {database_key}...")
+                for statement in index_statements:
+                    try:
+                        conn.execute(statement)
+                    except sqlite3.Error as e:
+                        # Log but don't fail on individual statement errors
+                        logger.warning(f"Index creation statement failed (continuing): {e}")
+                        logger.debug(f"Failed statement: {statement[:100]}...")
                 
                 conn.commit()
                 logger.info(f"Database {database_key} initialized from schema successfully")
