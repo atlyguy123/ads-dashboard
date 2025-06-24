@@ -1,11 +1,11 @@
 from flask import request, Response
 from functools import wraps
-import os
+from config import config
 
-# Team credentials - store these as environment variables in production
+# Team credentials - read from configuration
 TEAM_CREDENTIALS = {
-    os.getenv('ADMIN_USERNAME', 'admin'): os.getenv('ADMIN_PASSWORD', 'secure-password'),
-    os.getenv('TEAM_USERNAME', 'team'): os.getenv('TEAM_PASSWORD', 'team-password'),
+    config.ADMIN_USERNAME: config.ADMIN_PASSWORD,
+    config.TEAM_USERNAME: config.TEAM_PASSWORD,
     # Add more team members as needed
 }
 

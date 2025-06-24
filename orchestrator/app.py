@@ -12,7 +12,8 @@ from pathlib import Path
 import time
 from flask_cors import CORS
 
-# Import authentication
+# Import configuration and authentication
+from config import config
 from auth import requires_auth
 
 # Import dashboard blueprint
@@ -23,7 +24,7 @@ from debug.api.debug_routes import debug_bp
 from meta.api.meta_routes import meta_bp
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['SECRET_KEY'] = config.SECRET_KEY
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Register dashboard blueprint
@@ -35,14 +36,12 @@ app.register_blueprint(meta_bp)
 
 # Enable CORS for all routes to handle cross-origin requests
 # Allow Heroku domains in production
-allowed_origins = ['http://localhost:3000', 'http://localhost:5001', 'http://localhost:5678']
-if os.getenv('FLASK_ENV') == 'production':
-    heroku_app_name = os.getenv('HEROKU_APP_NAME')
-    if heroku_app_name:
-        allowed_origins.extend([
-            f'https://{heroku_app_name}.herokuapp.com',
-            f'http://{heroku_app_name}.herokuapp.com'
-        ])
+allowed_origins = config.ALLOWED_ORIGINS.copy()
+if config.is_production and config.HEROKU_APP_NAME:
+    allowed_origins.extend([
+        f'https://{config.HEROKU_APP_NAME}.herokuapp.com',
+        f'http://{config.HEROKU_APP_NAME}.herokuapp.com'
+    ])
 
 CORS(app, origins=allowed_origins, 
      allow_headers=['Content-Type', 'Authorization'], 
@@ -1488,7 +1487,7 @@ def mixpanel_debug_user_events():
 
 if __name__ == '__main__':
     # Initialize database structure if needed (especially for Heroku)
-    if os.getenv('FLASK_ENV') == 'production':
+    if config.is_production:
         try:
             from database_init import init_all_databases
             init_all_databases()
@@ -1497,7 +1496,4 @@ if __name__ == '__main__':
     
     init_db()
     runner = PipelineRunner()
-    host = os.getenv('HOST', '0.0.0.0')
-    port = int(os.getenv('PORT', 5001))
-    debug = os.getenv('FLASK_ENV') != 'production'
-    socketio.run(app, debug=debug, host=host, port=port) 
+    socketio.run(app, debug=config.FLASK_DEBUG, host=config.HOST, port=config.PORT) 
