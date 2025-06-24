@@ -707,27 +707,28 @@ class MetaDataUpdater:
                 return True
             
             # Step 3: Define table configurations
+            # Process tables sequentially: no breakdown -> country -> device
             table_configs = [
                 {
                     'table': 'ad_performance_daily',
                     'breakdown': None,
                     'description': 'no breakdown'
                 },
-                # BREAKDOWN TABLES (commented out for now, uncomment when ready)
-                # {
-                #     'table': 'ad_performance_daily_country',
-                #     'breakdown': 'country',
-                #     'description': 'country breakdown'
-                # },
+                {
+                    'table': 'ad_performance_daily_country',
+                    'breakdown': 'country',
+                    'description': 'country breakdown'
+                },
+                {
+                    'table': 'ad_performance_daily_device',
+                    'breakdown': 'device',
+                    'description': 'device breakdown'
+                }
+                # Region breakdown available but not currently active
                 # {
                 #     'table': 'ad_performance_daily_region',
                 #     'breakdown': 'region',
                 #     'description': 'region breakdown'
-                # },
-                # {
-                #     'table': 'ad_performance_daily_device',
-                #     'breakdown': 'device',
-                #     'description': 'device breakdown'
                 # }
             ]
             

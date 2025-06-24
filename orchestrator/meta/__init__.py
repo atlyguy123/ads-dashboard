@@ -8,7 +8,7 @@ This module provides comprehensive Meta API integration including:
 """
 
 from .services.meta_service import *
-from .services.meta_historical_service import *
+from .services.meta_historical_service import *  # TODO: Rename to meta_analytics_service
 
 __version__ = "1.0.0"
 __author__ = "Ads Dashboard Team" 

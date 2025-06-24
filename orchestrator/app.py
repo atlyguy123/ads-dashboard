@@ -950,43 +950,50 @@ def meta_fetch():
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/start', methods=['POST'])
-def meta_historical_start():
-    """Start Meta historical data collection"""
+@app.route('/api/meta/analytics/start', methods=['POST'])
+def meta_analytics_start():
+    """Start Meta analytics data collection"""
     return jsonify({
         "success": True,
-        "message": "Historical data collection started",
-        "job_id": f"historical_{int(datetime.now().timestamp())}",
+        "message": "Analytics data collection started",
+        "job_id": f"analytics_{int(datetime.now().timestamp())}",
         "status": "started",
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/jobs/<job_id>/status', methods=['GET'])
-def meta_historical_job_status(job_id):
-    """Get Meta historical job status"""
+# Backward compatibility route
+@app.route('/api/meta/historical/start', methods=['POST'])
+def meta_historical_start():
+    """Legacy route - use /api/meta/analytics/start instead"""
+    return meta_analytics_start()
+
+# Meta Analytics Routes (Preferred)
+@app.route('/api/meta/analytics/jobs/<job_id>/status', methods=['GET'])
+def meta_analytics_job_status(job_id):
+    """Get Meta analytics job status"""
     return jsonify({
         "success": True,
         "job_id": job_id,
         "status": "completed",
         "progress": 100,
-        "message": "Historical job completed",
+        "message": "Analytics job completed",
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/jobs/<job_id>/cancel', methods=['POST'])
-def meta_historical_job_cancel(job_id):
-    """Cancel Meta historical job"""
+@app.route('/api/meta/analytics/jobs/<job_id>/cancel', methods=['POST'])
+def meta_analytics_job_cancel(job_id):
+    """Cancel Meta analytics job"""
     return jsonify({
         "success": True,
         "job_id": job_id,
-        "message": "Historical job cancelled",
+        "message": "Analytics job cancelled",
         "status": "cancelled",
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/coverage', methods=['GET'])
-def meta_historical_coverage():
-    """Get Meta historical data coverage"""
+@app.route('/api/meta/analytics/coverage', methods=['GET'])
+def meta_analytics_coverage():
+    """Get Meta analytics data coverage"""
     return jsonify({
         "success": True,
         "data": {
@@ -1000,9 +1007,9 @@ def meta_historical_coverage():
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/missing-dates', methods=['GET'])
-def meta_historical_missing_dates():
-    """Get missing dates in Meta historical data"""
+@app.route('/api/meta/analytics/missing-dates', methods=['GET'])
+def meta_analytics_missing_dates():
+    """Get missing dates in Meta analytics data"""
     return jsonify({
         "success": True,
         "data": {
@@ -1012,27 +1019,27 @@ def meta_historical_missing_dates():
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/configurations', methods=['GET'])
-def meta_historical_configurations():
-    """Get Meta historical configurations"""
+@app.route('/api/meta/analytics/configurations', methods=['GET'])
+def meta_analytics_configurations():
+    """Get Meta analytics configurations"""
     return jsonify({
         "success": True,
         "data": [],
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/configurations/<config_id>', methods=['DELETE'])
-def meta_historical_delete_configuration(config_id):
-    """Delete Meta historical configuration"""
+@app.route('/api/meta/analytics/configurations/<config_id>', methods=['DELETE'])
+def meta_analytics_delete_configuration(config_id):
+    """Delete Meta analytics configuration"""
     return jsonify({
         "success": True,
         "message": f"Configuration {config_id} deleted",
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/meta/historical/export', methods=['GET'])
-def meta_historical_export():
-    """Export Meta historical data"""
+@app.route('/api/meta/analytics/export', methods=['GET'])
+def meta_analytics_export():
+    """Export Meta analytics data"""
     return jsonify({
         "success": True,
         "data": {
@@ -1041,6 +1048,42 @@ def meta_historical_export():
         },
         "timestamp": datetime.now().isoformat()
     })
+
+# Legacy Historical Routes (Backward compatibility - redirect to analytics)
+@app.route('/api/meta/historical/jobs/<job_id>/status', methods=['GET'])
+def meta_historical_job_status(job_id):
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_job_status(job_id)
+
+@app.route('/api/meta/historical/jobs/<job_id>/cancel', methods=['POST'])
+def meta_historical_job_cancel(job_id):
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_job_cancel(job_id)
+
+@app.route('/api/meta/historical/coverage', methods=['GET'])
+def meta_historical_coverage():
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_coverage()
+
+@app.route('/api/meta/historical/missing-dates', methods=['GET'])
+def meta_historical_missing_dates():
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_missing_dates()
+
+@app.route('/api/meta/historical/configurations', methods=['GET'])
+def meta_historical_configurations():
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_configurations()
+
+@app.route('/api/meta/historical/configurations/<config_id>', methods=['DELETE'])
+def meta_historical_delete_configuration(config_id):
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_delete_configuration(config_id)
+
+@app.route('/api/meta/historical/export', methods=['GET'])
+def meta_historical_export():
+    """Legacy route - redirects to analytics"""
+    return meta_analytics_export()
 
 @app.route('/api/meta/action-mappings', methods=['GET'])
 def meta_action_mappings_get():

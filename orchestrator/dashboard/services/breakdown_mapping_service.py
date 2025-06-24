@@ -328,8 +328,8 @@ class BreakdownMappingService:
                             SELECT 
                                 COUNT(DISTINCT u.distinct_id) as total_users,
                                 SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
                             FROM mixpanel_user u
                             LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
                             WHERE u.country = ? AND e.abi_campaign_id = ?
@@ -422,8 +422,8 @@ class BreakdownMappingService:
                             SELECT 
                                 COUNT(DISTINCT upm.distinct_id) as total_users,
                                 SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
                             FROM user_product_metrics upm
                             LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
                             WHERE upm.store = ? AND e.abi_campaign_id = ?

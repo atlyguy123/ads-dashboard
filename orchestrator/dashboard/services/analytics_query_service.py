@@ -294,8 +294,8 @@ class AnalyticsQueryService:
             COUNT(DISTINCT u.distinct_id) as total_users,
             COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
             SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
-            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-            COALESCE(SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
+            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            COALESCE(SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
         FROM mixpanel_user u
         LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
         WHERE e.abi_campaign_id IS NOT NULL
@@ -394,8 +394,8 @@ class AnalyticsQueryService:
             COUNT(DISTINCT u.distinct_id) as total_users,
             COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
             SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
-            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-            COALESCE(SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
+            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            COALESCE(SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
         FROM mixpanel_user u
         LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
         WHERE e.abi_ad_set_id IS NOT NULL
@@ -498,8 +498,8 @@ class AnalyticsQueryService:
             COUNT(DISTINCT u.distinct_id) as total_users,
             COUNT(DISTINCT CASE WHEN JSON_EXTRACT(u.profile_json, '$.first_install_date') BETWEEN ? AND ? THEN u.distinct_id END) as new_users,
             SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials_started,
-            SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-            COALESCE(SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
+            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+            COALESCE(SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN e.revenue_usd ELSE 0 END), 0) as mixpanel_revenue_usd
         FROM mixpanel_user u
         LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
         WHERE u.abi_ad_id IS NOT NULL
@@ -993,7 +993,7 @@ class AnalyticsQueryService:
                 SELECT 
                     u.abi_ad_id,
                     COUNT(DISTINCT CASE WHEN e.event_name = 'RC Trial started' AND DATE(e.event_time) BETWEEN ? AND ? THEN u.distinct_id END) as mixpanel_trials_started,
-                    COUNT(DISTINCT CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') AND DATE(e.event_time) BETWEEN ? AND ? THEN u.distinct_id END) as mixpanel_purchases,
+                    COUNT(DISTINCT CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN u.distinct_id END) as mixpanel_purchases,
                     COUNT(DISTINCT u.distinct_id) as total_attributed_users
                 FROM mixpanel_user u
                 LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
@@ -1034,7 +1034,7 @@ class AnalyticsQueryService:
                 SELECT 
                     u.abi_ad_id,
                     COALESCE(SUM(CASE 
-                        WHEN me.event_name IN ('RC Initial purchase', 'RC Trial converted') 
+                        WHEN me.event_name = 'RC Initial purchase' 
                              AND DATE(me.event_time) BETWEEN ? AND ?
                         THEN me.revenue_usd 
                         ELSE 0 
@@ -1306,6 +1306,9 @@ class AnalyticsQueryService:
         formatted['mixpanel_revenue_net'] = RevenueCalculators.calculate_mixpanel_revenue_net(calc_input)
         formatted['profit'] = RevenueCalculators.calculate_profit(calc_input)
         
+        # NEW: Add accuracy-adjusted estimated revenue for frontend display
+        formatted['estimated_revenue_adjusted'] = RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(calc_input)
+        
         # CRITICAL: Preserve children array if it exists (for hierarchical structure)
         if 'children' in record:
             formatted['children'] = record['children']
@@ -1313,9 +1316,26 @@ class AnalyticsQueryService:
         return formatted
     
     def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
-        """Get detailed daily metrics for sparkline charts - combines Meta and Mixpanel data by date"""
+        """Get detailed daily metrics for sparkline charts - ALWAYS returns exactly 14 days ending on config.end_date"""
         try:
             table_name = self.get_table_name(config.breakdown)
+            
+            # Calculate the exact 14-day period ending on config.end_date
+            end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
+            start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
+            
+            # Calculate expanded date range for activity analysis (1 week before and after)
+            expanded_start_date = start_date - timedelta(days=7)  # 1 week before display period
+            expanded_end_date = end_date + timedelta(days=7)      # 1 week after display period
+            
+            # Format dates for queries
+            chart_start_date = start_date.strftime('%Y-%m-%d')
+            chart_end_date = config.end_date
+            expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
+            expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
+            
+            logger.info(f"📊 CHART DATA: Showing 14 days from {chart_start_date} to {chart_end_date}")
+            logger.info(f"📊 ACTIVITY ANALYSIS: Checking spend activity from {expanded_start_str} to {expanded_end_str}")
             
             # Build WHERE clause for Meta data based on entity type
             if entity_type == 'campaign':
@@ -1330,7 +1350,31 @@ class AnalyticsQueryService:
             else:
                 raise ValueError(f"Invalid entity_type: {entity_type}")
             
-            # Get daily Meta data
+            # Get daily Meta data for the EXPANDED period to determine activity range
+            expanded_meta_query = f"""
+            SELECT date,
+                   SUM(spend) as daily_spend
+            FROM {table_name}
+            WHERE {meta_where} AND date BETWEEN ? AND ? AND spend > 0
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            expanded_meta_data = self._execute_meta_query(expanded_meta_query, [entity_id, expanded_start_str, expanded_end_str])
+            
+            # Determine first and last spend dates from expanded data
+            first_spend_date = None
+            last_spend_date = None
+            
+            if expanded_meta_data:
+                spend_dates = [row['date'] for row in expanded_meta_data if row['daily_spend'] > 0]
+                if spend_dates:
+                    first_spend_date = min(spend_dates)
+                    last_spend_date = max(spend_dates)
+            
+            logger.info(f"📊 ACTIVITY PERIOD: First spend: {first_spend_date}, Last spend: {last_spend_date}")
+            
+            # Get daily Meta data for the 14-day display period
             meta_query = f"""
             SELECT date,
                    SUM(spend) as daily_spend,
@@ -1344,9 +1388,9 @@ class AnalyticsQueryService:
             ORDER BY date ASC
             """
             
-            meta_data = self._execute_meta_query(meta_query, [entity_id, config.start_date, config.end_date])
+            meta_data = self._execute_meta_query(meta_query, [entity_id, chart_start_date, chart_end_date])
             
-            # Get daily Mixpanel data (attributed to credited_date)
+            # Get daily Mixpanel data for the 14-day period (attributed to credited_date)
             mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
             mixpanel_conn.row_factory = sqlite3.Row
             
@@ -1377,38 +1421,67 @@ class AnalyticsQueryService:
             """
             
             cursor = mixpanel_conn.cursor()
-            cursor.execute(mixpanel_query, [entity_id, config.start_date, config.end_date])
+            cursor.execute(mixpanel_query, [entity_id, chart_start_date, chart_end_date])
             mixpanel_data = [dict(row) for row in cursor.fetchall()]
             mixpanel_conn.close()
             
-            # Merge Meta and Mixpanel data by date
+            # Generate ALL 14 days, filling missing days with zeros
             daily_data = {}
+            current_date = start_date
             
-            # Add Meta data
-            for row in meta_data:
-                date = row['date']
-                daily_data[date] = {
-                    'date': date,
-                    'daily_spend': float(row.get('daily_spend', 0) or 0),
-                    'daily_impressions': int(row.get('daily_impressions', 0) or 0),
-                    'daily_clicks': int(row.get('daily_clicks', 0) or 0),
-                    'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
-                    'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0),
-                    # Initialize Mixpanel fields
+            # Initialize all 14 days with zero values and activity status
+            for i in range(14):
+                date_str = current_date.strftime('%Y-%m-%d')
+                
+                # Determine if this day should be grey (inactive)
+                is_inactive = False
+                if first_spend_date and last_spend_date:
+                    # Grey if before first spend or after last spend
+                    is_inactive = date_str < first_spend_date or date_str > last_spend_date
+                elif first_spend_date:
+                    # Only first spend found, grey before first spend
+                    is_inactive = date_str < first_spend_date
+                elif last_spend_date:
+                    # Only last spend found, grey after last spend
+                    is_inactive = date_str > last_spend_date
+                else:
+                    # No spend found in expanded period, all days are inactive
+                    is_inactive = True
+                
+                daily_data[date_str] = {
+                    'date': date_str,
+                    'daily_spend': 0.0,
+                    'daily_impressions': 0,
+                    'daily_clicks': 0,
+                    'daily_meta_trials': 0,
+                    'daily_meta_purchases': 0,
                     'daily_mixpanel_trials': 0,
                     'daily_mixpanel_purchases': 0,
                     'daily_mixpanel_conversions': 0,
                     'daily_mixpanel_revenue': 0.0,
                     'daily_mixpanel_refunds': 0.0,
                     'daily_estimated_revenue': 0.0,
-                    'daily_attributed_users': 0
+                    'daily_attributed_users': 0,
+                    'is_inactive': is_inactive  # New field for frontend styling
                 }
+                current_date += timedelta(days=1)
             
-            # Add Mixpanel data
+            # Overlay actual Meta data where it exists
+            for row in meta_data:
+                date = row['date']
+                if date in daily_data:
+                    daily_data[date].update({
+                        'daily_spend': float(row.get('daily_spend', 0) or 0),
+                        'daily_impressions': int(row.get('daily_impressions', 0) or 0),
+                        'daily_clicks': int(row.get('daily_clicks', 0) or 0),
+                        'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
+                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0)
+                    })
+            
+            # Overlay actual Mixpanel data where it exists
             for row in mixpanel_data:
                 date = row['date']
                 if date in daily_data:
-                    # Update existing date with Mixpanel data
                     daily_data[date].update({
                         'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
                         'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
@@ -1418,63 +1491,36 @@ class AnalyticsQueryService:
                         'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
                         'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
                     })
-                else:
-                    # Create new date entry (Mixpanel data without Meta data)
-                    daily_data[date] = {
-                        'date': date,
-                        'daily_spend': 0.0,
-                        'daily_impressions': 0,
-                        'daily_clicks': 0,
-                        'daily_meta_trials': 0,
-                        'daily_meta_purchases': 0,
-                        'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
-                        'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
-                        'daily_mixpanel_conversions': int(row.get('daily_mixpanel_conversions', 0) or 0),
-                        'daily_mixpanel_revenue': float(row.get('daily_mixpanel_revenue', 0) or 0),
-                        'daily_mixpanel_refunds': float(row.get('daily_mixpanel_refunds', 0) or 0),
-                        'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
-                        'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
-                    }
             
-            # Calculate accuracy ratio using SAME LOGIC as main dashboard event priority
+            # Calculate accuracy ratio for the entire period
             total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
             total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
             total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
             total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
             
-            # Use same event priority logic as getEventPriority() in DashboardGrid.js
+            # Determine event priority and accuracy ratio
             if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
-                # Default to trials when both are zero
                 event_priority = 'trials'
                 overall_accuracy_ratio = 0.0
             elif total_mixpanel_trials > total_mixpanel_purchases:
-                # Trials are dominant - use trial accuracy ratio
                 event_priority = 'trials'
                 overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
             elif total_mixpanel_purchases > total_mixpanel_trials:
-                # Purchases are dominant - use purchase accuracy ratio
                 event_priority = 'purchases'
                 overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
             else:
-                # Equal - use trial accuracy ratio as default
                 event_priority = 'equal'
                 overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
-                
-            # DEBUG: Log accuracy ratio calculation
-            logger.info(f"🔥 ACCURACY RATIO DEBUG for {entity_type} {entity_id}:")
-            logger.info(f"   Total MP Trials: {total_mixpanel_trials}, Meta Trials: {total_meta_trials}")
-            logger.info(f"   Total MP Purchases: {total_mixpanel_purchases}, Meta Purchases: {total_meta_purchases}")
-            logger.info(f"   Event Priority: {event_priority}")
-            logger.info(f"   Calculated Accuracy Ratio: {overall_accuracy_ratio:.3f} ({overall_accuracy_ratio * 100:.1f}%)")
             
-            # Calculate daily derived metrics using the modular calculator system
+            logger.info(f"📊 CHART ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
+            
+            # Calculate daily metrics using the modular calculator system for ALL 14 days
             chart_data = []
-            for date in sorted(daily_data.keys()):
+            for date in sorted(daily_data.keys()):  # This will always be exactly 14 days
                 day_data = daily_data[date]
                 
-                # CRITICAL FIX: Map daily fields to standard calculator field names
+                # Map daily fields to standard calculator field names
                 calculator_record = {
-                    # Map daily fields to standard names expected by calculators
                     'spend': day_data['daily_spend'],
                     'estimated_revenue_usd': day_data['daily_estimated_revenue'],
                     'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
@@ -1483,35 +1529,37 @@ class AnalyticsQueryService:
                     'meta_trials_started': day_data.get('daily_meta_trials', 0),
                     'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
                     'meta_purchases': day_data.get('daily_meta_purchases', 0),
-                    # Keep original daily fields for reference
-                    **day_data
+                    **day_data  # Keep original daily fields for reference
                 }
                 
-                # Use the modular calculator system for ROAS calculation
+                # Use the modular calculator system for ROAS and profit calculations
                 calc_input = CalculationInput(raw_record=calculator_record)
-                daily_roas = ROASCalculators.calculate_estimated_roas(calc_input)
-                day_data['daily_roas'] = daily_roas
+                day_data['daily_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
+                day_data['daily_profit'] = RevenueCalculators.calculate_profit(calc_input)
                 
-                # Use the modular calculator system for profit calculation  
-                daily_profit = RevenueCalculators.calculate_profit(calc_input)
-                day_data['daily_profit'] = daily_profit
-                
-                # Store the accuracy ratio and event priority for tooltip
+                # Store accuracy ratio and event priority for tooltips
                 day_data['period_accuracy_ratio'] = overall_accuracy_ratio
                 day_data['event_priority'] = event_priority
-                
-                # For sparkline coloring: use conversion count for statistical significance
                 day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
                 
                 chart_data.append(day_data)
+            
+            logger.info(f"📊 CHART RESULT: {len(chart_data)} days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
             
             return {
                 'success': True,
                 'chart_data': chart_data,
                 'entity_type': entity_type,
                 'entity_id': entity_id,
-                'date_range': f"{config.start_date} to {config.end_date}",
-                'total_days': len(chart_data)
+                'date_range': f"{chart_start_date} to {chart_end_date}",
+                'total_days': len(chart_data),
+                'period_info': f"14-day period ending {chart_end_date}",
+                'activity_analysis': {
+                    'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
+                    'first_spend_date': first_spend_date,
+                    'last_spend_date': last_spend_date,
+                    'inactive_days_count': sum(1 for d in chart_data if d.get('is_inactive', False))
+                }
             }
             
         except Exception as e:

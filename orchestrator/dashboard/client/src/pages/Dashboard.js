@@ -19,6 +19,7 @@ import { GraphModal } from '../components/GraphModal';
 import TimelineModal from '../components/TimelineModal';
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
+import DebugColumnTest from '../components/DebugColumnTest';
 
 // Available columns for visibility control
 const AVAILABLE_COLUMNS = [
@@ -115,15 +116,19 @@ export const Dashboard = () => {
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState(() => {
     const saved = localStorage.getItem('dashboard_column_visibility');
+    let visibility = {};
+    
     if (saved) {
       try {
-        return JSON.parse(saved);
+        visibility = JSON.parse(saved);
       } catch (e) {
         console.warn('Failed to parse saved column visibility:', e);
+        visibility = {};
       }
     }
+    
     // Default column visibility
-    return {
+    const defaultVisibility = {
       name: true,
       campaign_name: true,
       adset_name: true,
@@ -141,6 +146,16 @@ export const Dashboard = () => {
       profit: true,
       trial_accuracy_ratio: true
     };
+    
+    // Merge with defaults to ensure new columns are included
+    const mergedVisibility = { ...defaultVisibility, ...visibility };
+    
+    // Ensure the new column is visible by default
+    if (mergedVisibility.estimated_revenue_adjusted === undefined) {
+      mergedVisibility.estimated_revenue_adjusted = true;
+    }
+    
+    return mergedVisibility;
   });
 
   // Column order state
@@ -187,6 +202,21 @@ export const Dashboard = () => {
 
   // Column visibility dropdown state
   const [showColumnSelector, setShowColumnSelector] = useState(false);
+
+  // Debug function to check column visibility
+  useEffect(() => {
+    console.log('🔍 Column Visibility Debug:', {
+      'estimated_revenue_adjusted_visible': columnVisibility.estimated_revenue_adjusted,
+      'estimated_revenue_usd_visible': columnVisibility.estimated_revenue_usd,
+      'column_in_available_columns': AVAILABLE_COLUMNS.some(col => col.key === 'estimated_revenue_adjusted'),
+      'all_visible_columns': Object.keys(columnVisibility).filter(key => columnVisibility[key]),
+      'dashboardData_sample': dashboardData.length > 0 ? {
+        'has_estimated_revenue_adjusted': 'estimated_revenue_adjusted' in dashboardData[0],
+        'estimated_revenue_adjusted_value': dashboardData[0]?.estimated_revenue_adjusted,
+        'estimated_revenue_usd_value': dashboardData[0]?.estimated_revenue_usd
+      } : 'no_data'
+    });
+  }, [columnVisibility, dashboardData]);
 
   // Pipeline state variables (for tracking running/queued pipelines)
   const [runningPipelines, setRunningPipelines] = useState(new Set());
@@ -281,6 +311,15 @@ export const Dashboard = () => {
       }
     });
     setColumnVisibility(newVisibility);
+  };
+
+  // Force refresh column visibility to include new columns
+  const refreshColumnVisibility = () => {
+    const newVisibility = { ...columnVisibility };
+    // Ensure the new estimated_revenue_adjusted column is included
+    newVisibility.estimated_revenue_adjusted = true;
+    setColumnVisibility(newVisibility);
+    console.log('🔄 Force refreshed column visibility to include estimated_revenue_adjusted');
   };
 
   // Handle sorting functionality
@@ -585,6 +624,7 @@ export const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <DebugColumnTest />
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
@@ -637,6 +677,13 @@ export const Dashboard = () => {
                           className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
                         >
                           Hide All
+                        </button>
+                        <button
+                          onClick={refreshColumnVisibility}
+                          className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded hover:bg-green-200 dark:hover:bg-green-800"
+                          title="Force refresh to include new columns"
+                        >
+                          Refresh
                         </button>
                       </div>
                     </div>

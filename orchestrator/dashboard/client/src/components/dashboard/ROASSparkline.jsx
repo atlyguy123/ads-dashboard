@@ -32,26 +32,6 @@ const ROASSparkline = ({
     return hasSignificantData ? 'text-green-600' : 'text-green-400';
   };
 
-  // Calculate limited date range (max 14 days)
-  const getLimitedDateRange = (start, end) => {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-    
-    if (daysDiff <= 14) {
-      return { start, end };
-    }
-    
-    // Take the last 14 days from the end date
-    const limitedStart = new Date(endDate);
-    limitedStart.setDate(limitedStart.getDate() - 13); // 13 days back + end date = 14 days
-    
-    return {
-      start: limitedStart.toISOString().split('T')[0],
-      end
-    };
-  };
-
   // Load chart data
   useEffect(() => {
     const loadChartData = async () => {
@@ -72,15 +52,12 @@ const ROASSparkline = ({
       setError(null);
       
       try {
-        // Limit to 14 days maximum
-        const { start: limitedStart, end: limitedEnd } = getLimitedDateRange(startDate, endDate);
-        
         const apiParams = {
           entity_type: entityType,
           entity_id: entityId,
           breakdown: breakdown,
-          start_date: limitedStart,
-          end_date: limitedEnd
+          start_date: startDate,
+          end_date: endDate
         };
         
         const response = await dashboardApi.getAnalyticsChartData(apiParams);
@@ -158,7 +135,9 @@ const ROASSparkline = ({
   // CRITICAL DEBUG: Log what data we're actually working with
   if (chartData.length > 0) {
     console.log('🔥 SPARKLINE FRONTEND DEBUG:');
+    console.log('   chartData.length:', chartData.length);
     console.log('   First record:', chartData[0]);
+    console.log('   Last record:', chartData[chartData.length - 1]);
     console.log('   daily_roas values:', chartData.map(d => parseFloat(d.daily_roas) || 0));
     console.log('   daily_spend values:', chartData.map(d => parseFloat(d.daily_spend) || 0));
     console.log('   daily_estimated_revenue values:', chartData.map(d => parseFloat(d.daily_estimated_revenue) || 0));
@@ -208,6 +187,7 @@ const ROASSparkline = ({
             console.log('   minValue:', minValue);
             console.log('   maxValue:', maxValue);
             console.log('   range:', range);
+            console.log('   Expect exactly 14 days, got:', values.length);
             
             const points = values.map((value, index) => {
               const x = padding + (index / (values.length - 1)) * (width - 2 * padding);
@@ -232,19 +212,29 @@ const ROASSparkline = ({
               const startConversions = parseInt(chartData[i].daily_mixpanel_purchases) || 0;
               const endConversions = parseInt(chartData[i + 1].daily_mixpanel_purchases) || 0;
               
-              const startColor = getROASPerformanceColor(startROAS, startConversions);
-              const endColor = getROASPerformanceColor(endROAS, endConversions);
+              // Use grey styling for inactive periods (before first spend / after last spend)
+              const startIsInactive = chartData[i].is_inactive || false;
+              const endIsInactive = chartData[i + 1].is_inactive || false;
+              
+              const startColor = startIsInactive ? 
+                'text-gray-300 dark:text-gray-600' : 
+                getROASPerformanceColor(startROAS, startConversions);
+              const endColor = endIsInactive ? 
+                'text-gray-300 dark:text-gray-600' : 
+                getROASPerformanceColor(endROAS, endConversions);
               
               // First half: from start point to midpoint (colored like start point)
               segments.push({
                 path: `M ${points[i]} L ${midPoint}`,
-                color: startColor
+                color: startColor,
+                isInactive: startIsInactive
               });
               
               // Second half: from midpoint to end point (colored like end point)
               segments.push({
                 path: `M ${midPoint} L ${points[i + 1]}`,
-                color: endColor
+                color: endColor,
+                isInactive: endIsInactive
               });
             }
             
@@ -265,8 +255,12 @@ const ROASSparkline = ({
                       d={segment.path}
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.5"
+                      strokeWidth={segment.isInactive ? "1" : "1.5"}
+                      strokeDasharray={segment.isInactive ? "2,2" : "none"}
                       className={segment.color}
+                      style={{
+                        opacity: segment.isInactive ? 0.3 : 1
+                      }}
                     />
                   ))}
                   {values.map((value, index) => {
@@ -274,18 +268,22 @@ const ROASSparkline = ({
                     const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
                     const isHovered = hoveredPoint === index;
                     const dayConversions = parseInt(chartData[index].daily_mixpanel_purchases) || 0;
-                    const dayColor = getROASPerformanceColor(value, dayConversions);
+                    const isInactive = chartData[index].is_inactive || false;
+                    const dayColor = isInactive ? 
+                      'text-gray-300 dark:text-gray-600' : 
+                      getROASPerformanceColor(value, dayConversions);
                     
                     return (
                       <circle
                         key={index}
                         cx={x}
                         cy={y}
-                        r={isHovered ? "2.5" : "1"}
+                        r={isHovered ? "2.5" : (isInactive ? "0.5" : "1")}
                         fill="currentColor"
                         className={dayColor}
                         style={{
-                          filter: isHovered ? 'drop-shadow(0 0 3px rgba(0,0,0,0.3))' : 'none'
+                          filter: isHovered ? 'drop-shadow(0 0 3px rgba(0,0,0,0.3))' : 'none',
+                          opacity: isInactive ? 0.3 : 1
                         }}
                       />
                     );

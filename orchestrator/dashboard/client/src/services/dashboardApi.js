@@ -136,10 +136,29 @@ class DashboardApiService {
    * Get analytics data from the analytics pipeline - NEW ANALYTICS API
    */
   async getAnalyticsData(params) {
-    return this.makeRequest('/analytics/data', {
+    console.log('🔍 ANALYTICS API - getAnalyticsData called with params:', params);
+    const result = await this.makeRequest('/analytics/data', {
       method: 'POST',
       body: JSON.stringify(params),
     });
+    
+    // 🔍 CRITICAL DEBUG - Check if estimated_revenue_adjusted is in the response
+    if (result && result.data && result.data.length > 0) {
+      const firstRecord = result.data[0];
+      console.log('🔍 ANALYTICS API - CRITICAL FIELD CHECK:', {
+        'total_records': result.data.length,
+        'first_record_keys': Object.keys(firstRecord),
+        'has_estimated_revenue_adjusted': 'estimated_revenue_adjusted' in firstRecord,
+        'estimated_revenue_adjusted_value': firstRecord.estimated_revenue_adjusted,
+        'estimated_revenue_usd_value': firstRecord.estimated_revenue_usd,
+        'spend_value': firstRecord.spend,
+        'campaign_name': firstRecord.campaign_name
+      });
+    } else {
+      console.log('🔍 ANALYTICS API - No data returned or empty result:', result);
+    }
+    
+    return result;
   }
 
   /**

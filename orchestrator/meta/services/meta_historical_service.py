@@ -1555,5 +1555,7 @@ class MetaHistoricalService:
             'warnings': warnings
         }
 
-# Global service instance
-meta_historical_service = MetaHistoricalService() 
+# Global service instance (TODO: Rename to meta_analytics_service when file is renamed)
+meta_analytics_service = MetaHistoricalService()
+# Backward compatibility alias
+meta_historical_service = meta_analytics_service 

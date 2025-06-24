@@ -293,6 +293,23 @@ def get_analytics_data():
         with analytics_lock:
             result = analytics_service.execute_analytics_query(config)
         
+        # 🔍 CRITICAL DEBUG - Log the exact response being sent to frontend
+        logger.info("🔍 ANALYTICS ENDPOINT - CRITICAL RESPONSE DEBUG:")
+        if result.get('success') and result.get('data'):
+            data_records = result['data']
+            logger.info(f"🔍 Total records being sent: {len(data_records)}")
+            
+            if data_records:
+                first_record = data_records[0]
+                logger.info(f"🔍 First record keys: {list(first_record.keys())}")
+                logger.info(f"🔍 Has estimated_revenue_adjusted: {'estimated_revenue_adjusted' in first_record}")
+                logger.info(f"🔍 estimated_revenue_adjusted value: {first_record.get('estimated_revenue_adjusted', 'MISSING')}")
+                logger.info(f"🔍 estimated_revenue_usd value: {first_record.get('estimated_revenue_usd', 'MISSING')}")
+                logger.info(f"🔍 spend value: {first_record.get('spend', 'MISSING')}")
+                logger.info(f"🔍 campaign_name: {first_record.get('campaign_name', 'MISSING')}")
+        else:
+            logger.info(f"🔍 No data in result or query failed: {result}")
+        
         if result.get('success'):
             return jsonify(result)
         else:

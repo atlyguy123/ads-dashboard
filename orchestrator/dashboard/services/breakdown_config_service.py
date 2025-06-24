@@ -237,9 +237,9 @@ class BreakdownConfigService:
                         COUNT(DISTINCT upm.distinct_id) as total_users,
                         SUM(CASE WHEN e.event_name = 'RC Trial started' 
                             AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as trials,
-                        SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') 
+                        SUM(CASE WHEN e.event_name = 'RC Initial purchase' 
                             AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as purchases,
-                        SUM(CASE WHEN e.event_name IN ('RC Initial purchase', 'RC Trial converted') 
+                        SUM(CASE WHEN e.event_name = 'RC Initial purchase' 
                             AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as revenue
                     FROM user_product_metrics upm
                     LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id

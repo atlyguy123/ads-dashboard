@@ -40,10 +40,6 @@ class DatabaseManager:
         'meta_analytics': {
             'filename': 'meta_analytics.db', 
             'description': 'Meta (Facebook) advertising analytics data'
-        },
-        'meta_historical_data': {
-            'filename': 'meta_historical_data.db',
-            'description': 'Historical Meta advertising data'
         }
     }
     

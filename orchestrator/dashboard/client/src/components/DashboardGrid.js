@@ -454,6 +454,24 @@ export const DashboardGrid = ({
   };
 
   const visibleColumns = getOrderedVisibleColumns();
+  
+  // 🔍 CRITICAL DEBUG - Log column visibility for estimated_revenue_adjusted
+  console.log('🔍 DASHBOARDGRID DEBUG - Column Visibility:', {
+    'total_available_columns': AVAILABLE_COLUMNS.length,
+    'available_column_keys': AVAILABLE_COLUMNS.map(col => col.key),
+    'estimated_revenue_adjusted_in_available': AVAILABLE_COLUMNS.some(col => col.key === 'estimated_revenue_adjusted'),
+    'column_visibility_state': columnVisibility,
+    'estimated_revenue_adjusted_visibility': columnVisibility.estimated_revenue_adjusted,
+    'visible_columns_count': visibleColumns.length,
+    'visible_column_keys': visibleColumns.map(col => col.key),
+    'estimated_revenue_adjusted_in_visible': visibleColumns.some(col => col.key === 'estimated_revenue_adjusted'),
+    'data_sample': data.length > 0 ? {
+      'first_row_keys': Object.keys(data[0]),
+      'has_estimated_revenue_adjusted_field': 'estimated_revenue_adjusted' in data[0],
+      'estimated_revenue_adjusted_value': data[0]?.estimated_revenue_adjusted,
+      'estimated_revenue_usd_value': data[0]?.estimated_revenue_usd
+    } : 'no_data'
+  });
 
   // Helper function to check if a column should be visible
   const isColumnVisible = (columnKey) => {
@@ -588,7 +606,7 @@ export const DashboardGrid = ({
 
     // Add pipeline update styling for key metrics
     const pipelineUpdatedClass = isPipelineUpdated && 
-      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_roas', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
+      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'estimated_roas', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
         ? 'font-bold text-green-600 dark:text-green-400' : '';
 
     // Special rendering for accuracy column with tooltip

@@ -7,7 +7,7 @@ Includes both live API testing and historical data collection endpoints.
 
 from flask import Blueprint, request, jsonify
 from ..services.meta_service import fetch_meta_data, check_async_job_status, get_async_job_results
-from ..services.meta_historical_service import meta_historical_service
+from ..services.meta_historical_service import meta_analytics_service
 import sys
 import importlib.util
 from pathlib import Path
@@ -101,7 +101,7 @@ def start_historical_collection():
         if not all([start_date, end_date, fields]):
             return jsonify({'error': 'start_date, end_date, and fields are required'}), 400
         
-        job_id = meta_historical_service.start_collection_job(
+        job_id = meta_analytics_service.start_collection_job(
             start_date=start_date,
             end_date=end_date,
             fields=fields,
@@ -117,7 +117,7 @@ def start_historical_collection():
 def get_job_status(job_id):
     """Get status of a historical collection job"""
     try:
-        status = meta_historical_service.get_job_status(job_id)
+        status = meta_analytics_service.get_job_status(job_id)
         if status is None:
             return jsonify({'error': 'Job not found'}), 404
         return jsonify(status)
@@ -128,7 +128,7 @@ def get_job_status(job_id):
 def cancel_job(job_id):
     """Cancel a running historical collection job"""
     try:
-        success = meta_historical_service.cancel_job(job_id)
+        success = meta_analytics_service.cancel_job(job_id)
         if not success:
             return jsonify({'error': 'Job not found or cannot be cancelled'}), 404
         return jsonify({'status': 'cancelled'})
@@ -139,7 +139,7 @@ def cancel_job(job_id):
 def list_jobs():
     """List all historical collection jobs"""
     try:
-        jobs = meta_historical_service.list_jobs()
+        jobs = meta_analytics_service.list_jobs()
         return jsonify({'jobs': jobs})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -148,7 +148,7 @@ def list_jobs():
 def get_configurations():
     """Get all stored field/breakdown configurations"""
     try:
-        configs = meta_historical_service.get_configurations()
+        configs = meta_analytics_service.get_configurations()
         return jsonify(configs)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -165,7 +165,7 @@ def get_data_coverage():
         if not fields:
             return jsonify({'error': 'fields parameter is required'}), 400
         
-        coverage = meta_historical_service.get_data_coverage(
+        coverage = meta_analytics_service.get_data_coverage(
             fields=fields,
             breakdowns=breakdowns,
             start_date=start_date,
@@ -188,7 +188,7 @@ def get_missing_dates():
         if not all([start_date, end_date, fields]):
             return jsonify({'error': 'start_date, end_date, and fields are required'}), 400
         
-        missing_dates = meta_historical_service.get_missing_dates_for_config(
+        missing_dates = meta_analytics_service.get_missing_dates_for_config(
             start_date=start_date,
             end_date=end_date,
             fields=fields,
@@ -213,7 +213,7 @@ def export_historical_data():
         if not all([start_date, end_date, fields]):
             return jsonify({'error': 'start_date, end_date, and fields are required'}), 400
         
-        data = meta_historical_service.export_data_for_config(
+        data = meta_analytics_service.export_data_for_config(
             start_date=start_date,
             end_date=end_date,
             fields=fields,
@@ -230,7 +230,7 @@ def export_historical_data():
 def delete_historical_configuration(config_hash):
     """Delete all historical data for a specific configuration"""
     try:
-        success = meta_historical_service.delete_configuration_data(config_hash)
+        success = meta_analytics_service.delete_configuration_data(config_hash)
         if not success:
             return jsonify({'error': 'Configuration not found or could not be deleted'}), 404
         return jsonify({'status': 'deleted', 'config_hash': config_hash})
@@ -241,7 +241,7 @@ def delete_historical_configuration(config_hash):
 def get_action_mappings():
     """Get current action mappings"""
     try:
-        mappings = meta_historical_service.get_action_mappings()
+        mappings = meta_analytics_service.get_action_mappings()
         return jsonify({'mappings': mappings})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -256,7 +256,7 @@ def save_action_mappings():
         if not isinstance(mappings, dict):
             return jsonify({'error': 'Mappings must be a dictionary'}), 400
         
-        success = meta_historical_service.save_action_mappings(mappings)
+        success = meta_analytics_service.save_action_mappings(mappings)
         if not success:
             return jsonify({'error': 'Failed to save action mappings'}), 500
             
@@ -268,7 +268,7 @@ def save_action_mappings():
 def get_tables_overview():
     """Get overview of all historical data tables"""
     try:
-        overview = meta_historical_service.get_tables_overview()
+        overview = meta_analytics_service.get_tables_overview()
         return jsonify(overview)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -280,7 +280,7 @@ def get_table_data(table_name):
         limit = request.args.get('limit', 100, type=int)
         offset = request.args.get('offset', 0, type=int)
         
-        data = meta_historical_service.get_table_data(table_name, limit=limit, offset=offset)
+        data = meta_analytics_service.get_table_data(table_name, limit=limit, offset=offset)
         if data is None:
             return jsonify({'error': 'Table not found or access denied'}), 404
             
@@ -293,9 +293,9 @@ def get_table_aggregated_data(table_name):
     """Get aggregated daily metrics from a performance table (all available data)"""
     try:
         if table_name == 'composite_validation':
-            data = meta_historical_service.get_composite_validation_metrics()
+            data = meta_analytics_service.get_composite_validation_metrics()
         else:
-            data = meta_historical_service.get_aggregated_daily_metrics(table_name)
+            data = meta_analytics_service.get_aggregated_daily_metrics(table_name)
             
         if data is None:
             return jsonify({'error': 'Table not found or not a performance table'}), 404
@@ -308,7 +308,7 @@ def get_table_aggregated_data(table_name):
 def delete_table_date(table_name, date):
     """Delete all data for a specific date from a table"""
     try:
-        result = meta_historical_service.delete_date_data(table_name, date)
+        result = meta_analytics_service.delete_date_data(table_name, date)
         
         if result['success']:
             return jsonify({
