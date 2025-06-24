@@ -35,16 +35,7 @@ const ROASSparkline = ({
   // Load chart data
   useEffect(() => {
     const loadChartData = async () => {
-      console.log('🔥 SPARKLINE COMPONENT DEBUG:', {
-        entityType,
-        entityId,
-        startDate,
-        endDate,
-        shouldMakeRequest: !!(entityId && startDate && endDate)
-      });
-      
       if (!entityId || !startDate || !endDate) {
-        console.log('🔥 SPARKLINE SKIPPED - Missing params:', { entityId, startDate, endDate });
         return;
       }
       
@@ -62,19 +53,12 @@ const ROASSparkline = ({
         
         const response = await dashboardApi.getAnalyticsChartData(apiParams);
         
-        console.log('🔥 SPARKLINE DEBUG - API RESPONSE:', response);
-        console.log('🔥 SPARKLINE DEBUG - API PARAMS:', apiParams);
-        
         if (response && response.success && response.chart_data) {
-          console.log('🔥 SPARKLINE DEBUG - CHART DATA:', response.chart_data);
-          console.log('🔥 SPARKLINE DEBUG - CHART DATA LENGTH:', response.chart_data.length);
           setChartData(response.chart_data);
         } else {
-          console.error('🔥 SPARKLINE ERROR - Invalid API response for', entityId, response);
           setError('Invalid API response');
         }
       } catch (error) {
-        console.error('ROASSparkline: API call failed for', entityId, error.message);
         setError(error.message);
       } finally {
         setLoading(false);
@@ -131,26 +115,6 @@ const ROASSparkline = ({
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
     parseFloat(d.daily_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
   );
-  
-  // CRITICAL DEBUG: Log what data we're actually working with
-  if (chartData.length > 0) {
-    console.log('🔥 SPARKLINE FRONTEND DEBUG:');
-    console.log('   chartData.length:', chartData.length);
-    console.log('   First record:', chartData[0]);
-    console.log('   Last record:', chartData[chartData.length - 1]);
-    console.log('   daily_roas values:', chartData.map(d => parseFloat(d.daily_roas) || 0));
-    console.log('   daily_spend values:', chartData.map(d => parseFloat(d.daily_spend) || 0));
-    console.log('   daily_estimated_revenue values:', chartData.map(d => parseFloat(d.daily_estimated_revenue) || 0));
-    console.log('   hasEnoughData:', hasEnoughData);
-  }
-
-  console.log('🔥 SPARKLINE RENDER DEBUG:');
-  console.log('   chartData.length:', chartData.length);
-  console.log('   hasEnoughData:', hasEnoughData);
-  console.log('   chartData sample:', chartData[0]);
-  if (chartData.length > 0) {
-    console.log('   daily_roas values:', chartData.map(d => d.daily_roas));
-  }
 
   return (
     <div className="flex items-center space-x-3 min-w-[120px] relative">
@@ -180,14 +144,6 @@ const ROASSparkline = ({
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
-            
-            // CRITICAL DEBUG: Log sparkline calculation values
-            console.log('🔥 SPARKLINE SVG CALCULATION DEBUG:');
-            console.log('   values:', values);
-            console.log('   minValue:', minValue);
-            console.log('   maxValue:', maxValue);
-            console.log('   range:', range);
-            console.log('   Expect exactly 14 days, got:', values.length);
             
             const points = values.map((value, index) => {
               const x = padding + (index / (values.length - 1)) * (width - 2 * padding);
@@ -248,6 +204,17 @@ const ROASSparkline = ({
                   onMouseMove={handleMouseMove}
                   onMouseLeave={handleMouseLeave}
                 >
+                  {/* Center reference line - behind the main sparkline */}
+                  <line
+                    x1={width / 2}
+                    y1={padding}
+                    x2={width / 2}
+                    y2={height - padding}
+                    stroke="#FFFFFF"
+                    strokeWidth="1"
+                    strokeDasharray="2,2"
+                    style={{ opacity: 0.5 }}
+                  />
                   {/* Render each segment with its own color */}
                   {segments.map((segment, index) => (
                     <path
@@ -332,14 +299,6 @@ const ROASSparkline = ({
                                 const eventPriority = chartData[hoveredPoint].event_priority || 'trials';
                                 const ratioLabel = eventPriority === 'purchases' ? 'Purchase Accuracy' : 'Trial Accuracy';
                                 const accuracyRatio = (parseFloat(chartData[hoveredPoint].period_accuracy_ratio) * 100).toFixed(1);
-                                
-                                // DEBUG: Log accuracy ratio in sparkline
-                                console.log('🔥 SPARKLINE ACCURACY DEBUG:', {
-                                  eventPriority,
-                                  ratioLabel,
-                                  accuracyRatio,
-                                  rawRatio: chartData[hoveredPoint].period_accuracy_ratio
-                                });
                                 
                                 return `${ratioLabel}: ${accuracyRatio}% (MP/Meta)`;
                               })()}

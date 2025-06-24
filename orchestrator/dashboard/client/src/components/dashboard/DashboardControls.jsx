@@ -6,7 +6,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, RefreshCw, Settings, Database, Clock, Eye, ChevronDown, ChevronUp, ArrowUp, ArrowDown } from 'lucide-react';
 
-// Define all available columns with their display names and default visibility
+// ⚠️  DEPRECATED: This column definition is outdated!
+// 📋 USE INSTEAD: src/config/columns.js - Read: src/config/Column README.md for instructions
+// TODO: Remove this old definition and import from config/columns.js
 const AVAILABLE_COLUMNS = [
   { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true }, // Always visible
   { key: 'campaign_name', label: 'Campaign', defaultVisible: true },

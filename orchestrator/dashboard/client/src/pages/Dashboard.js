@@ -19,42 +19,12 @@ import { GraphModal } from '../components/GraphModal';
 import TimelineModal from '../components/TimelineModal';
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
-import DebugColumnTest from '../components/DebugColumnTest';
 
-// Available columns for visibility control
-const AVAILABLE_COLUMNS = [
-  { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true },
-  { key: 'campaign_name', label: 'Campaign', defaultVisible: true },
-  { key: 'adset_name', label: 'Ad Set', defaultVisible: true },
-  { key: 'impressions', label: 'Impressions', defaultVisible: true },
-  { key: 'clicks', label: 'Clicks', defaultVisible: true },
-  { key: 'spend', label: 'Spend', defaultVisible: true },
-  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
-  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
-  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
-  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
-  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
-  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_refunds_usd', label: 'Actual Refunds (Events)', defaultVisible: true },
-  { key: 'mixpanel_revenue_usd', label: 'Actual Revenue (Events)', defaultVisible: true },
-  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
-  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
-  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
-  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: true },
-  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
-  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
-  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
-  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
-  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
-  { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
-  { key: 'profit', label: 'Profit', defaultVisible: true },
-  { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
-  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
-];
+
+// Import centralized column configuration
+// 📋 NEED TO MODIFY COLUMNS? Read: src/config/Column README.md for step-by-step instructions
+import { AVAILABLE_COLUMNS, migrateColumnOrder, migrateColumnVisibility } from '../config/columns';
+import { useColumnValidation } from '../hooks/useColumnValidation';
 
 export const Dashboard = () => {
   // Main dashboard state
@@ -113,62 +83,40 @@ export const Dashboard = () => {
   
 
   
-  // Column visibility state
+  // Column visibility state - using centralized migration
   const [columnVisibility, setColumnVisibility] = useState(() => {
     const saved = localStorage.getItem('dashboard_column_visibility');
-    let visibility = {};
+    let savedVisibility = {};
     
     if (saved) {
       try {
-        visibility = JSON.parse(saved);
+        savedVisibility = JSON.parse(saved);
       } catch (e) {
         console.warn('Failed to parse saved column visibility:', e);
-        visibility = {};
+        savedVisibility = {};
       }
     }
     
-    // Default column visibility
-    const defaultVisibility = {
-      name: true,
-      campaign_name: true,
-      adset_name: true,
-      impressions: true,
-      clicks: true,
-      spend: true,
-      meta_trials_started: true,
-      mixpanel_trials_started: true,
-      meta_purchases: true,
-      mixpanel_purchases: true,
-      mixpanel_revenue_usd: true,
-      mixpanel_revenue_net: true,
-      estimated_revenue_adjusted: true,
-      estimated_roas: true,
-      profit: true,
-      trial_accuracy_ratio: true
-    };
-    
-    // Merge with defaults to ensure new columns are included
-    const mergedVisibility = { ...defaultVisibility, ...visibility };
-    
-    // Ensure the new column is visible by default
-    if (mergedVisibility.estimated_revenue_adjusted === undefined) {
-      mergedVisibility.estimated_revenue_adjusted = true;
-    }
-    
-    return mergedVisibility;
+    // Use centralized migration function
+    return migrateColumnVisibility(savedVisibility);
   });
 
-  // Column order state
+  // Column order state - using centralized migration
   const [columnOrder, setColumnOrder] = useState(() => {
     const saved = localStorage.getItem('dashboard_column_order');
+    let savedOrder = [];
+    
     if (saved) {
       try {
-        return JSON.parse(saved);
+        savedOrder = JSON.parse(saved);
       } catch (e) {
         console.warn('Failed to parse saved column order:', e);
+        savedOrder = [];
       }
     }
-    return AVAILABLE_COLUMNS.map(col => col.key);
+    
+    // Use centralized migration function
+    return migrateColumnOrder(savedOrder);
   });
   
   // Row order state  
@@ -203,20 +151,17 @@ export const Dashboard = () => {
   // Column visibility dropdown state
   const [showColumnSelector, setShowColumnSelector] = useState(false);
 
-  // Debug function to check column visibility
+  // Validate column consistency (prevents future issues)
+  const validationResult = useColumnValidation(columnOrder, columnVisibility);
+  
+  // Debug column visibility (temporary)
   useEffect(() => {
-    console.log('🔍 Column Visibility Debug:', {
-      'estimated_revenue_adjusted_visible': columnVisibility.estimated_revenue_adjusted,
-      'estimated_revenue_usd_visible': columnVisibility.estimated_revenue_usd,
-      'column_in_available_columns': AVAILABLE_COLUMNS.some(col => col.key === 'estimated_revenue_adjusted'),
-      'all_visible_columns': Object.keys(columnVisibility).filter(key => columnVisibility[key]),
-      'dashboardData_sample': dashboardData.length > 0 ? {
-        'has_estimated_revenue_adjusted': 'estimated_revenue_adjusted' in dashboardData[0],
-        'estimated_revenue_adjusted_value': dashboardData[0]?.estimated_revenue_adjusted,
-        'estimated_revenue_usd_value': dashboardData[0]?.estimated_revenue_usd
-      } : 'no_data'
+    console.log('Column Status:', {
+      'estimated_revenue_adjusted': columnVisibility.estimated_revenue_adjusted,
+      'visible_columns_count': Object.keys(columnVisibility).filter(key => columnVisibility[key]).length,
+      'validation_passed': validationResult.isValid
     });
-  }, [columnVisibility, dashboardData]);
+  }, [columnVisibility, validationResult]);
 
   // Pipeline state variables (for tracking running/queued pipelines)
   const [runningPipelines, setRunningPipelines] = useState(new Set());
@@ -258,6 +203,7 @@ export const Dashboard = () => {
 
   useEffect(() => {
     localStorage.setItem('dashboard_column_visibility', JSON.stringify(columnVisibility));
+    console.log('💾 Column visibility saved to localStorage:', Object.keys(columnVisibility).filter(key => columnVisibility[key]).length, 'visible columns');
   }, [columnVisibility]);
 
   // Save additional states to localStorage
@@ -267,6 +213,7 @@ export const Dashboard = () => {
 
   useEffect(() => {
     localStorage.setItem('dashboard_column_order', JSON.stringify(columnOrder));
+    console.log('💾 Column order saved to localStorage:', columnOrder.length, 'columns in order');
   }, [columnOrder]);
 
   useEffect(() => {
@@ -287,12 +234,17 @@ export const Dashboard = () => {
     }
   }, [lastUpdated]);
 
-  // Column visibility functions
+  // Column visibility functions  
+  // 📋 MODIFY COLUMN FUNCTIONS? Read: src/config/Column README.md for best practices
   const handleColumnToggle = (columnKey) => {
-    setColumnVisibility(prev => ({
-      ...prev,
-      [columnKey]: !prev[columnKey]
-    }));
+    setColumnVisibility(prev => {
+      const newVisibility = {
+        ...prev,
+        [columnKey]: !prev[columnKey]
+      };
+      console.log(`🔄 Column '${columnKey}' toggled to:`, newVisibility[columnKey]);
+      return newVisibility;
+    });
   };
 
   const handleSelectAllColumns = () => {
@@ -313,14 +265,9 @@ export const Dashboard = () => {
     setColumnVisibility(newVisibility);
   };
 
-  // Force refresh column visibility to include new columns
-  const refreshColumnVisibility = () => {
-    const newVisibility = { ...columnVisibility };
-    // Ensure the new estimated_revenue_adjusted column is included
-    newVisibility.estimated_revenue_adjusted = true;
-    setColumnVisibility(newVisibility);
-    console.log('🔄 Force refreshed column visibility to include estimated_revenue_adjusted');
-  };
+  // REMOVED: No longer needed - column migration now works correctly
+  
+
 
   // Handle sorting functionality
   const handleSort = (column) => {
@@ -535,6 +482,24 @@ export const Dashboard = () => {
     hasInitialLoadRef.current = true;
   }, [handleBackgroundRefresh, handleRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 🔥 CRITICAL FIX: Auto-refresh when breakdown, dateRange, or hierarchy changes
+  useEffect(() => {
+    if (!hasInitialLoadRef.current) return; // Don't trigger before initial load
+    
+    console.log('🔄 Dashboard parameters changed, refreshing data:', {
+      dateRange,
+      breakdown,
+      hierarchy
+    });
+    
+    // Use background refresh if we have existing data, otherwise regular refresh
+    if (dashboardData && dashboardData.length > 0) {
+      handleBackgroundRefresh();
+    } else {
+      handleRefresh();
+    }
+  }, [dateRange, breakdown, hierarchy, handleBackgroundRefresh, handleRefresh]);
+
   // Handle row actions
   const handleRowAction = (action, rowData) => {
     setSelectedRowData(rowData);
@@ -624,7 +589,6 @@ export const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <DebugColumnTest />
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
@@ -678,13 +642,7 @@ export const Dashboard = () => {
                         >
                           Hide All
                         </button>
-                        <button
-                          onClick={refreshColumnVisibility}
-                          className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded hover:bg-green-200 dark:hover:bg-green-800"
-                          title="Force refresh to include new columns"
-                        >
-                          Refresh
-                        </button>
+
                       </div>
                     </div>
                     

@@ -1,0 +1,121 @@
+/**
+ * DASHBOARD COLUMNS CONFIGURATION
+ * 
+ * ⚠️  SINGLE SOURCE OF TRUTH ⚠️
+ * This is the ONLY place where dashboard columns should be defined.
+ * All other files should import from here.
+ * 
+ * 📋 NEED HELP? Read: src/config/Column README.md for complete instructions
+ * 
+ * Quick Steps:
+ * 1. Add column definition here
+ * 2. Add field to backend API response  
+ * 3. Add formatting logic to DashboardGrid.js renderCellValue()
+ * 4. Test everything works
+ */
+
+export const AVAILABLE_COLUMNS = [
+  { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true },
+  { key: 'campaign_name', label: 'Campaign', defaultVisible: true },
+  { key: 'adset_name', label: 'Ad Set', defaultVisible: true },
+  { key: 'impressions', label: 'Impressions', defaultVisible: true },
+  { key: 'clicks', label: 'Clicks', defaultVisible: true },
+  { key: 'spend', label: 'Spend', defaultVisible: true },
+  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
+  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
+  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
+  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
+  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
+  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_refunds_usd', label: 'Actual Refunds (Events)', defaultVisible: true },
+  { key: 'mixpanel_revenue_usd', label: 'Actual Revenue (Events)', defaultVisible: true },
+  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
+  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
+  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
+  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
+  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: true },
+  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
+  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
+  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
+  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
+  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
+  { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
+  { key: 'profit', label: 'Profit', defaultVisible: true },
+  { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
+  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
+];
+
+/**
+ * Helper functions for column management
+ */
+export const getColumnByKey = (key) => {
+  return AVAILABLE_COLUMNS.find(col => col.key === key);
+};
+
+export const getDefaultVisibleColumns = () => {
+  return AVAILABLE_COLUMNS.filter(col => col.defaultVisible);
+};
+
+export const getAllColumnKeys = () => {
+  return AVAILABLE_COLUMNS.map(col => col.key);
+};
+
+/**
+ * Validates that a column order array contains all available columns
+ */
+export const validateColumnOrder = (columnOrder) => {
+  const allKeys = getAllColumnKeys();
+  const missing = allKeys.filter(key => !columnOrder.includes(key));
+  const extra = columnOrder.filter(key => !allKeys.includes(key));
+  
+  return {
+    isValid: missing.length === 0 && extra.length === 0,
+    missing,
+    extra,
+    expected: allKeys.length,
+    actual: columnOrder.length
+  };
+};
+
+/**
+ * Auto-migrates column order to include new columns
+ */
+export const migrateColumnOrder = (savedColumnOrder) => {
+  const allKeys = getAllColumnKeys();
+  
+  // Start with saved order
+  const migrated = [...(savedColumnOrder || [])];
+  
+  // Add missing columns at the end
+  allKeys.forEach(key => {
+    if (!migrated.includes(key)) {
+      migrated.push(key);
+    }
+  });
+  
+  // Remove obsolete columns
+  return migrated.filter(key => allKeys.includes(key));
+};
+
+/**
+ * Auto-migrates column visibility to include new columns
+ * RESPECTS USER PREFERENCES - only adds defaults for truly NEW columns
+ */
+export const migrateColumnVisibility = (savedVisibility) => {
+  const migrated = {};
+  
+  AVAILABLE_COLUMNS.forEach(col => {
+    if (savedVisibility && savedVisibility.hasOwnProperty(col.key)) {
+      // ALWAYS respect saved user preferences (never override)
+      migrated[col.key] = savedVisibility[col.key];
+    } else {
+      // Only use defaults for genuinely NEW columns that user hasn't seen
+      migrated[col.key] = col.defaultVisible || false;
+    }
+  });
+  
+  return migrated;
+}; 

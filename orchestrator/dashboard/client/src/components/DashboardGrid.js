@@ -1,6 +1,7 @@
 import React, { useState, Fragment, useRef, useEffect } from 'react';
 import { ChevronDown, ChevronRight, BarChart2, Info, Layers, Table2, Search, AlignJustify, Play, Clock, Sparkles, ChevronUp, ArrowUpDown } from 'lucide-react';
-import { AVAILABLE_COLUMNS } from './dashboard/DashboardControls';
+// 📋 ADDING NEW COLUMNS? Read: src/config/Column README.md for complete instructions
+import { AVAILABLE_COLUMNS } from '../config/columns';
 import ROASSparkline from './dashboard/ROASSparkline';
 
 // Pipeline Update Badge Component
@@ -448,29 +449,18 @@ export const DashboardGrid = ({
       // If no visibility settings loaded yet, use default visibility
       return orderedColumns.filter(col => col.defaultVisible);
     } else {
-      // Use explicit visibility settings
-      return orderedColumns.filter(col => columnVisibility[col.key] !== false);
+      // Use explicit visibility settings - show column if explicitly true
+      return orderedColumns.filter(col => columnVisibility[col.key] === true);
     }
   };
 
   const visibleColumns = getOrderedVisibleColumns();
   
-  // 🔍 CRITICAL DEBUG - Log column visibility for estimated_revenue_adjusted
-  console.log('🔍 DASHBOARDGRID DEBUG - Column Visibility:', {
-    'total_available_columns': AVAILABLE_COLUMNS.length,
-    'available_column_keys': AVAILABLE_COLUMNS.map(col => col.key),
-    'estimated_revenue_adjusted_in_available': AVAILABLE_COLUMNS.some(col => col.key === 'estimated_revenue_adjusted'),
-    'column_visibility_state': columnVisibility,
-    'estimated_revenue_adjusted_visibility': columnVisibility.estimated_revenue_adjusted,
-    'visible_columns_count': visibleColumns.length,
-    'visible_column_keys': visibleColumns.map(col => col.key),
-    'estimated_revenue_adjusted_in_visible': visibleColumns.some(col => col.key === 'estimated_revenue_adjusted'),
-    'data_sample': data.length > 0 ? {
-      'first_row_keys': Object.keys(data[0]),
-      'has_estimated_revenue_adjusted_field': 'estimated_revenue_adjusted' in data[0],
-      'estimated_revenue_adjusted_value': data[0]?.estimated_revenue_adjusted,
-      'estimated_revenue_usd_value': data[0]?.estimated_revenue_usd
-    } : 'no_data'
+  // Debug column visibility (cleanup after fix)
+  console.log('Column Visibility Status:', {
+    'visible_columns': visibleColumns.length,
+    'estimated_revenue_adjusted_visible': visibleColumns.some(col => col.key === 'estimated_revenue_adjusted'),
+    'mixpanel_revenue_net_visible': visibleColumns.some(col => col.key === 'mixpanel_revenue_net')
   });
 
   // Helper function to check if a column should be visible
@@ -501,6 +491,7 @@ export const DashboardGrid = ({
   };
 
   // Helper function to render a cell value with proper formatting and coloring
+  // 📋 ADDING NEW COLUMN FORMATTING? Read: src/config/Column README.md for instructions
   const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriority = null) => {
     const calculatedRow = calculateDerivedValues(row);
     let value = calculatedRow[columnKey];
@@ -698,6 +689,7 @@ export const DashboardGrid = ({
         const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
         currentOrder.splice(newTargetIndex, 0, draggedCol);
         
+        console.log(`🔄 Column reordered: '${draggedColumn}' moved from position ${draggedIndex} to ${newTargetIndex}`);
         onColumnOrderChange(currentOrder);
       }
     }
