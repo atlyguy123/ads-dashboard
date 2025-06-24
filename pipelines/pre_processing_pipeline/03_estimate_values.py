@@ -562,7 +562,7 @@ class ValueEstimator:
             
             # Calculate current value and value status
             current_value, value_status = self._calculate_current_value(
-                events, start_event, conversion_metrics, price_bucket_value
+                events, start_event, conversion_metrics, price_bucket_value, distinct_id, product_id
             )
             
             # CRITICAL: Only return the three fields we're allowed to modify
@@ -693,7 +693,7 @@ class ValueEstimator:
         else:
             return 'unknown'
 
-    def _calculate_current_value(self, events: List[Dict], start_event: Dict, conversion_metrics: Dict, price_bucket: float) -> Tuple[float, str]:
+    def _calculate_current_value(self, events: List[Dict], start_event: Dict, conversion_metrics: Dict, price_bucket: float, distinct_id: str, product_id: str) -> Tuple[float, str]:
         """
         Calculate current_value and value_status based on time and events.
         
@@ -701,6 +701,7 @@ class ValueEstimator:
         - Trial Users: 3 phases (0-7 days, 8-37 days, 38+ days)
         - Initial Purchase Users: 2 phases (0-30 days, 31+ days)
         - Uses different refund rates for trial conversions vs initial purchases
+        - Applies platform fees based on store type (AppStore/PlayStore: 15%, Stripe: 5%)
         """
         try:
             today = datetime.utcnow().date()
@@ -783,7 +784,11 @@ class ValueEstimator:
                         current_value = actual_revenue_from_initial_purchase  # Cancelled users keep their value (they paid)
                     value_status = "final_value"
             
-            return float(current_value), value_status
+            # Apply platform fee based on store type
+            store = self._get_store_from_database(distinct_id, product_id)
+            current_value_with_fees = self._apply_platform_fee(current_value, store)
+            
+            return float(current_value_with_fees), value_status
             
         except Exception as e:
             self.error_counts['failed_value_calculation'] += 1
@@ -982,6 +987,60 @@ class ValueEstimator:
         except Exception as e:
             logger.error(f"Failed to update user product records: {e}")
             return 0
+
+    def _get_store_from_database(self, distinct_id: str, product_id: str) -> str:
+        """
+        Get store information from user_product_metrics table for platform fee calculation.
+        
+        Args:
+            distinct_id: User identifier
+            product_id: Product identifier
+            
+        Returns:
+            Store name (APP_STORE, PLAY_STORE, STRIPE, PROMOTIONAL, or empty string if not found)
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT store
+                FROM user_product_metrics 
+                WHERE distinct_id = ? AND product_id = ?
+            """, (distinct_id, product_id))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            return row[0] if row and row[0] else ''
+                
+        except Exception as e:
+            logger.error(f"Error getting store for {distinct_id}: {e}")
+            return ''
+
+    def _apply_platform_fee(self, current_value: float, store: str) -> float:
+        """
+        Apply platform fee based on store type.
+        
+        Args:
+            current_value: The calculated value before platform fees
+            store: Store type (APP_STORE, PLAY_STORE, STRIPE, PROMOTIONAL)
+            
+        Returns:
+            Value after applying platform fee
+        """
+        if store in ['APP_STORE', 'PLAY_STORE']:
+            # 15% platform fee - multiply by 0.85
+            return current_value * 0.85
+        elif store == 'STRIPE':
+            # 5% platform fee - multiply by 0.95
+            return current_value * 0.95
+        elif store == 'PROMOTIONAL':
+            # No platform fee - return original value
+            return current_value
+        else:
+            # Unknown store - return original value to be safe
+            return current_value
 
 
 # Additional utility functions for compatibility with the existing codebase

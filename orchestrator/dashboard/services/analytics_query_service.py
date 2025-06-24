@@ -83,28 +83,64 @@ class AnalyticsQueryService:
     
     def execute_analytics_query(self, config: QueryConfig) -> Dict[str, Any]:
         """
-        Execute analytics query with comprehensive error handling and fallback logic
-        Enhanced with breakdown mapping support
+        Execute analytics query with proper hierarchical structure
+        
+        When breakdown is requested, maintains hierarchy and enriches it with breakdown data
+        instead of replacing the hierarchy with flat breakdown records.
         """
         try:
-            logger.info(f"🔍 EXECUTE_ANALYTICS_QUERY CALLED - BREAKDOWN MAPPING VERSION")
-            # Get the appropriate table name based on breakdown
+            logger.info(f"🔍 Executing analytics query: breakdown={config.breakdown}, group_by={config.group_by}")
+            
+            # Get the appropriate table name for the breakdown
             table_name = self.get_table_name(config.breakdown)
-            logger.info(f"🔍 Table name: {table_name}, Breakdown: {config.breakdown}")
             
-            # Check if this is a breakdown query that needs mapping
-            if config.enable_breakdown_mapping and config.breakdown in ['country', 'device']:
-                return self._execute_breakdown_query_with_mapping(config)
-            
-            # Check if Meta ad performance tables have data
+            # Check if Meta data exists in the primary table
             meta_data_count = self._get_meta_data_count(table_name)
-            logger.info(f"🔍 Meta data count: {meta_data_count}")
+            logger.info(f"📊 Meta data count in {table_name}: {meta_data_count}")
             
+            # CRITICAL FIX: Always get hierarchical data first
             if meta_data_count == 0:
-                logger.info(f"🔍 No data found in {table_name}, falling back to Mixpanel-only data")
-                return self._execute_mixpanel_only_query(config)
+                # Use Mixpanel-only data with hierarchical structure
+                hierarchical_result = self._execute_mixpanel_only_query(config)
+            else:
+                # Use Meta + Mixpanel data with hierarchical structure
+                hierarchical_result = self._execute_hierarchical_query(config, table_name)
             
-            # Original logic for when Meta data exists
+            # Check if we got valid hierarchical data
+            if not hierarchical_result.get('success') or not hierarchical_result.get('data'):
+                return hierarchical_result
+            
+            # CRITICAL FIX: If breakdown is requested AND we have hierarchical data, 
+            # enrich the hierarchy with breakdown data instead of replacing it
+            if config.breakdown != 'all' and config.enable_breakdown_mapping:
+                logger.info(f"🔍 Enriching hierarchical data with {config.breakdown} breakdown data")
+                enriched_result = self._enrich_hierarchical_data_with_breakdowns(
+                    hierarchical_result, config
+                )
+                return enriched_result
+            
+            # Return the hierarchical data as-is for 'all' breakdown
+            return hierarchical_result
+            
+        except Exception as e:
+            logger.error(f"Error executing analytics query: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'metadata': {
+                    'query_config': config.__dict__,
+                    'generated_at': datetime.now().isoformat()
+                }
+            }
+    
+    def _execute_hierarchical_query(self, config: QueryConfig, table_name: str) -> Dict[str, Any]:
+        """
+        Execute hierarchical query maintaining campaign->adset->ad structure
+        """
+        try:
+            logger.info(f"🔍 Executing hierarchical query: {config.group_by} level")
+            
+            # Execute the appropriate hierarchical query based on group_by
             if config.group_by == 'campaign':
                 structured_data = self._get_campaign_level_data(config, table_name)
             elif config.group_by == 'adset':
@@ -121,12 +157,12 @@ class AnalyticsQueryService:
                     'record_count': len(structured_data),
                     'date_range': f"{config.start_date} to {config.end_date}",
                     'generated_at': datetime.now().isoformat(),
-                    'breakdown_mapping_enabled': config.enable_breakdown_mapping
+                    'data_source': 'hierarchical_with_meta'
                 }
             }
             
         except Exception as e:
-            logger.error(f"Error executing analytics query: {e}", exc_info=True)
+            logger.error(f"Error executing hierarchical query: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
@@ -136,15 +172,17 @@ class AnalyticsQueryService:
                 }
             }
     
-    def _execute_breakdown_query_with_mapping(self, config: QueryConfig) -> Dict[str, Any]:
+    def _enrich_hierarchical_data_with_breakdowns(self, hierarchical_result: Dict[str, Any], config: QueryConfig) -> Dict[str, Any]:
         """
-        Execute breakdown query with Meta-Mixpanel mapping
-        This provides unified breakdown data with proper mapping between platforms
+        Enrich existing hierarchical data with breakdown information
+        
+        This maintains the campaign->adset->ad structure while adding breakdown data
+        under each entity as requested by the user.
         """
         try:
-            logger.info(f"🔍 Executing breakdown query with mapping: {config.breakdown}")
+            logger.info(f"🔍 Enriching hierarchy with {config.breakdown} breakdown data")
             
-            # Get breakdown data using the mapping service
+            # Get breakdown data from the mapping service
             breakdown_data = self.breakdown_service.get_breakdown_data(
                 breakdown_type=config.breakdown,
                 start_date=config.start_date,
@@ -152,83 +190,163 @@ class AnalyticsQueryService:
                 group_by=config.group_by or 'campaign'
             )
             
-            # Convert BreakdownData objects to dashboard-compatible format
-            structured_data = []
-            
+            # Convert breakdown data to a lookup structure keyed by entity ID
+            breakdown_lookup = {}
             for bd in breakdown_data:
-                # Map each breakdown data to our standard format
-                base_entity = {
-                    'id': f"{config.breakdown}_{bd.breakdown_value}_{bd.meta_data.get('campaign_id', 'unknown')}",
-                    'entity_type': config.breakdown,
-                    'campaign_id': bd.meta_data.get('campaign_id'),
-                    'campaign_name': bd.meta_data.get('campaign_name'),
-                    'name': bd.breakdown_value,  # This is the breakdown value (country name, device type, etc.)
-                    'breakdown_value': bd.breakdown_value,  # 🔥 CRITICAL FIX: Add breakdown_value to top level
-                    
-                    # Meta metrics
+                # FILTER OUT INVALID BREAKDOWN VALUES
+                breakdown_value = bd.breakdown_value
+                if not breakdown_value or breakdown_value.lower() in ['unknown', 'null', '', 'total']:
+                    continue  # Skip invalid/irrelevant breakdown values
+                
+                # Create keys for different entity levels
+                campaign_id = bd.meta_data.get('campaign_id')
+                adset_id = bd.meta_data.get('adset_id')
+                ad_id = bd.meta_data.get('ad_id')
+                
+                # Store breakdown data by the most specific available ID
+                if ad_id:
+                    key = f"ad_{ad_id}"
+                elif adset_id:
+                    key = f"adset_{adset_id}"
+                elif campaign_id:
+                    key = f"campaign_{campaign_id}"
+                else:
+                    continue  # Skip if no ID available
+                
+                if key not in breakdown_lookup:
+                    breakdown_lookup[key] = []
+                
+                # CRITICAL FIX: Use the same calculation system as parent entities
+                # Create a fake record with breakdown data for calculations
+                breakdown_record = {
                     'spend': bd.meta_data.get('spend', 0),
                     'impressions': bd.meta_data.get('impressions', 0),
                     'clicks': bd.meta_data.get('clicks', 0),
                     'meta_trials_started': bd.meta_data.get('meta_trials', 0),
                     'meta_purchases': bd.meta_data.get('meta_purchases', 0),
-                    
-                    # Mixpanel metrics
                     'mixpanel_trials_started': bd.mixpanel_data.get('mixpanel_trials', 0),
                     'mixpanel_purchases': bd.mixpanel_data.get('mixpanel_purchases', 0),
                     'mixpanel_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
-                    'mixpanel_revenue_net': bd.mixpanel_data.get('mixpanel_revenue', 0),  # Same as gross for now
-                    'estimated_revenue_adjusted': bd.mixpanel_data.get('mixpanel_revenue', 0),  # Use actual revenue
-                    'profit': bd.mixpanel_data.get('mixpanel_revenue', 0) - bd.meta_data.get('spend', 0),
-                    
-                    # Calculated metrics
-                    'estimated_roas': bd.combined_metrics.get('estimated_roas', 0),
-                    'trial_accuracy_ratio': bd.combined_metrics.get('trial_accuracy_ratio', 0),
-                    'purchase_accuracy_ratio': bd.combined_metrics.get('purchase_accuracy_ratio', 0),
-                    
-                    # Breakdown-specific data
-                    'breakdowns': [{
-                        'type': config.breakdown,
-                        'values': [{
-                            'name': bd.breakdown_value,
-                            'meta_value': bd.meta_data.get(config.breakdown),
-                            'mixpanel_value': bd.breakdown_value,
-                            **bd.meta_data,
-                            **bd.mixpanel_data,
-                            **bd.combined_metrics
-                        }]
-                    }],
-                    
-                    # Additional metadata
-                    'total_users': bd.mixpanel_data.get('total_users', 0),
-                    'children': []
+                    'total_attributed_users': bd.mixpanel_data.get('total_users', 0),
+                    'estimated_revenue_usd': bd.mixpanel_data.get('estimated_revenue', 0),  # CRITICAL ADD: Use estimated revenue from breakdown service
+                    # Add other fields that might be needed for calculations
+                    'mixpanel_trials_in_progress': 0,
+                    'mixpanel_trials_ended': 0,
+                    'mixpanel_converted_amount': 0,
+                    'mixpanel_conversions_net_refunds': 0,
+                    'mixpanel_refunds_usd': 0,
+                    'segment_accuracy_average': None
                 }
                 
-                structured_data.append(base_entity)
-            
-            return {
-                'success': True,
-                'data': structured_data,
-                'metadata': {
-                    'query_config': config.__dict__,
-                    'table_used': f'breakdown_mapping_{config.breakdown}',
-                    'record_count': len(structured_data),
-                    'date_range': f"{config.start_date} to {config.end_date}",
-                    'generated_at': datetime.now().isoformat(),
-                    'breakdown_mapping_enabled': True,
-                    'breakdown_type': config.breakdown
+                # Use the same calculation system as _format_record
+                calc_input = CalculationInput(
+                    raw_record=breakdown_record,
+                    config=config.__dict__ if config else None,
+                    start_date=config.start_date if config else None,
+                    end_date=config.end_date if config else None
+                )
+                
+                # Extract entity IDs for identification
+                campaign_id = bd.meta_data.get('campaign_id')
+                adset_id = bd.meta_data.get('adset_id') 
+                ad_id = bd.meta_data.get('ad_id')
+                
+                # Calculate all the same metrics as parent entities
+                calculated_breakdown = {
+                    'type': config.breakdown,
+                    'name': breakdown_value,
+                    'meta_value': bd.meta_data.get(config.breakdown),
+                    'mixpanel_value': breakdown_value,
+                    
+                    # Entity identification fields (needed for sparkline)
+                    'id': f"{breakdown_value}_{campaign_id or adset_id or ad_id}",  # Unique ID for breakdown
+                    'entity_type': 'campaign' if campaign_id else ('adset' if adset_id else 'ad'),
+                    'campaign_id': campaign_id,
+                    'adset_id': adset_id,
+                    'ad_id': ad_id,
+                    
+                    # Base metrics (same as parent)
+                    'spend': float(breakdown_record.get('spend', 0) or 0),
+                    'impressions': int(breakdown_record.get('impressions', 0) or 0),
+                    'clicks': int(breakdown_record.get('clicks', 0) or 0),
+                    'meta_trials_started': int(breakdown_record.get('meta_trials_started', 0) or 0),
+                    'meta_purchases': int(breakdown_record.get('meta_purchases', 0) or 0),
+                    'mixpanel_trials_started': int(breakdown_record.get('mixpanel_trials_started', 0) or 0),
+                    'mixpanel_purchases': int(breakdown_record.get('mixpanel_purchases', 0) or 0),
+                    'mixpanel_revenue_usd': float(breakdown_record.get('mixpanel_revenue_usd', 0) or 0),
+                    'total_attributed_users': int(breakdown_record.get('total_attributed_users', 0) or 0),
+                    'estimated_revenue_usd': float(breakdown_record.get('estimated_revenue_usd', 0) or 0),  # CRITICAL ADD: Include estimated revenue
+                    
+                    # Calculated metrics (same calculation system as parent)
+                    'trial_accuracy_ratio': AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input) / 100.0,  # Convert to decimal for frontend
+                    'purchase_accuracy_ratio': AccuracyCalculators.calculate_purchase_accuracy_ratio(calc_input) / 100.0,  # Convert to decimal for frontend
+                    'estimated_roas': ROASCalculators.calculate_estimated_roas(calc_input),
+                    'performance_impact_score': ROASCalculators.calculate_performance_impact_score(calc_input),
+                    'estimated_revenue_adjusted': RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(calc_input),  # CRITICAL ADD: Missing field
+                    'mixpanel_cost_per_trial': CostCalculators.calculate_mixpanel_cost_per_trial(calc_input),
+                    'mixpanel_cost_per_purchase': CostCalculators.calculate_mixpanel_cost_per_purchase(calc_input),
+                    'meta_cost_per_trial': CostCalculators.calculate_meta_cost_per_trial(calc_input),
+                    'meta_cost_per_purchase': CostCalculators.calculate_meta_cost_per_purchase(calc_input),
+                    'click_to_trial_rate': RateCalculators.calculate_click_to_trial_rate(calc_input),
+                    'trial_conversion_rate': DatabaseCalculators.calculate_trial_conversion_rate(calc_input),
+                    'trial_to_purchase_rate': DatabaseCalculators.calculate_trial_to_purchase_rate(calc_input),
+                    'mixpanel_revenue_net': RevenueCalculators.calculate_mixpanel_revenue_net(calc_input),
+                    'profit': RevenueCalculators.calculate_profit(calc_input),
                 }
-            }
+                
+                breakdown_lookup[key].append(calculated_breakdown)
+            
+            # Recursively enrich the hierarchical data with breakdown information
+            def enrich_entity(entity, level='campaign'):
+                """Recursively add breakdown data to entities"""
+                entity_type = level
+                entity_id = None
+                
+                if level == 'campaign':
+                    entity_id = entity.get('campaign_id')
+                elif level == 'adset':
+                    entity_id = entity.get('adset_id')
+                elif level == 'ad':
+                    entity_id = entity.get('ad_id')
+                
+                # Add breakdown data if available for this entity
+                if entity_id:
+                    lookup_key = f"{entity_type}_{entity_id}"
+                    if lookup_key in breakdown_lookup:
+                        entity['breakdowns'] = [{
+                            'type': config.breakdown,
+                            'values': breakdown_lookup[lookup_key]
+                        }]
+                
+                # Recursively process children
+                if 'children' in entity and entity['children']:
+                    next_level = 'adset' if level == 'campaign' else 'ad'
+                    for child in entity['children']:
+                        enrich_entity(child, next_level)
+            
+            # Enrich all top-level entities
+            enriched_data = hierarchical_result['data'].copy()
+            
+            # CRITICAL FIX: Start enrichment at the correct level based on group_by
+            starting_level = config.group_by or 'campaign'
+            for entity in enriched_data:
+                enrich_entity(entity, starting_level)
+            
+            # Update the result with enriched data
+            enriched_result = hierarchical_result.copy()
+            enriched_result['data'] = enriched_data
+            enriched_result['metadata']['breakdown_enriched'] = True
+            enriched_result['metadata']['breakdown_type'] = config.breakdown
+            enriched_result['metadata']['breakdown_records_added'] = len(breakdown_data)
+            
+            logger.info(f"✅ Successfully enriched {len(enriched_data)} entities with {config.breakdown} breakdown data")
+            return enriched_result
             
         except Exception as e:
-            logger.error(f"Error executing breakdown query with mapping: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'metadata': {
-                    'query_config': config.__dict__,
-                    'generated_at': datetime.now().isoformat()
-                }
-            }
+            logger.error(f"Error enriching hierarchical data with breakdowns: {e}", exc_info=True)
+            # Return original hierarchical data if enrichment fails
+            hierarchical_result['metadata']['breakdown_enrichment_failed'] = str(e)
+            return hierarchical_result
     
     def discover_breakdown_mappings(self) -> Dict[str, Any]:
         """
@@ -1251,6 +1369,11 @@ class AnalyticsQueryService:
             'adset_name': record.get('adset_name', ''),
             'ad_name': record.get('ad_name', ''),
             
+            # CRITICAL FIX: Preserve entity ID fields for breakdown enrichment
+            'campaign_id': record.get('campaign_id'),
+            'adset_id': record.get('adset_id'), 
+            'ad_id': record.get('ad_id'),
+            
             # Meta metrics (already aggregated)
             'spend': float(record.get('spend', 0) or 0),
             'impressions': int(record.get('impressions', 0) or 0),
@@ -1290,8 +1413,8 @@ class AnalyticsQueryService:
         )
         
         # Calculate all derived metrics using the calculator functions
-        formatted['trial_accuracy_ratio'] = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input)
-        formatted['purchase_accuracy_ratio'] = AccuracyCalculators.calculate_purchase_accuracy_ratio(calc_input)
+        formatted['trial_accuracy_ratio'] = AccuracyCalculators.calculate_trial_accuracy_ratio(calc_input) / 100.0  # Convert to decimal for frontend
+        formatted['purchase_accuracy_ratio'] = AccuracyCalculators.calculate_purchase_accuracy_ratio(calc_input) / 100.0  # Convert to decimal for frontend
         
         # ROAS calculation with accuracy adjustment
         formatted['estimated_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
@@ -1328,23 +1451,38 @@ class AnalyticsQueryService:
     def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
         """Get detailed daily metrics for sparkline charts - ALWAYS returns exactly 14 days ending on config.end_date"""
         try:
+            # Check if this is a breakdown entity (format: "US_120217904661980178")
+            is_breakdown_entity = '_' in entity_id and not entity_id.startswith(('campaign_', 'adset_', 'ad_'))
+            
+            if is_breakdown_entity:
+                # Parse breakdown entity ID
+                breakdown_value, parent_entity_id = entity_id.split('_', 1)
+                logger.info(f"📊 BREAKDOWN CHART: {breakdown_value} breakdown for {entity_type} {parent_entity_id}")
+                return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value)
+            
+            # Regular entity chart data
             table_name = self.get_table_name(config.breakdown)
             
             # Calculate the exact 14-day period ending on config.end_date
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
-            start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
+            display_start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
+            
+            # Calculate data fetch period: need 7 additional days before display period for rolling calculations
+            data_start_date = display_start_date - timedelta(days=6)  # 6 days before display (7 total including display start)
             
             # Calculate expanded date range for activity analysis (1 week before and after)
-            expanded_start_date = start_date - timedelta(days=7)  # 1 week before display period
+            expanded_start_date = display_start_date - timedelta(days=7)  # 1 week before display period
             expanded_end_date = end_date + timedelta(days=7)      # 1 week after display period
             
             # Format dates for queries
-            chart_start_date = start_date.strftime('%Y-%m-%d')
+            chart_start_date = data_start_date.strftime('%Y-%m-%d')  # Fetch from earlier date
             chart_end_date = config.end_date
+            display_start_str = display_start_date.strftime('%Y-%m-%d')  # Display period start
             expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
             expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
             
-            logger.info(f"📊 CHART DATA: Showing 14 days from {chart_start_date} to {chart_end_date}")
+            logger.info(f"📊 CHART DATA: Fetching 20 days from {chart_start_date} to {chart_end_date} for rolling calculations")
+            logger.info(f"📊 DISPLAY PERIOD: Showing 14 days from {display_start_str} to {chart_end_date}")
             logger.info(f"📊 ACTIVITY ANALYSIS: Checking spend activity from {expanded_start_str} to {expanded_end_str}")
             
             # Build WHERE clause for Meta data based on entity type
@@ -1435,12 +1573,12 @@ class AnalyticsQueryService:
             mixpanel_data = [dict(row) for row in cursor.fetchall()]
             mixpanel_conn.close()
             
-            # Generate ALL 14 days, filling missing days with zeros
+            # Generate ALL data fetch days (20 total: 6 days before + 14 display days), filling missing days with zeros
             daily_data = {}
-            current_date = start_date
+            current_date = data_start_date
             
-            # Initialize all 14 days with zero values and activity status
-            for i in range(14):
+            # Initialize all 20 days with zero values and activity status
+            for i in range(20):
                 date_str = current_date.strftime('%Y-%m-%d')
                 
                 # Determine if this day should be grey (inactive)
@@ -1524,9 +1662,9 @@ class AnalyticsQueryService:
             
             logger.info(f"📊 CHART ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
             
-            # Calculate daily metrics using the modular calculator system for ALL 14 days
-            chart_data = []
-            for date in sorted(daily_data.keys()):  # This will always be exactly 14 days
+            # Calculate daily metrics using the modular calculator system for ALL 20 days
+            all_data = []
+            for date in sorted(daily_data.keys()):  # This will be exactly 20 days
                 day_data = daily_data[date]
                 
                 # Map daily fields to standard calculator field names
@@ -1552,18 +1690,29 @@ class AnalyticsQueryService:
                 day_data['event_priority'] = event_priority
                 day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
                 
-                chart_data.append(day_data)
+                all_data.append(day_data)
             
-            # Calculate rolling 7-day ROAS for each day
-            for i, day_data in enumerate(chart_data):
+            # Calculate rolling 7-day ROAS for each day in the full dataset
+            for i, day_data in enumerate(all_data):
                 # Calculate rolling window (this day + up to 6 days back)
                 rolling_start_idx = max(0, i - 6)  # Don't go before array start
-                rolling_days = chart_data[rolling_start_idx:i + 1]
+                rolling_days = all_data[rolling_start_idx:i + 1]
                 
-                # Sum spend and revenue for the rolling window
+                # Sum spend and accuracy-adjusted revenue for the rolling window
                 rolling_spend = sum(d['daily_spend'] for d in rolling_days)
-                rolling_revenue = sum(d['daily_estimated_revenue'] for d in rolling_days)
+                # Use accuracy-adjusted revenue from daily calculation for consistency
+                rolling_revenue = sum(RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
+                    CalculationInput(raw_record={
+                        'estimated_revenue_usd': d['daily_estimated_revenue'],
+                        'mixpanel_trials_started': d['daily_mixpanel_trials'],
+                        'mixpanel_purchases': d['daily_mixpanel_purchases'],
+                        'meta_trials_started': d['daily_meta_trials'],
+                        'meta_purchases': d['daily_meta_purchases']
+                    })
+                ) for d in rolling_days)
                 rolling_conversions = sum(d['daily_mixpanel_purchases'] for d in rolling_days)
+                rolling_trials = sum(d['daily_mixpanel_trials'] for d in rolling_days)
+                rolling_meta_trials = sum(d['daily_meta_trials'] for d in rolling_days)
                 
                 # Calculate rolling ROAS
                 if rolling_spend > 0:
@@ -1576,18 +1725,25 @@ class AnalyticsQueryService:
                 day_data['rolling_7d_spend'] = rolling_spend
                 day_data['rolling_7d_revenue'] = rolling_revenue
                 day_data['rolling_7d_conversions'] = rolling_conversions
+                day_data['rolling_7d_trials'] = rolling_trials
+                day_data['rolling_7d_meta_trials'] = rolling_meta_trials
                 day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
             
-            logger.info(f"📊 CHART RESULT: {len(chart_data)} days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
+            # Extract only the 14-day display period (skip the first 6 days used for rolling calculations)
+            chart_data = all_data[6:]  # Return only the last 14 days for display
+            
+            logger.info(f"📊 CHART RESULT: {len(chart_data)} display days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
+            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for proper 7-day rolling averages")
             
             return {
                 'success': True,
                 'chart_data': chart_data,
                 'entity_type': entity_type,
                 'entity_id': entity_id,
-                'date_range': f"{chart_start_date} to {chart_end_date}",
+                'date_range': f"{display_start_str} to {chart_end_date}",
                 'total_days': len(chart_data),
                 'period_info': f"14-day period ending {chart_end_date}",
+                'rolling_calculation_info': f"Used 20-day dataset for accurate 7-day rolling averages",
                 'activity_analysis': {
                     'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
                     'first_spend_date': first_spend_date,
@@ -1601,4 +1757,298 @@ class AnalyticsQueryService:
             return {
                 'success': False,
                 'error': str(e)
+            }
+    
+    def _get_breakdown_chart_data(self, config: QueryConfig, entity_type: str, parent_entity_id: str, breakdown_value: str) -> Dict[str, Any]:
+        """Get chart data for a specific breakdown value (e.g., US breakdown for a campaign)"""
+        try:
+            # Import BreakdownMappingService here to avoid circular imports
+            from .breakdown_mapping_service import BreakdownMappingService
+            breakdown_service = BreakdownMappingService()
+            
+            # Determine which breakdown table to use based on config.breakdown
+            if config.breakdown == 'country':
+                breakdown_table = 'ad_performance_daily_country'
+                breakdown_field = 'country'
+                mixpanel_filter_field = 'country'
+                mixpanel_filter_value = breakdown_value  # Use original country code
+            elif config.breakdown == 'device':
+                breakdown_table = 'ad_performance_daily_device'
+                breakdown_field = 'device'
+                # For device, we need to map Meta device to Mixpanel store
+                device_mapping = breakdown_service.get_device_mapping(breakdown_value)
+                if not device_mapping:
+                    raise ValueError(f"No device mapping found for {breakdown_value}")
+                mixpanel_filter_field = 'store'
+                mixpanel_filter_value = device_mapping['store']  # Use Mixpanel store value
+            else:
+                raise ValueError(f"Breakdown chart data not supported for breakdown type: {config.breakdown}")
+            
+            # Calculate date ranges (same as regular chart data)
+            end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
+            display_start_date = end_date - timedelta(days=13)
+            data_start_date = display_start_date - timedelta(days=6)
+            expanded_start_date = display_start_date - timedelta(days=7)
+            expanded_end_date = end_date + timedelta(days=7)
+            
+            chart_start_date = data_start_date.strftime('%Y-%m-%d')
+            chart_end_date = config.end_date
+            expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
+            expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
+            
+            # Build WHERE clause for Meta breakdown data
+            if entity_type == 'campaign':
+                meta_where = f"campaign_id = ? AND {breakdown_field} = ?"
+                mixpanel_attr_field = "abi_campaign_id"
+            elif entity_type == 'adset':
+                meta_where = f"adset_id = ? AND {breakdown_field} = ?"
+                mixpanel_attr_field = "abi_ad_set_id"
+            elif entity_type == 'ad':
+                meta_where = f"ad_id = ? AND {breakdown_field} = ?"
+                mixpanel_attr_field = "abi_ad_id"
+            else:
+                raise ValueError(f"Invalid entity_type: {entity_type}")
+            
+            # Get daily Meta breakdown data for activity analysis
+            expanded_meta_query = f"""
+            SELECT date, SUM(spend) as daily_spend
+            FROM {breakdown_table}
+            WHERE {meta_where} AND date BETWEEN ? AND ? AND spend > 0
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            expanded_meta_data = self._execute_meta_query(expanded_meta_query, 
+                [parent_entity_id, breakdown_value, expanded_start_str, expanded_end_str])
+            
+            # Determine activity period
+            first_spend_date = None
+            last_spend_date = None
+            if expanded_meta_data:
+                spend_dates = [row['date'] for row in expanded_meta_data if row['daily_spend'] > 0]
+                if spend_dates:
+                    first_spend_date = min(spend_dates)
+                    last_spend_date = max(spend_dates)
+            
+            # Get daily Meta breakdown data for chart period
+            meta_query = f"""
+            SELECT date,
+                   SUM(spend) as daily_spend,
+                   SUM(impressions) as daily_impressions,
+                   SUM(clicks) as daily_clicks,
+                   SUM(meta_trials) as daily_meta_trials,
+                   SUM(meta_purchases) as daily_meta_purchases
+            FROM {breakdown_table}
+            WHERE {meta_where} AND date BETWEEN ? AND ?
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            meta_data = self._execute_meta_query(meta_query, 
+                [parent_entity_id, breakdown_value, chart_start_date, chart_end_date])
+            
+            # Get daily Mixpanel breakdown data
+            mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
+            mixpanel_conn.row_factory = sqlite3.Row
+            
+            mixpanel_query = f"""
+            SELECT 
+                upm.credited_date as date,
+                COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
+                COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
+                COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
+                SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
+                SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
+                SUM(upm.current_value) as daily_estimated_revenue,
+                COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
+            FROM user_product_metrics upm
+            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+            WHERE u.{mixpanel_attr_field} = ? AND u.{mixpanel_filter_field} = ?
+              AND upm.credited_date BETWEEN ? AND ?
+            GROUP BY upm.credited_date
+            ORDER BY upm.credited_date ASC
+            """
+            
+            cursor = mixpanel_conn.cursor()
+            cursor.execute(mixpanel_query, [parent_entity_id, mixpanel_filter_value, chart_start_date, chart_end_date])
+            mixpanel_data = [dict(row) for row in cursor.fetchall()]
+            mixpanel_conn.close()
+            
+            # Generate daily data structure (same as regular chart data)
+            daily_data = {}
+            current_date = data_start_date
+            
+            for i in range(20):  # 20 days total
+                date_str = current_date.strftime('%Y-%m-%d')
+                
+                # Determine if this day should be grey (inactive)
+                is_inactive = False
+                if first_spend_date and last_spend_date:
+                    is_inactive = date_str < first_spend_date or date_str > last_spend_date
+                elif first_spend_date:
+                    is_inactive = date_str < first_spend_date
+                elif last_spend_date:
+                    is_inactive = date_str > last_spend_date
+                else:
+                    is_inactive = True
+                
+                daily_data[date_str] = {
+                    'date': date_str,
+                    'daily_spend': 0.0,
+                    'daily_impressions': 0,
+                    'daily_clicks': 0,
+                    'daily_meta_trials': 0,
+                    'daily_meta_purchases': 0,
+                    'daily_mixpanel_trials': 0,
+                    'daily_mixpanel_purchases': 0,
+                    'daily_mixpanel_conversions': 0,
+                    'daily_mixpanel_revenue': 0.0,
+                    'daily_mixpanel_refunds': 0.0,
+                    'daily_estimated_revenue': 0.0,
+                    'daily_attributed_users': 0,
+                    'is_inactive': is_inactive
+                }
+                current_date += timedelta(days=1)
+            
+            # Overlay actual data
+            for row in meta_data:
+                date = row['date']
+                if date in daily_data:
+                    daily_data[date].update({
+                        'daily_spend': float(row.get('daily_spend', 0) or 0),
+                        'daily_impressions': int(row.get('daily_impressions', 0) or 0),
+                        'daily_clicks': int(row.get('daily_clicks', 0) or 0),
+                        'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
+                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0)
+                    })
+            
+            for row in mixpanel_data:
+                date = row['date']
+                if date in daily_data:
+                    daily_data[date].update({
+                        'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
+                        'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
+                        'daily_mixpanel_conversions': int(row.get('daily_mixpanel_conversions', 0) or 0),
+                        'daily_mixpanel_revenue': float(row.get('daily_mixpanel_revenue', 0) or 0),
+                        'daily_mixpanel_refunds': float(row.get('daily_mixpanel_refunds', 0) or 0),
+                        'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
+                        'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
+                    })
+            
+            # Calculate rolling ROAS using the same system as regular chart data
+            from ..calculators.base_calculators import CalculationInput
+            from ..calculators.roas_calculators import ROASCalculators
+            from ..calculators.revenue_calculators import RevenueCalculators
+            
+            # Calculate accuracy ratio for the entire period
+            total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
+            total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
+            total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
+            total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
+            
+            # Determine event priority and accuracy ratio
+            if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
+                event_priority = 'trials'
+                overall_accuracy_ratio = 0.0
+            elif total_mixpanel_trials > total_mixpanel_purchases:
+                event_priority = 'trials'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+            elif total_mixpanel_purchases > total_mixpanel_trials:
+                event_priority = 'purchases'
+                overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
+            else:
+                event_priority = 'equal'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+            
+            # Calculate daily metrics using the modular calculator system for ALL 20 days
+            all_data = []
+            for date in sorted(daily_data.keys()):
+                day_data = daily_data[date]
+                
+                # Map daily fields to standard calculator field names
+                calculator_record = {
+                    'spend': day_data['daily_spend'],
+                    'estimated_revenue_usd': day_data['daily_estimated_revenue'],
+                    'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
+                    'mixpanel_refunds_usd': day_data.get('daily_mixpanel_refunds', 0),
+                    'mixpanel_trials_started': day_data.get('daily_mixpanel_trials', 0),
+                    'meta_trials_started': day_data.get('daily_meta_trials', 0),
+                    'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
+                    'meta_purchases': day_data.get('daily_meta_purchases', 0),
+                    **day_data  # Keep original daily fields for reference
+                }
+                
+                # Use the modular calculator system for ROAS and profit calculations
+                calc_input = CalculationInput(raw_record=calculator_record)
+                day_data['daily_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
+                day_data['daily_profit'] = RevenueCalculators.calculate_profit(calc_input)
+                
+                # Store accuracy ratio and event priority for tooltips
+                day_data['period_accuracy_ratio'] = overall_accuracy_ratio
+                day_data['event_priority'] = event_priority
+                day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
+                
+                all_data.append(day_data)
+            
+            # Calculate rolling 7-day ROAS for each day in the full dataset
+            for i, day_data in enumerate(all_data):
+                # Calculate rolling window (this day + up to 6 days back)
+                rolling_start_idx = max(0, i - 6)
+                rolling_days = all_data[rolling_start_idx:i + 1]
+                
+                # Sum spend and accuracy-adjusted revenue for the rolling window
+                rolling_spend = sum(d['daily_spend'] for d in rolling_days)
+                rolling_revenue = sum(RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
+                    CalculationInput(raw_record={
+                        'estimated_revenue_usd': d['daily_estimated_revenue'],
+                        'mixpanel_trials_started': d['daily_mixpanel_trials'],
+                        'mixpanel_purchases': d['daily_mixpanel_purchases'],
+                        'meta_trials_started': d['daily_meta_trials'],
+                        'meta_purchases': d['daily_meta_purchases']
+                    })
+                ) for d in rolling_days)
+                rolling_conversions = sum(d['daily_mixpanel_purchases'] for d in rolling_days)
+                rolling_trials = sum(d['daily_mixpanel_trials'] for d in rolling_days)
+                rolling_meta_trials = sum(d['daily_meta_trials'] for d in rolling_days)
+                
+                # Calculate rolling ROAS
+                if rolling_spend > 0:
+                    rolling_roas = rolling_revenue / rolling_spend
+                else:
+                    rolling_roas = 0.0
+                
+                # Add rolling metrics to day data
+                day_data['rolling_7d_roas'] = round(rolling_roas, 2)
+                day_data['rolling_7d_spend'] = rolling_spend
+                day_data['rolling_7d_revenue'] = rolling_revenue
+                day_data['rolling_7d_conversions'] = rolling_conversions
+                day_data['rolling_7d_trials'] = rolling_trials
+                day_data['rolling_7d_meta_trials'] = rolling_meta_trials
+                day_data['rolling_window_days'] = len(rolling_days)
+            
+            # Extract only the 14-day display period (skip the first 6 days used for rolling calculations)
+            chart_data = all_data[6:]  # Return only the last 14 days for display
+            
+            logger.info(f"📊 BREAKDOWN CHART RESULT: {len(chart_data)} display days for {breakdown_value} breakdown")
+            
+            return {
+                'success': True,
+                'chart_data': chart_data,
+                'metadata': {
+                    'entity_type': entity_type,
+                    'entity_id': parent_entity_id,
+                    'breakdown_type': config.breakdown,
+                    'breakdown_value': breakdown_value,
+                    'period_days': 14,
+                    'rolling_window_days': 7,
+                    'generated_at': datetime.now().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting breakdown chart data: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'chart_data': []
             } 

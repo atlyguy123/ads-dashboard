@@ -40,66 +40,115 @@ class BreakdownMappingService:
             with sqlite3.connect(self.mixpanel_db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Country mappings (common Meta → Mixpanel mappings)
+                # CRITICAL FIX: Country mappings using ISO codes (Meta stores codes, not names)
                 country_mappings = [
-                    ('United States', 'US'),
-                    ('United Kingdom', 'GB'), 
-                    ('Canada', 'CA'),
-                    ('Australia', 'AU'),
-                    ('Germany', 'DE'),
-                    ('France', 'FR'),
-                    ('Brazil', 'BR'),
-                    ('India', 'IN'),
-                    ('China', 'CN'),
-                    ('Japan', 'JP'),
-                    ('South Korea', 'KR'),
-                    ('Mexico', 'MX'),
-                    ('Italy', 'IT'),
-                    ('Spain', 'ES'),
-                    ('Netherlands', 'NL'),
-                    ('Sweden', 'SE'),
-                    ('Norway', 'NO'),
-                    ('Denmark', 'DK'),
-                    ('Switzerland', 'CH'),
-                    ('Austria', 'AT'),
-                    ('Poland', 'PL'),
-                    ('Thailand', 'TH'),
-                    ('Malaysia', 'MY'),
-                    ('Singapore', 'SG'),
-                    ('Hong Kong', 'HK'),
-                    ('Taiwan', 'TW'),
-                    ('South Africa', 'ZA'),
-                    ('New Zealand', 'NZ'),
-                    ('Argentina', 'AR'),
-                    ('Chile', 'CL'),
-                    ('Colombia', 'CO'),
-                    ('Peru', 'PE'),
-                    ('Venezuela', 'VE'),
-                    ('Ecuador', 'EC'),
-                    ('Russia', 'RU'),
-                    ('Turkey', 'TR'),
-                    ('Israel', 'IL'),
-                    ('Saudi Arabia', 'SA'),
-                    ('United Arab Emirates', 'AE'),
-                    ('Egypt', 'EG'),
-                    ('Morocco', 'MA'),
-                    ('Nigeria', 'NG'),
-                    ('Kenya', 'KE'),
-                    ('Ghana', 'GH'),
-                    ('Philippines', 'PH'),
-                    ('Indonesia', 'ID'),
-                    ('Vietnam', 'VN'),
-                    ('Pakistan', 'PK'),
-                    ('Bangladesh', 'BD'),
-                    ('Sri Lanka', 'LK'),
+                    ('US', 'US'),    # United States
+                    ('GB', 'GB'),    # United Kingdom (Meta uses GB, not UK)
+                    ('CA', 'CA'),    # Canada
+                    ('AU', 'AU'),    # Australia
+                    ('DE', 'DE'),    # Germany
+                    ('FR', 'FR'),    # France
+                    ('BR', 'BR'),    # Brazil
+                    ('IN', 'IN'),    # India
+                    ('CN', 'CN'),    # China
+                    ('JP', 'JP'),    # Japan
+                    ('KR', 'KR'),    # South Korea
+                    ('MX', 'MX'),    # Mexico
+                    ('IT', 'IT'),    # Italy
+                    ('ES', 'ES'),    # Spain
+                    ('NL', 'NL'),    # Netherlands
+                    ('SE', 'SE'),    # Sweden
+                    ('NO', 'NO'),    # Norway
+                    ('DK', 'DK'),    # Denmark
+                    ('CH', 'CH'),    # Switzerland
+                    ('AT', 'AT'),    # Austria
+                    ('PL', 'PL'),    # Poland
+                    ('TH', 'TH'),    # Thailand
+                    ('MY', 'MY'),    # Malaysia
+                    ('SG', 'SG'),    # Singapore
+                    ('HK', 'HK'),    # Hong Kong
+                    ('TW', 'TW'),    # Taiwan
+                    ('ZA', 'ZA'),    # South Africa
+                    ('NZ', 'NZ'),    # New Zealand
+                    ('AR', 'AR'),    # Argentina
+                    ('CL', 'CL'),    # Chile
+                    ('CO', 'CO'),    # Colombia
+                    ('PE', 'PE'),    # Peru
+                    ('VE', 'VE'),    # Venezuela
+                    ('EC', 'EC'),    # Ecuador
+                    ('RU', 'RU'),    # Russia
+                    ('TR', 'TR'),    # Turkey
+                    ('IL', 'IL'),    # Israel
+                    ('SA', 'SA'),    # Saudi Arabia
+                    ('AE', 'AE'),    # United Arab Emirates
+                    ('EG', 'EG'),    # Egypt
+                    ('MA', 'MA'),    # Morocco
+                    ('NG', 'NG'),    # Nigeria
+                    ('KE', 'KE'),    # Kenya
+                    ('GH', 'GH'),    # Ghana
+                    ('PH', 'PH'),    # Philippines
+                    ('ID', 'ID'),    # Indonesia
+                    ('VN', 'VN'),    # Vietnam
+                    ('PK', 'PK'),    # Pakistan
+                    ('BD', 'BD'),    # Bangladesh
+                    ('LK', 'LK'),    # Sri Lanka
+                    ('IE', 'IE'),    # Ireland
+                    ('PT', 'PT'),    # Portugal
+                    ('FI', 'FI'),    # Finland
+                    ('BE', 'BE'),    # Belgium
+                    ('CZ', 'CZ'),    # Czech Republic
+                    ('HU', 'HU'),    # Hungary
+                    ('SK', 'SK'),    # Slovakia
+                    ('GR', 'GR'),    # Greece
+                    ('RO', 'RO'),    # Romania
+                    ('BG', 'BG'),    # Bulgaria
+                    ('HR', 'HR'),    # Croatia
+                    ('SI', 'SI'),    # Slovenia
+                    ('EE', 'EE'),    # Estonia
+                    ('LV', 'LV'),    # Latvia
+                    ('LT', 'LT'),    # Lithuania
+                    ('MT', 'MT'),    # Malta
+                    ('CY', 'CY'),    # Cyprus
+                    ('LU', 'LU'),    # Luxembourg
+                    ('IS', 'IS'),    # Iceland
+                    ('UA', 'UA'),    # Ukraine
+                    ('BY', 'BY'),    # Belarus
+                    ('MD', 'MD'),    # Moldova
+                    ('BA', 'BA'),    # Bosnia and Herzegovina
+                    ('RS', 'RS'),    # Serbia
+                    ('ME', 'ME'),    # Montenegro
+                    ('MK', 'MK'),    # North Macedonia
+                    ('AL', 'AL'),    # Albania
+                    ('XK', 'XK'),    # Kosovo
+                    ('CR', 'CR'),    # Costa Rica
+                    ('PA', 'PA'),    # Panama
+                    ('GT', 'GT'),    # Guatemala
+                    ('HN', 'HN'),    # Honduras
+                    ('SV', 'SV'),    # El Salvador
+                    ('NI', 'NI'),    # Nicaragua
+                    ('BZ', 'BZ'),    # Belize
+                    ('JM', 'JM'),    # Jamaica
+                    ('TT', 'TT'),    # Trinidad and Tobago
+                    ('BB', 'BB'),    # Barbados
+                    ('PR', 'PR'),    # Puerto Rico
+                    ('DO', 'DO'),    # Dominican Republic
+                    ('HT', 'HT'),    # Haiti
+                    ('CU', 'CU'),    # Cuba
+                    ('BS', 'BS'),    # Bahamas
+                    ('UY', 'UY'),    # Uruguay
+                    ('PY', 'PY'),    # Paraguay
+                    ('BO', 'BO'),    # Bolivia
+                    ('GY', 'GY'),    # Guyana
+                    ('SR', 'SR'),    # Suriname
+                    ('GF', 'GF'),    # French Guiana
                 ]
                 
-                for meta_name, mixpanel_code in country_mappings:
+                for meta_code, mixpanel_code in country_mappings:
                     cursor.execute("""
                         INSERT OR IGNORE INTO meta_country_mapping 
                         (meta_country_name, mixpanel_country_code, created_at, updated_at)
                         VALUES (?, ?, ?, ?)
-                    """, (meta_name, mixpanel_code, datetime.now(), datetime.now()))
+                    """, (meta_code, mixpanel_code, datetime.now(), datetime.now()))
                 
                 # Device mappings (Meta impression_device → Mixpanel store)
                 device_mappings = [
@@ -119,7 +168,7 @@ class BreakdownMappingService:
                     """, (meta_device, mixpanel_store, category, platform, datetime.now(), datetime.now()))
                 
                 conn.commit()
-                logger.info("✅ Initialized default breakdown mappings")
+                logger.info("✅ Initialized default breakdown mappings with ISO country codes")
                 
         except Exception as e:
             logger.error(f"Failed to initialize default mappings: {e}")
@@ -297,19 +346,24 @@ class BreakdownMappingService:
         return breakdown_data
 
     def _get_country_breakdown_data(self, start_date: str, end_date: str, group_by: str) -> List[BreakdownData]:
-        """Get country breakdown data with Meta-Mixpanel mapping"""
+        """
+        Get country breakdown data grouped by entity with all breakdown values
+        
+        CRITICAL RESTRUCTURE: Instead of creating separate entities for each country,
+        this groups all countries under each campaign/adset/ad as required.
+        """
         try:
-            # 🔥 CRITICAL FIX: Query Meta data from the correct database
+            # Query Meta data grouped by entity, then collect all breakdown values
             with sqlite3.connect(self.meta_db_path) as meta_conn:
                 meta_cursor = meta_conn.cursor()
                 
-                # Get Meta data with country info
+                # Get all Meta breakdown data for the date range
                 if group_by == 'campaign':
                     meta_query = """
                         SELECT 
-                            m.country as meta_country,
                             m.campaign_id,
                             m.campaign_name,
+                            m.country as meta_country,
                             SUM(m.spend) as spend,
                             SUM(m.impressions) as impressions,
                             SUM(m.clicks) as clicks,
@@ -317,63 +371,163 @@ class BreakdownMappingService:
                             SUM(m.meta_purchases) as meta_purchases
                         FROM ad_performance_daily_country m
                         WHERE m.date BETWEEN ? AND ?
-                        GROUP BY m.country, m.campaign_id, m.campaign_name
-                        ORDER BY SUM(m.spend) DESC
+                        GROUP BY m.campaign_id, m.campaign_name, m.country
+                        ORDER BY m.campaign_id, SUM(m.spend) DESC
                     """
-                    
-                    meta_cursor.execute(meta_query, (start_date, end_date))
-                    meta_results = meta_cursor.fetchall()
+                elif group_by == 'adset':
+                    meta_query = """
+                        SELECT 
+                            m.campaign_id,
+                            m.adset_id,
+                            m.adset_name,
+                            m.country as meta_country,
+                            SUM(m.spend) as spend,
+                            SUM(m.impressions) as impressions,
+                            SUM(m.clicks) as clicks,
+                            SUM(m.meta_trials) as meta_trials,
+                            SUM(m.meta_purchases) as meta_purchases
+                        FROM ad_performance_daily_country m
+                        WHERE m.date BETWEEN ? AND ?
+                        GROUP BY m.campaign_id, m.adset_id, m.adset_name, m.country
+                        ORDER BY m.campaign_id, m.adset_id, SUM(m.spend) DESC
+                    """
+                else:  # ad level
+                    meta_query = """
+                        SELECT 
+                            m.campaign_id,
+                            m.adset_id,
+                            m.ad_id,
+                            m.ad_name,
+                            m.country as meta_country,
+                            SUM(m.spend) as spend,
+                            SUM(m.impressions) as impressions,
+                            SUM(m.clicks) as clicks,
+                            SUM(m.meta_trials) as meta_trials,
+                            SUM(m.meta_purchases) as meta_purchases
+                        FROM ad_performance_daily_country m
+                        WHERE m.date BETWEEN ? AND ?
+                        GROUP BY m.campaign_id, m.adset_id, m.ad_id, m.ad_name, m.country
+                        ORDER BY m.campaign_id, m.adset_id, m.ad_id, SUM(m.spend) DESC
+                    """
+                
+                meta_cursor.execute(meta_query, (start_date, end_date))
+                meta_results = meta_cursor.fetchall()
             
-            # Query mapping tables and Mixpanel data from the correct database
+            # Group Meta data by entity and process with Mixpanel data
             with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
                 mixpanel_cursor = mixpanel_conn.cursor()
                 
-                breakdown_data = []
+                # Group breakdown data by entity ID
+                entity_breakdowns = {}  # {entity_id: [breakdown_data, ...]}
                 
                 for row in meta_results:
-                    meta_country, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
+                    if group_by == 'campaign':
+                        campaign_id, campaign_name, meta_country = row[:3]
+                        entity_id = campaign_id
+                        entity_name = campaign_name
+                        meta_data_base = {'campaign_id': campaign_id, 'campaign_name': campaign_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[3:]
+                    elif group_by == 'adset':
+                        campaign_id, adset_id, adset_name, meta_country = row[:4]
+                        entity_id = adset_id
+                        entity_name = adset_name
+                        meta_data_base = {'campaign_id': campaign_id, 'adset_id': adset_id, 'adset_name': adset_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[4:]
+                    else:  # ad level
+                        campaign_id, adset_id, ad_id, ad_name, meta_country = row[:5]
+                        entity_id = ad_id
+                        entity_name = ad_name
+                        meta_data_base = {'campaign_id': campaign_id, 'adset_id': adset_id, 'ad_id': ad_id, 'ad_name': ad_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[5:]
                     
-                    # Get country mapping
-                    mixpanel_cursor.execute("""
-                        SELECT mixpanel_country_code FROM meta_country_mapping 
-                        WHERE meta_country_name = ? AND is_active = 1
-                    """, (meta_country,))
+                    # CRITICAL SIMPLIFICATION: Use Meta country code directly (no mapping needed)
+                    mixpanel_country = meta_country  # Both use same ISO codes!
                     
-                    mapping_result = mixpanel_cursor.fetchone()
-                    if not mapping_result:
-                        logger.warning(f"No mapping found for Meta country: {meta_country}")
-                        continue
+                    # Get corresponding Mixpanel data for this specific country and entity
+                    if group_by == 'campaign':
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT u.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM mixpanel_user u
+                            LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+                            WHERE u.country = ? AND u.abi_campaign_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_country, campaign_id)
+                    elif group_by == 'adset':
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT u.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM mixpanel_user u
+                            LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_set_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_country, adset_id)
+                    else:  # ad level
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT u.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM mixpanel_user u
+                            LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_country, ad_id)
                     
-                    mixpanel_country = mapping_result[0]
-                    
-                    # Get corresponding Mixpanel data
-                    mixpanel_query = """
-                        SELECT 
-                            COUNT(DISTINCT u.distinct_id) as total_users,
-                            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
-                        FROM mixpanel_user u
-                        LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
-                        WHERE u.country = ? AND u.abi_campaign_id = ?
-                    """
-                    
-                    mixpanel_cursor.execute(mixpanel_query, (
-                        start_date, end_date, start_date, end_date, start_date, end_date,
-                        mixpanel_country, campaign_id
-                    ))
-                    
+                    mixpanel_cursor.execute(mixpanel_query, mixpanel_params)
                     mixpanel_result = mixpanel_cursor.fetchone()
                     total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
                     
-                    # Create breakdown data object
-                    breakdown_data.append(BreakdownData(
+                    # CRITICAL FIX: Get estimated revenue from user_product_metrics (same as parent entities)
+                    if group_by == 'campaign':
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_campaign_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, campaign_id, start_date, end_date)
+                    elif group_by == 'adset':
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_set_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, adset_id, start_date, end_date)
+                    else:  # ad level
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, ad_id, start_date, end_date)
+                    
+                    mixpanel_cursor.execute(estimated_revenue_query, estimated_revenue_params)
+                    estimated_revenue_result = mixpanel_cursor.fetchone()
+                    estimated_revenue = float(estimated_revenue_result[0] or 0) if estimated_revenue_result else 0.0
+                    
+                    # Create breakdown data entry for this country
+                    breakdown_entry = BreakdownData(
                         breakdown_type='country',
                         breakdown_value=mixpanel_country,
                         meta_data={
+                            **meta_data_base,
                             'country': meta_country,
-                            'campaign_id': campaign_id,
-                            'campaign_name': campaign_name,
                             'spend': float(spend or 0),
                             'impressions': int(impressions or 0),
                             'clicks': int(clicks or 0),
@@ -385,35 +539,52 @@ class BreakdownMappingService:
                             'total_users': int(total_users or 0),
                             'mixpanel_trials': int(mixpanel_trials or 0),
                             'mixpanel_purchases': int(mixpanel_purchases or 0),
-                            'mixpanel_revenue': float(mixpanel_revenue or 0)
+                            'mixpanel_revenue': float(mixpanel_revenue or 0),
+                            'estimated_revenue': estimated_revenue  # CRITICAL ADD: Include estimated revenue
                         },
                         combined_metrics={
-                            'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
+                            'estimated_roas': (estimated_revenue / float(spend or 1)) if spend else 0,  # Use estimated revenue for ROAS
                             'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
                             'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
                         }
-                    ))
+                    )
+                    
+                    # Group by entity ID - this is the KEY RESTRUCTURE
+                    if entity_id not in entity_breakdowns:
+                        entity_breakdowns[entity_id] = []
+                    entity_breakdowns[entity_id].append(breakdown_entry)
                 
+                # Flatten the grouped data back to a list
+                # Each BreakdownData now represents one country for one entity
+                breakdown_data = []
+                for entity_id, breakdowns in entity_breakdowns.items():
+                    breakdown_data.extend(breakdowns)
+                
+                logger.info(f"✅ Retrieved {len(breakdown_data)} country breakdown records for {len(entity_breakdowns)} entities")
                 return breakdown_data
                 
         except Exception as e:
-            logger.error(f"Error getting country breakdown data: {e}")
+            logger.error(f"Error getting country breakdown data: {e}", exc_info=True)
             return []
 
     def _get_device_breakdown_data(self, start_date: str, end_date: str, group_by: str) -> List[BreakdownData]:
-        """Get device breakdown data with Meta-Mixpanel mapping"""
+        """
+        Get device breakdown data grouped by entity with all breakdown values
+        
+        CRITICAL RESTRUCTURE: Groups all devices under each campaign/adset/ad as required.
+        """
         try:
-            # 🔥 CRITICAL FIX: Query Meta data from the correct database
+            # Query Meta data grouped by entity, then collect all breakdown values
             with sqlite3.connect(self.meta_db_path) as meta_conn:
                 meta_cursor = meta_conn.cursor()
                 
-                # Get Meta data with device info
+                # Get all Meta breakdown data for the date range
                 if group_by == 'campaign':
                     meta_query = """
                         SELECT 
-                            m.device as meta_device,
                             m.campaign_id,
                             m.campaign_name,
+                            m.device as meta_device,
                             SUM(m.spend) as spend,
                             SUM(m.impressions) as impressions,
                             SUM(m.clicks) as clicks,
@@ -421,21 +592,74 @@ class BreakdownMappingService:
                             SUM(m.meta_purchases) as meta_purchases
                         FROM ad_performance_daily_device m
                         WHERE m.date BETWEEN ? AND ?
-                        GROUP BY m.device, m.campaign_id, m.campaign_name
-                        ORDER BY SUM(m.spend) DESC
+                        GROUP BY m.campaign_id, m.campaign_name, m.device
+                        ORDER BY m.campaign_id, SUM(m.spend) DESC
                     """
-                    
-                    meta_cursor.execute(meta_query, (start_date, end_date))
-                    meta_results = meta_cursor.fetchall()
+                elif group_by == 'adset':
+                    meta_query = """
+                        SELECT 
+                            m.campaign_id,
+                            m.adset_id,
+                            m.adset_name,
+                            m.device as meta_device,
+                            SUM(m.spend) as spend,
+                            SUM(m.impressions) as impressions,
+                            SUM(m.clicks) as clicks,
+                            SUM(m.meta_trials) as meta_trials,
+                            SUM(m.meta_purchases) as meta_purchases
+                        FROM ad_performance_daily_device m
+                        WHERE m.date BETWEEN ? AND ?
+                        GROUP BY m.campaign_id, m.adset_id, m.adset_name, m.device
+                        ORDER BY m.campaign_id, m.adset_id, SUM(m.spend) DESC
+                    """
+                else:  # ad level
+                    meta_query = """
+                        SELECT 
+                            m.campaign_id,
+                            m.adset_id,
+                            m.ad_id,
+                            m.ad_name,
+                            m.device as meta_device,
+                            SUM(m.spend) as spend,
+                            SUM(m.impressions) as impressions,
+                            SUM(m.clicks) as clicks,
+                            SUM(m.meta_trials) as meta_trials,
+                            SUM(m.meta_purchases) as meta_purchases
+                        FROM ad_performance_daily_device m
+                        WHERE m.date BETWEEN ? AND ?
+                        GROUP BY m.campaign_id, m.adset_id, m.ad_id, m.ad_name, m.device
+                        ORDER BY m.campaign_id, m.adset_id, m.ad_id, SUM(m.spend) DESC
+                    """
+                
+                meta_cursor.execute(meta_query, (start_date, end_date))
+                meta_results = meta_cursor.fetchall()
             
-            # Query mapping tables and Mixpanel data from the correct database
+            # Group Meta data by entity and process with Mixpanel data
             with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
                 mixpanel_cursor = mixpanel_conn.cursor()
                 
-                breakdown_data = []
+                # Group breakdown data by entity ID
+                entity_breakdowns = {}  # {entity_id: [breakdown_data, ...]}
                 
                 for row in meta_results:
-                    meta_device, campaign_id, campaign_name, spend, impressions, clicks, meta_trials, meta_purchases = row
+                    if group_by == 'campaign':
+                        campaign_id, campaign_name, meta_device = row[:3]
+                        entity_id = campaign_id
+                        entity_name = campaign_name
+                        meta_data_base = {'campaign_id': campaign_id, 'campaign_name': campaign_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[3:]
+                    elif group_by == 'adset':
+                        campaign_id, adset_id, adset_name, meta_device = row[:4]
+                        entity_id = adset_id
+                        entity_name = adset_name
+                        meta_data_base = {'campaign_id': campaign_id, 'adset_id': adset_id, 'adset_name': adset_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[4:]
+                    else:  # ad level
+                        campaign_id, adset_id, ad_id, ad_name, meta_device = row[:5]
+                        entity_id = ad_id
+                        entity_name = ad_name
+                        meta_data_base = {'campaign_id': campaign_id, 'adset_id': adset_id, 'ad_id': ad_id, 'ad_name': ad_name}
+                        spend, impressions, clicks, meta_trials, meta_purchases = row[5:]
                     
                     # Get device mapping
                     mixpanel_cursor.execute("""
@@ -446,42 +670,101 @@ class BreakdownMappingService:
                     
                     mapping_result = mixpanel_cursor.fetchone()
                     if not mapping_result:
-                        logger.warning(f"No mapping found for Meta device: {meta_device}")
+                        logger.debug(f"No mapping found for Meta device: {meta_device}")
                         continue
                     
                     mixpanel_store, device_category, platform = mapping_result
                     
-                    # Get corresponding Mixpanel data
-                    mixpanel_query = """
-                        SELECT 
-                            COUNT(DISTINCT upm.distinct_id) as total_users,
-                            SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                            SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
-                        FROM user_product_metrics upm
-                        LEFT JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                        LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
-                        WHERE upm.store = ? AND u.abi_campaign_id = ?
-                    """
+                    # Get corresponding Mixpanel data for this specific device and entity
+                    if group_by == 'campaign':
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT upm.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM user_product_metrics upm
+                            LEFT JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
+                            WHERE upm.store = ? AND u.abi_campaign_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_store, campaign_id)
+                    elif group_by == 'adset':
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT upm.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM user_product_metrics upm
+                            LEFT JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
+                            WHERE upm.store = ? AND u.abi_ad_set_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_store, adset_id)
+                    else:  # ad level
+                        mixpanel_query = """
+                            SELECT 
+                                COUNT(DISTINCT upm.distinct_id) as total_users,
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                            FROM user_product_metrics upm
+                            LEFT JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            LEFT JOIN mixpanel_event e ON upm.distinct_id = e.distinct_id
+                            WHERE upm.store = ? AND u.abi_ad_id = ?
+                        """
+                        mixpanel_params = (start_date, end_date, start_date, end_date, start_date, end_date, mixpanel_store, ad_id)
                     
-                    mixpanel_cursor.execute(mixpanel_query, (
-                        start_date, end_date, start_date, end_date, start_date, end_date,
-                        mixpanel_store, campaign_id
-                    ))
-                    
+                    mixpanel_cursor.execute(mixpanel_query, mixpanel_params)
                     mixpanel_result = mixpanel_cursor.fetchone()
                     total_users, mixpanel_trials, mixpanel_purchases, mixpanel_revenue = mixpanel_result or (0, 0, 0, 0)
                     
-                    # Create breakdown data object
-                    breakdown_data.append(BreakdownData(
+                    # CRITICAL FIX: Get estimated revenue from user_product_metrics (same as parent entities)
+                    if group_by == 'campaign':
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_campaign_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, campaign_id, start_date, end_date)
+                    elif group_by == 'adset':
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_set_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, adset_id, start_date, end_date)
+                    else:  # ad level
+                        estimated_revenue_query = """
+                            SELECT 
+                                SUM(upm.current_value) as estimated_revenue
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                        """
+                        estimated_revenue_params = (mixpanel_country, ad_id, start_date, end_date)
+                    
+                    mixpanel_cursor.execute(estimated_revenue_query, estimated_revenue_params)
+                    estimated_revenue_result = mixpanel_cursor.fetchone()
+                    estimated_revenue = float(estimated_revenue_result[0] or 0) if estimated_revenue_result else 0.0
+                    
+                    # Create breakdown data entry for this device
+                    breakdown_entry = BreakdownData(
                         breakdown_type='device',
                         breakdown_value=mixpanel_store,
                         meta_data={
+                            **meta_data_base,
                             'device': meta_device,
                             'device_category': device_category,
                             'platform': platform,
-                            'campaign_id': campaign_id,
-                            'campaign_name': campaign_name,
                             'spend': float(spend or 0),
                             'impressions': int(impressions or 0),
                             'clicks': int(clicks or 0),
@@ -495,19 +778,32 @@ class BreakdownMappingService:
                             'total_users': int(total_users or 0),
                             'mixpanel_trials': int(mixpanel_trials or 0),
                             'mixpanel_purchases': int(mixpanel_purchases or 0),
-                            'mixpanel_revenue': float(mixpanel_revenue or 0)
+                            'mixpanel_revenue': float(mixpanel_revenue or 0),
+                            'estimated_revenue': estimated_revenue  # CRITICAL ADD: Include estimated revenue
                         },
                         combined_metrics={
-                            'estimated_roas': (float(mixpanel_revenue or 0) / float(spend or 1)) if spend else 0,
+                            'estimated_roas': (estimated_revenue / float(spend or 1)) if spend else 0,  # Use estimated revenue for ROAS
                             'trial_accuracy_ratio': (float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0,
                             'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
                         }
-                    ))
+                    )
+                    
+                    # Group by entity ID - this is the KEY RESTRUCTURE
+                    if entity_id not in entity_breakdowns:
+                        entity_breakdowns[entity_id] = []
+                    entity_breakdowns[entity_id].append(breakdown_entry)
                 
+                # Flatten the grouped data back to a list
+                # Each BreakdownData now represents one device for one entity
+                breakdown_data = []
+                for entity_id, breakdowns in entity_breakdowns.items():
+                    breakdown_data.extend(breakdowns)
+                
+                logger.info(f"✅ Retrieved {len(breakdown_data)} device breakdown records for {len(entity_breakdowns)} entities")
                 return breakdown_data
                 
         except Exception as e:
-            logger.error(f"Error getting device breakdown data: {e}")
+            logger.error(f"Error getting device breakdown data: {e}", exc_info=True)
             return []
 
     def _get_cached_breakdown(self, cache_key: str) -> Optional[List[BreakdownData]]:

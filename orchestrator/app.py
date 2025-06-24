@@ -12,6 +12,9 @@ from pathlib import Path
 import time
 from flask_cors import CORS
 
+# Import authentication
+from auth import requires_auth
+
 # Import dashboard blueprint
 from dashboard.api.dashboard_routes import dashboard_bp
 # Import debug blueprint
@@ -570,16 +573,19 @@ debug_registry = DebugModuleRegistry()
 print(f"Debug system initialized with {debug_registry.get_module_count()} modules loaded")
 
 @app.route('/')
+@requires_auth
 def index():
     """Main dashboard page"""
     return render_template('dashboard.html')
 
 @app.route('/pipelines')
+@requires_auth
 def pipelines():
     """Pipeline orchestrator page"""
     return render_template('pipelines.html')
 
 @app.route('/debug')
+@requires_auth
 def debug():
     """Debug dashboard page"""
     return render_template('debug.html')
@@ -696,6 +702,7 @@ def handle_disconnect():
 
 # Dashboard routes for serving static files
 @app.route('/ads-dashboard')
+@requires_auth
 def dashboard_home():
     """Serve the ads dashboard application"""
     return send_from_directory('dashboard/static', 'index.html')
@@ -1471,4 +1478,8 @@ def mixpanel_debug_user_events():
 
 if __name__ == '__main__':
     init_db()
-    socketio.run(app, debug=True, host='0.0.0.0', port=5001) 
+    runner = PipelineRunner()
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', 5001))
+    debug = os.getenv('FLASK_ENV') != 'production'
+    socketio.run(app, debug=debug, host=host, port=port) 

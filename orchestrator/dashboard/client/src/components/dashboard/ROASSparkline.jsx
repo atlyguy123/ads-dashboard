@@ -8,7 +8,8 @@ const ROASSparkline = ({
   conversionCount = 0,
   breakdown = 'all',
   startDate,
-  endDate 
+  endDate,
+  isBreakdownEntity = false
 }) => {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -315,17 +316,17 @@ const ROASSparkline = ({
                               })()}
                             </div>
                           )}
-          {/* Show conversion counts for confidence assessment */}
+          {/* Show rolling conversion counts for confidence assessment */}
           <div className="text-green-300 text-xs">
             Rolling Conversions: {chartData[hoveredPoint].rolling_7d_conversions || 0}
           </div>
           <div className="text-blue-300 text-xs">
-            Trials: {chartData[hoveredPoint].daily_mixpanel_trials || 0}
+            Rolling Trials: {chartData[hoveredPoint].rolling_7d_trials || 0}
           </div>
           {/* Show Meta comparison if available */}
-          {chartData[hoveredPoint].daily_meta_trials && (
+          {chartData[hoveredPoint].rolling_7d_meta_trials && (
             <div className="text-gray-400 text-xs">
-              Meta Trials: {chartData[hoveredPoint].daily_meta_trials}
+              Rolling Meta Trials: {chartData[hoveredPoint].rolling_7d_meta_trials}
             </div>
           )}
                   </div>

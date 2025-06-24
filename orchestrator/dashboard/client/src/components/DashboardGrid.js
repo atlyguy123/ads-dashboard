@@ -1,20 +1,10 @@
 import React, { useState, Fragment, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, BarChart2, Info, Layers, Table2, Search, AlignJustify, Play, Clock, Sparkles, ChevronUp, ArrowUpDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers, Table2, Search, AlignJustify, ChevronUp, ArrowUpDown } from 'lucide-react';
 // 📋 ADDING NEW COLUMNS? Read: src/config/Column README.md for complete instructions
 import { AVAILABLE_COLUMNS } from '../config/columns';
 import ROASSparkline from './dashboard/ROASSparkline';
 
-// Pipeline Update Badge Component
-const PipelineBadge = ({ isPipelineUpdated, className = "" }) => {
-  if (!isPipelineUpdated) return null;
-  
-  return (
-    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 ${className}`}>
-      <Sparkles size={12} className="mr-1" />
-      Pipeline
-    </span>
-  );
-};
+
 
 // Estimated ROAS Tooltip Component
 const EstimatedRoasTooltip = ({ roas, estimatedRevenue, diffPercent, spend, colorClass, pipelineUpdatedClass }) => {
@@ -404,14 +394,9 @@ export const DashboardGrid = ({
   data = [], 
   rowOrder = [],
   onRowOrderChange = null,
-  onRowAction = () => {}, 
   columnVisibility = {}, 
   columnOrder = [],
   onColumnOrderChange = null,
-  runningPipelines = new Set(),
-  pipelineQueue = [],
-  activePipelineCount = 0,
-  maxConcurrentPipelines = 8,
   dashboardParams = null,
   sortConfig = { column: null, direction: 'asc' },
   onSort = () => {}
@@ -475,22 +460,7 @@ export const DashboardGrid = ({
     return columnVisibility[columnKey] !== false;
   };
 
-  // Helper function to check if a pipeline is running for a specific row
-  const isPipelineRunning = (rowId) => {
-    return runningPipelines.has(rowId);
-  };
 
-  // Helper function to check if a pipeline is queued for a specific row
-  const isPipelineQueued = (rowId) => {
-    return pipelineQueue.some(item => item.id === rowId);
-  };
-
-  // Helper function to get pipeline status
-  const getPipelineStatus = (rowId) => {
-    if (isPipelineRunning(rowId)) return 'running';
-    if (isPipelineQueued(rowId)) return 'queued';
-    return 'idle';
-  };
 
   // Helper function to render a cell value with proper formatting and coloring
   // 📋 ADDING NEW COLUMN FORMATTING? Read: src/config/Column README.md for instructions
@@ -532,7 +502,7 @@ export const DashboardGrid = ({
       case 'trial_conversion_rate':
       case 'trial_accuracy_ratio':
       case 'purchase_accuracy_ratio':
-        formattedValue = value !== undefined && value !== null ? `${formatNumber(value, 2)}%` : 'N/A';
+        formattedValue = value !== undefined && value !== null ? `${formatNumber(value * 100, 2)}%` : 'N/A';
         break;
       case 'avg_trial_refund_rate':
         if (value !== undefined && value !== null) {
@@ -636,12 +606,13 @@ export const DashboardGrid = ({
         
         // Only apply color coding if Meta count > 5
         if (metaCount > 5) {
-          // Apply color thresholds
-          if (value < 10) {
+          // Apply color thresholds (value is decimal, so convert to percentage)
+          const percentageValue = value * 100;
+          if (percentageValue < 10) {
             colorClass = 'text-red-600 dark:text-red-400 font-semibold'; // < 10%: Red
-          } else if (value < 20) {
+          } else if (percentageValue < 20) {
             colorClass = 'text-orange-600 dark:text-orange-400 font-semibold'; // < 20%: Orange
-          } else if (value <= 30) {
+          } else if (percentageValue <= 30) {
             colorClass = 'text-yellow-600 dark:text-yellow-400 font-semibold'; // ≤ 30%: Yellow
           }
           // > 30%: Keep normal color (no special coloring)
@@ -654,27 +625,44 @@ export const DashboardGrid = ({
       colorClass = 'text-gray-500 dark:text-gray-500';
     }
 
-    // Add pipeline update styling for key metrics
-    const pipelineUpdatedClass = isPipelineUpdated && 
-      ['mixpanel_purchases', 'mixpanel_revenue_usd', 'mixpanel_revenue_net', 'estimated_revenue_usd', 'estimated_revenue_adjusted', 'estimated_roas', 'performance_impact_score', 'mixpanel_trials_started', 'mixpanel_refunds_usd', 'segment_accuracy_average'].includes(columnKey) 
-        ? 'font-bold text-green-600 dark:text-green-400' : '';
 
-    // Special rendering for accuracy column with tooltip
-    if (columnKey === 'segment_accuracy_average' && row.accuracy_breakdown) {
-      return (
-        <AccuracyTooltip 
-          average={formattedValue}
-          breakdown={row.accuracy_breakdown}
-          colorClass={colorClass}
-          pipelineUpdatedClass={pipelineUpdatedClass}
-        />
-      );
-    }
+
+          // Special rendering for accuracy column with tooltip
+      if (columnKey === 'segment_accuracy_average' && row.accuracy_breakdown) {
+        return (
+          <AccuracyTooltip 
+            average={formattedValue}
+            breakdown={row.accuracy_breakdown}
+            colorClass={colorClass}
+            pipelineUpdatedClass=""
+          />
+        );
+      }
 
     // Special rendering for estimated ROAS column with sparkline
     if (columnKey === 'estimated_roas') {
       // Extract the actual ID from the row.id field (format: "campaign_123", "adset_456", "ad_789")
       const entityId = row.id ? row.id.split('_')[1] : null;
+      
+      // Check if this is a breakdown row (has breakdown-specific ID format like "US_120217904661980178")
+      const isBreakdownRow = row.id && row.id.includes('_') && !row.id.startsWith('campaign_') && !row.id.startsWith('adset_') && !row.id.startsWith('ad_');
+      
+      if (isBreakdownRow) {
+        // For breakdown rows, show sparkline with breakdown entity info
+        const [breakdownValue, parentEntityId] = row.id.split('_', 2);
+        return (
+          <ROASSparkline 
+            entityType={row.entity_type || 'campaign'}  // Use entity_type from breakdown data
+            entityId={row.id}  // Use full breakdown ID (e.g., "US_120217904661980178")
+            currentROAS={value}
+            conversionCount={calculatedRow.mixpanel_purchases || 0}
+            breakdown={dashboardParams?.breakdown || 'all'}
+            startDate={dashboardParams?.start_date || '2025-04-01'}
+            endDate={dashboardParams?.end_date || '2025-04-10'}
+            isBreakdownEntity={true}  // Flag to indicate this is a breakdown entity
+          />
+        );
+      }
       
       // DEBUG: Log the row data to understand the structure
       console.log('🔥 SPARKLINE CELL DEBUG:', {
@@ -699,12 +687,12 @@ export const DashboardGrid = ({
       );
     }
 
-    return (
-      <span className={`${colorClass} ${pipelineUpdatedClass}`}>
-        {formattedValue}
-        {isEstimated && <span className="ml-1 text-xs">*</span>}
-      </span>
-    );
+          return (
+        <span className={colorClass}>
+          {formattedValue}
+          {isEstimated && <span className="ml-1 text-xs">*</span>}
+        </span>
+      );
   };
 
   // Simple column drag handlers
@@ -850,29 +838,7 @@ export const DashboardGrid = ({
     if (!row.breakdowns) return breakdownNodes;
     
     row.breakdowns.forEach(breakdown => {
-      // Enhanced breakdown header with mapping info
-      breakdownNodes.push(
-        <tr key={`${row.id}-${breakdown.type}-header`} className="border-b border-gray-200 dark:border-gray-700 bg-blue-50/50 dark:bg-blue-900/50">
-          <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-900/50 z-10">
-            <div className="flex items-center">
-              <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
-              <span style={{ paddingLeft: `${(level + 1) * 20}px` }} className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                📊 {breakdown.type.charAt(0).toUpperCase() + breakdown.type.slice(1)} Breakdown
-                {breakdown.values && breakdown.values.length > 0 && (
-                  <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
-                    ({breakdown.values.length} segments)
-                  </span>
-                )}
-              </span>
-            </div>
-          </td>
-          {visibleColumns.slice(1).map((column) => (
-            <td key={column.key} className="px-3 py-1 text-center text-xs text-blue-600 dark:text-blue-400">
-              {column.key === 'name' ? 'Segment' : ''}
-            </td>
-          ))}
-        </tr>
-      );
+      // REMOVED: Breakdown header row as requested by user
 
       breakdown.values.forEach((value, index) => {
         const calculatedValue = calculateDerivedValues(value);
@@ -911,22 +877,9 @@ export const DashboardGrid = ({
               // Enhanced breakdown value rendering with mapping awareness
               return (
                 <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right">
-                  <div className="flex flex-col">
-                    <span className={`${getFieldColor(column.key, calculatedValue[column.key])}`}>
-                      {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue))}
-                    </span>
-                    {/* Show accuracy ratios for trial/purchase metrics */}
-                    {(column.key === 'mixpanel_trials_started' && value.trial_accuracy_ratio !== undefined) && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {(value.trial_accuracy_ratio * 100).toFixed(1)}% accuracy
-                      </span>
-                    )}
-                    {(column.key === 'mixpanel_purchases' && value.purchase_accuracy_ratio !== undefined) && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {(value.purchase_accuracy_ratio * 100).toFixed(1)}% accuracy
-                      </span>
-                    )}
-                  </div>
+                  <span className={`${getFieldColor(column.key, calculatedValue[column.key])}`}>
+                    {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue))}
+                  </span>
                 </td>
               );
             })}
@@ -934,42 +887,7 @@ export const DashboardGrid = ({
         );
       });
       
-      // Add summary row for breakdown if multiple values
-      if (breakdown.values && breakdown.values.length > 1) {
-        const summaryData = breakdown.values.reduce((acc, value) => {
-          Object.keys(value).forEach(key => {
-            if (typeof value[key] === 'number') {
-              acc[key] = (acc[key] || 0) + value[key];
-            }
-          });
-          return acc;
-        }, {});
-        
-        const calculatedSummary = calculateDerivedValues(summaryData);
-        
-        breakdownNodes.push(
-          <tr key={`${row.id}-${breakdown.type}-summary`} className="border-b border-gray-300 dark:border-gray-600 bg-blue-100/50 dark:bg-blue-800/50 text-xs font-medium">
-            <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-blue-100/50 dark:bg-blue-800/50 z-10">
-              <div className="flex items-center">
-                <span className="opacity-0 w-8"></span>
-                <span style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="text-blue-700 dark:text-blue-300 italic">
-                  📋 {breakdown.type} Total ({breakdown.values.length} segments)
-                </span>
-              </div>
-            </td>
-            {visibleColumns.slice(1).map((column) => {
-              if (column.key === 'campaign_name' || column.key === 'adset_name') {
-                return <td key={column.key} className="px-3 py-1"></td>;
-              }
-              return (
-                <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right font-medium text-blue-700 dark:text-blue-300">
-                  {renderCellValue(calculatedSummary, column.key, false, getEventPriority(calculatedSummary))}
-                </td>
-              );
-            })}
-          </tr>
-        );
-      }
+      // REMOVED: Summary row for breakdown as requested by user
     });
     
     return breakdownNodes;
@@ -980,9 +898,7 @@ export const DashboardGrid = ({
     const isBreakdownExpanded = !!expandedBreakdowns[row.id];
     const rowNodes = [];
 
-    // Check if this row has been updated with pipeline data
-    const isPipelineUpdated = row._pipelineUpdated;
-    const pipelineTimestamp = row._pipelineTimestamp;
+
 
     const calculatedRow = calculateDerivedValues(row);
 
@@ -1004,93 +920,44 @@ export const DashboardGrid = ({
           : level === 1 
             ? 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200' 
             : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200'
-      } ${(isPipelineUpdated || row._pipelineUpdated) ? 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/20' : ''} ${draggedRowId === row.id ? 'opacity-50' : ''} ${dragOverRowId === row.id && draggedRowId !== row.id ? 'ring-2 ring-blue-400' : ''}`}>
+      } ${draggedRowId === row.id ? 'opacity-50' : ''} ${dragOverRowId === row.id && draggedRowId !== row.id ? 'ring-2 ring-blue-400' : ''}`}>
         
         {/* Name column - always visible */}
         <td className={`sticky left-0 px-3 py-2 whitespace-nowrap z-10 ${
           level === 0 
-            ? ((isPipelineUpdated || row._pipelineUpdated) ? 'bg-green-50 dark:bg-green-900/20' : 'bg-gray-50 dark:bg-gray-800')
+            ? 'bg-gray-50 dark:bg-gray-800'
             : level === 1 
-              ? ((isPipelineUpdated || row._pipelineUpdated) ? 'bg-green-50 dark:bg-green-900/20' : 'bg-white dark:bg-gray-700')
-              : ((isPipelineUpdated || row._pipelineUpdated) ? 'bg-green-50 dark:bg-green-900/20' : 'bg-gray-100 dark:bg-gray-600')
+              ? 'bg-white dark:bg-gray-700'
+              : 'bg-gray-100 dark:bg-gray-600'
         }`}>
           <div className="flex items-center">
-            <button onClick={() => onRowAction('graph', row)} className="mr-2 p-1 hover:text-blue-500" title="View Chart"><BarChart2 size={16} /></button>
-            <button onClick={() => onRowAction('debug', row)} className="mr-2 p-1 hover:text-orange-500" title="Debug Info"><Info size={16} /></button>
-            <button 
-              onClick={() => onRowAction('pipeline', row)} 
-              disabled={isPipelineRunning(row.id) || isPipelineQueued(row.id)}
-              className={`mr-2 p-1 ${
-                isPipelineRunning(row.id) ? 'text-green-500 cursor-not-allowed' : 
-                isPipelineQueued(row.id) ? 'text-yellow-500 cursor-not-allowed' : 
-                'hover:text-green-500'
-              }`} 
-              title={
-                isPipelineRunning(row.id) ? 'Pipeline Running...' : 
-                isPipelineQueued(row.id) ? 'Pipeline Queued...' : 
-                'Run Pipeline'
-              }
-            >
-              {isPipelineRunning(row.id) ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
-              ) : isPipelineQueued(row.id) ? (
-                <div className="animate-pulse rounded-full h-4 w-4 border-2 border-yellow-500 bg-yellow-200"></div>
-              ) : (
-                <Play size={16} />
-              )}
-            </button>
-            <button onClick={() => onRowAction('timeline', row)} className="mr-2 p-1 hover:text-purple-500" title="View Timeline"><Clock size={16} /></button>
-            <span className="flex items-center">
-              <span style={{ paddingLeft: `${level * 20}px` }}>
-                {row.children && row.children.length > 0 ? (
-                  <button onClick={() => toggleExpand(row.id)} className="mr-1 p-1">
-                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </button>
-                ) : (
-                  <span className="inline-block w-8"></span>
-                )}
-              </span>
-              
-              {row.breakdowns && row.breakdowns.length > 0 && (
-                <button 
-                  onClick={() => toggleBreakdown(row.id)} 
-                  className={`mr-2 p-1 rounded ${isBreakdownExpanded ? 'text-blue-500 bg-blue-100 dark:bg-blue-900/30' : 'text-gray-400 hover:text-blue-400'}`}
-                  title="Toggle breakdowns"
-                >
-                  <Search size={14} />
+            <span style={{ paddingLeft: `${level * 20}px` }}>
+              {row.children && row.children.length > 0 ? (
+                <button onClick={() => toggleExpand(row.id)} className="mr-1 p-1">
+                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
+              ) : (
+                <span className="inline-block w-8"></span>
               )}
-              
-              {/* Pipeline update indicator */}
-              {(isPipelineUpdated || row._pipelineUpdated) && (
-                <PipelineBadge 
-                  isPipelineUpdated={true} 
-                  className="mr-2" 
-                />
-              )}
-              
-              {/* Pipeline running indicator */}
-              {isPipelineRunning(row.id) && (
-                <span className="mr-2 px-2 py-1 bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 text-xs rounded-full animate-pulse">
-                  🔄 Running
-                </span>
-              )}
-              
-              {/* Pipeline queued indicator */}
-              {isPipelineQueued(row.id) && (
-                <span className="mr-2 px-2 py-1 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 text-xs rounded-full animate-pulse">
-                  ⏳ Queued
-                </span>
-              )}
-              
-              <span className={`${level === 0 ? 'text-gray-900 dark:text-gray-100' : level === 1 ? 'text-gray-800 dark:text-gray-200' : 'text-gray-700 dark:text-gray-100'}`}>
-                {level === 0 
-                  ? (row.name || row.campaign_name)
-                  : level === 1 
-                    ? (row.name || row.adset_name)
-                    : (row.name || row.ad_name)
-                }
-              </span>
+            </span>
+            
+            {row.breakdowns && row.breakdowns.length > 0 && (
+              <button 
+                onClick={() => toggleBreakdown(row.id)} 
+                className={`mr-2 p-1 rounded ${isBreakdownExpanded ? 'text-blue-500 bg-blue-100 dark:bg-blue-900/30' : 'text-gray-400 hover:text-blue-400'}`}
+                title="Toggle breakdowns"
+              >
+                <Search size={14} />
+              </button>
+            )}
+            
+            <span className={`${level === 0 ? 'text-gray-900 dark:text-gray-100' : level === 1 ? 'text-gray-800 dark:text-gray-200' : 'text-gray-700 dark:text-gray-100'}`}>
+              {level === 0 
+                ? (row.name || row.campaign_name)
+                : level === 1 
+                  ? (row.name || row.adset_name)
+                  : (row.name || row.ad_name)
+              }
             </span>
           </div>
         </td>
@@ -1120,9 +987,7 @@ export const DashboardGrid = ({
           const roasColor = isRoasColumn ? getRoasColor(calculatedRow[column.key]) : '';
           const finalColor = isRoasColumn ? roasColor : fieldColor;
           
-          const pipelineHighlight = (isPipelineUpdated || row._pipelineUpdated) && 
-            ['total_conversions', 'revenue_usd', 'estimated_conversions', 'estimated_revenue_usd', 'roas', 'estimated_roas', 'total_trials_started', 'total_refunds_usd', 'total_converted_amount_mixpanel', 'mixpanel_trials', 'mixpanel_purchases', 'estimated_roas', 'profit'].includes(column.key) 
-              ? 'font-bold text-green-600 dark:text-green-400' : '';
+
 
           // Check if the column should be grayed out based on event priority
           const shouldGrayOut = shouldGrayOutColumn(column.key, eventPriority);
@@ -1132,8 +997,8 @@ export const DashboardGrid = ({
           const columnBackgroundClass = getColumnBackgroundClass(column.key);
 
                       return (
-              <td key={column.key} className={`px-3 py-2 whitespace-nowrap text-right ${grayedOutColor} ${pipelineHighlight} ${isRoasColumn ? 'font-medium' : ''} ${columnBackgroundClass}`}>
-                {renderCellValue(calculatedRow, column.key, isPipelineUpdated, eventPriority)}
+              <td key={column.key} className={`px-3 py-2 whitespace-nowrap text-right ${grayedOutColor} ${isRoasColumn ? 'font-medium' : ''} ${columnBackgroundClass}`}>
+                {renderCellValue(calculatedRow, column.key, false, eventPriority)}
               </td>
             );
         })}
@@ -1203,40 +1068,7 @@ export const DashboardGrid = ({
           </button>
         </div>
 
-        {/* Pipeline Status */}
-        <div className="flex items-center space-x-4 ml-auto text-xs">
-          {/* Running Pipelines Counter */}
-          {(runningPipelines.size > 0 || pipelineQueue.length > 0) && (
-            <div className="flex items-center space-x-2">
-              {runningPipelines.size > 0 && (
-                <div className="flex items-center bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded-full">
-                  <div className="animate-spin rounded-full h-3 w-3 border-b border-blue-600 dark:border-blue-400 mr-2"></div>
-                  <span className="text-blue-800 dark:text-blue-200 font-medium">
-                    {runningPipelines.size} active
-                  </span>
-                </div>
-              )}
-              
-              {pipelineQueue.length > 0 && (
-                <div className="flex items-center bg-yellow-100 dark:bg-yellow-900 px-2 py-1 rounded-full">
-                  <div className="animate-pulse rounded-full h-3 w-3 bg-yellow-600 dark:bg-yellow-400 mr-2"></div>
-                  <span className="text-yellow-800 dark:text-yellow-200 font-medium">
-                    {pipelineQueue.length} queued
-                  </span>
-                </div>
-              )}
-              
-              <div className="text-gray-500 dark:text-gray-400 text-xs">
-                ({activePipelineCount}/{maxConcurrentPipelines} concurrent)
-              </div>
-            </div>
-          )}
-          
-          <div className="flex items-center">
-            <span className="text-green-600 dark:text-green-400 mr-1">✨</span>
-            <span className="text-gray-600 dark:text-gray-400">Pipeline Enhanced</span>
-          </div>
-        </div>
+
       </div>
       
       {/* Table container with proper horizontal scrolling */}

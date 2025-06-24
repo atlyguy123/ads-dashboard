@@ -14,9 +14,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { DashboardGrid } from '../components/DashboardGrid';
-import { DebugModal } from '../components/DebugModal';
-import { GraphModal } from '../components/GraphModal';
-import TimelineModal from '../components/TimelineModal';
+
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
 
@@ -74,12 +72,7 @@ export const Dashboard = () => {
   const [textFilter, setTextFilter] = useState(() => {
     return localStorage.getItem('dashboard_text_filter') || '';
   });
-  
-  // Modal states
-  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
-  const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
-  const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
-  const [selectedRowData, setSelectedRowData] = useState(null);
+
   
 
   
@@ -163,11 +156,7 @@ export const Dashboard = () => {
     });
   }, [columnVisibility, validationResult]);
 
-  // Pipeline state variables (for tracking running/queued pipelines)
-  const [runningPipelines, setRunningPipelines] = useState(new Set());
-  const [pipelineQueue, setPipelineQueue] = useState([]);
-  const [activePipelineCount, setActivePipelineCount] = useState(0);
-  const [maxConcurrentPipelines, setMaxConcurrentPipelines] = useState(8);
+
 
   // Track if initial load has been performed
   const hasInitialLoadRef = useRef(false);
@@ -339,13 +328,45 @@ export const Dashboard = () => {
       
       // Recursively sort children arrays
       return sorted.map(item => {
+        const updatedItem = { ...item };
+        
+        // Sort children arrays (hierarchy)
         if (item.children && item.children.length > 0) {
-          return {
-            ...item,
-            children: sortRecursively(item.children)
-          };
+          updatedItem.children = sortRecursively(item.children);
         }
-        return item;
+        
+        // Sort breakdown values within each entity
+        if (item.breakdowns && item.breakdowns.length > 0) {
+          updatedItem.breakdowns = item.breakdowns.map(breakdown => ({
+            ...breakdown,
+            values: [...breakdown.values].sort((a, b) => {
+              let aValue = a[sortConfig.column];
+              let bValue = b[sortConfig.column];
+              
+              // Handle undefined/null values
+              if (aValue == null && bValue == null) return 0;
+              if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
+              if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
+              
+              // Handle numeric comparisons
+              if (typeof aValue === 'number' && typeof bValue === 'number') {
+                return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+              }
+              
+              // Handle string comparisons
+              const aStr = String(aValue).toLowerCase();
+              const bStr = String(bValue).toLowerCase();
+              
+              if (sortConfig.direction === 'asc') {
+                return aStr.localeCompare(bStr);
+              } else {
+                return bStr.localeCompare(aStr);
+              }
+            })
+          }));
+        }
+        
+        return updatedItem;
       });
     };
     
@@ -523,33 +544,7 @@ export const Dashboard = () => {
     }
   }, [dateRange, breakdown, hierarchy, handleBackgroundRefresh, handleRefresh]);
 
-  // Handle row actions
-  const handleRowAction = (action, rowData) => {
-    setSelectedRowData(rowData);
-    if (action === 'graph') {
-      setIsGraphModalOpen(true);
-    } else if (action === 'debug') {
-      setIsDebugModalOpen(true);
-    } else if (action === 'timeline') {
-      setIsTimelineModalOpen(true);
-    }
-  };
 
-  // Modal close handlers
-  const closeDebugModal = () => {
-    setIsDebugModalOpen(false);
-    setSelectedRowData(null);
-  };
-
-  const closeGraphModal = () => {
-    setIsGraphModalOpen(false);
-    setSelectedRowData(null);
-  };
-
-  const closeTimelineModal = () => {
-    setIsTimelineModalOpen(false);
-    setSelectedRowData(null);
-  };
 
   // Get dashboard stats
   const getDashboardStats = () => {
@@ -829,14 +824,9 @@ export const Dashboard = () => {
               data={processedData}
               rowOrder={rowOrder}
               onRowOrderChange={setRowOrder}
-              onRowAction={handleRowAction}
               columnVisibility={columnVisibility}
               columnOrder={columnOrder}
               onColumnOrderChange={setColumnOrder}
-              runningPipelines={runningPipelines}
-              pipelineQueue={pipelineQueue}
-              activePipelineCount={activePipelineCount}
-              maxConcurrentPipelines={maxConcurrentPipelines}
               dashboardParams={{
                 start_date: dateRange.start_date,
                 end_date: dateRange.end_date,
@@ -882,33 +872,7 @@ export const Dashboard = () => {
         )}
       </div>
       
-      {/* Modals */}
-      {selectedRowData && (
-        <>
-          <DebugModal 
-            isOpen={isDebugModalOpen} 
-            onClose={closeDebugModal} 
-            data={selectedRowData} 
-          />
-          <GraphModal 
-            isOpen={isGraphModalOpen} 
-            onClose={closeGraphModal} 
-            data={selectedRowData}
-            dashboardParams={{
-              start_date: dateRange.start_date,
-              end_date: dateRange.end_date,
-              breakdown: breakdown,
-              hierarchy: hierarchy
-            }}
-          />
-          <TimelineModal 
-            isOpen={isTimelineModalOpen} 
-            onClose={closeTimelineModal} 
-            data={selectedRowData}
-            rowData={selectedRowData}
-          />
-        </>
-      )}
+
     </div>
   );
 }; 
