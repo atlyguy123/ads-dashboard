@@ -55,12 +55,12 @@ class ROASCalculators(BaseCalculator):
         ensures campaigns have meaningful scale worth optimizing.
         
         The score is then scaled based on the time frame to maintain consistent thresholds:
-        - 1 day: score × (1/7) 
-        - 7 days: score × 1 (baseline)
-        - 14 days: score × 2
+        - 1 day: score × (7/1) = score × 7 (normalize up for less data)
+        - 7 days: score × (7/7) = score × 1 (baseline)
+        - 14 days: score × (7/14) = score × 0.5 (normalize down for more data)
         - etc.
         
-        Formula: (spend × ROAS²) × (days / 7)
+        Formula: (spend × ROAS²) × (7 / days)
         
         Args:
             calc_input: Standardized calculation input containing raw record data
@@ -114,7 +114,8 @@ class ROASCalculators(BaseCalculator):
             days = max(1, days_diff)  # Ensure minimum 1 day
             
             # Scale factor: 7 days is baseline (scale = 1.0)
-            scale_factor = days / 7.0
+            # Inverse scaling: More days = lower scale factor (normalize down)
+            scale_factor = 7.0 / days
             
             return scale_factor
             
