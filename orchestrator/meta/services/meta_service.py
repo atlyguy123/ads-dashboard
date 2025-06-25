@@ -23,11 +23,14 @@ import sys
 import time
 from datetime import datetime
 from dotenv import load_dotenv
+from pathlib import Path
 import urllib.parse # Helper for query string
 import logging
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from project root
+project_root = Path(__file__).resolve().parent.parent.parent.parent
+env_file = project_root / '.env'
+load_dotenv(env_file)
 
 logger = logging.getLogger(__name__)
 
