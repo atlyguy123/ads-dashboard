@@ -8,7 +8,12 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env file if it exists (for local development)
+# Load .env file from project root (same fix as meta_service.py)
+project_root = Path(__file__).resolve().parent.parent
+env_file = project_root / '.env'
+load_dotenv(env_file)
+
+# Also try to load from orchestrator directory as fallback
 env_path = Path(__file__).parent / '.env'
 if env_path.exists():
     load_dotenv(env_path)

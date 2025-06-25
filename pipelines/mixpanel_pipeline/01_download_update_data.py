@@ -14,8 +14,10 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# FIXED: Load environment variables from project root (same fix as meta_service.py)
+project_root = Path(__file__).resolve().parent.parent.parent
+env_file = project_root / '.env'
+load_dotenv(env_file)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

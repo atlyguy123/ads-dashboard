@@ -254,14 +254,16 @@ class MetaDataUpdater:
             breakdowns = 'impression_device'
         
         try:
-            # Use the actual Meta API service
+            # Use the actual Meta API service with smart sync/async auto-detection
             api_response, error = fetch_meta_data(
                 start_date=from_date,
                 end_date=to_date,
                 time_increment=1,
                 fields=fields,
-                breakdowns=breakdowns,
-                use_async=True  # Use async by default
+                breakdowns=breakdowns
+                # Removed use_async=True to allow smart auto-detection
+                # This will use sync for single-day requests (more reliable)
+                # and async for multi-day requests (better performance)
             )
             
             if error:

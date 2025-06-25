@@ -84,7 +84,7 @@ def start_async_meta_job(start_date, end_date, time_increment, fields=None, brea
     end_dt = datetime.strptime(end_date, '%Y-%m-%d')
     date_range_days = (end_dt - start_dt).days
     
-    # Parameters for the async request
+    # Parameters for the async request - REVERTED: Use POST method (Meta requires POST for async)
     params = {
         'access_token': access_token,
         'level': 'ad',
@@ -108,17 +108,32 @@ def start_async_meta_job(start_date, end_date, time_increment, fields=None, brea
         params['action_breakdowns'] = action_breakdowns
     
     try:
-        # Make async job request
+        # Make async job request - REVERTED: Use POST method (required for async jobs)
         query_string = urllib.parse.urlencode(params, doseq=True)
         logger.debug(f'Meta Async API URL: {api_url}?{query_string}')
         
+        # REVERT: Meta async API requires POST method
         response = requests.post(api_url, data=params)
         response.raise_for_status()
         
         job_data = response.json()
         
+        # Debug: Log the response to see what we're getting
+        logger.debug(f'Async job response: {job_data}')
+        
+        # Check if we got a report_run_id
+        report_run_id = job_data.get('report_run_id')
+        if not report_run_id:
+            # If no report_run_id, this might be a synchronous response with data
+            if 'data' in job_data:
+                logger.info("API returned sync data instead of async job - treating as sync response")
+                return None, "API returned sync data instead of async job"
+            else:
+                logger.error(f"No report_run_id in response: {job_data}")
+                return None, f"No report_run_id in async job response: {json.dumps(job_data)}"
+        
         return {
-            'report_run_id': job_data.get('report_run_id'),
+            'report_run_id': report_run_id,
             'async_status': job_data.get('async_status', 'Job Started'),
             'start_date': start_date,
             'end_date': end_date,
@@ -303,9 +318,14 @@ def fetch_meta_data(start_date, end_date, time_increment, fields=None, breakdown
     Returns:
         tuple: (data, error) where data is the API response and error is an error message if any
     """
-    # Always use async for the best user experience!
-    # Async provides: progress tracking, no timeouts, cancel functionality, better UX
-    should_use_async = use_async if use_async is not None else True
+    # FIXED: Default to sync mode for single-day requests for reliability
+    # Only use async for large date ranges where it's actually beneficial
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    date_range_days = (end_dt - start_dt).days
+    
+    # Auto-detect: Only use async for date ranges > 3 days or if explicitly requested
+    should_use_async = use_async if use_async is not None else (date_range_days > 3)
     
     if should_use_async:
         # Try async processing first
@@ -329,7 +349,8 @@ def fetch_meta_data(start_date, end_date, time_increment, fields=None, breakdown
             }
         }, None
     else:
-        # Use original synchronous method for small requests
+        # Use synchronous method for small requests (more reliable)
+        print(f"Using sync mode for {date_range_days + 1} day(s) request")
         return fetch_meta_data_sync(start_date, end_date, time_increment, fields, breakdowns, action_breakdowns)
 
 def fetch_meta_data_sync(start_date, end_date, time_increment, fields=None, breakdowns=None, action_breakdowns=None):

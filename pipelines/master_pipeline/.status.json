@@ -1,38 +1,38 @@
 {
   "\ud83d\udcca Mixpanel - Download & Update Data": {
     "status": "success",
-    "timestamp": "2025-06-25T11:25:14.249174",
+    "timestamp": "2025-06-25T11:54:47.713680",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Setup Database": {
     "status": "success",
-    "timestamp": "2025-06-25T11:25:29.994904",
+    "timestamp": "2025-06-25T11:54:48.543948",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Ingest Data": {
     "status": "success",
-    "timestamp": "2025-06-25T11:26:28.910325",
+    "timestamp": "2025-06-25T11:55:34.914250",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Assign Product Information": {
     "status": "success",
-    "timestamp": "2025-06-25T11:26:32.730288",
+    "timestamp": "2025-06-25T11:55:42.908163",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Set ABI Attribution": {
     "status": "success",
-    "timestamp": "2025-06-25T11:26:33.962131",
+    "timestamp": "2025-06-25T11:55:45.338145",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Validate Event Lifecycle": {
     "status": "success",
-    "timestamp": "2025-06-25T11:29:03.633732",
+    "timestamp": "2025-06-25T11:55:54.376007",
     "error_message": null
   },
   "\ud83d\udcca Mixpanel - Assign Economic Tier": {
-    "status": "success",
-    "timestamp": "2025-06-25T11:29:19.208168",
-    "error_message": null
+    "status": "cancelled",
+    "timestamp": "2025-06-25T11:58:45.190249",
+    "error_message": "Force cancelled - process not tracked"
   },
   "\u2699\ufe0f Pre-processing - Assign Credited Date": {
     "status": "success",
