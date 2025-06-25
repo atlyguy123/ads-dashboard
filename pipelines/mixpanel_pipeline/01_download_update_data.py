@@ -411,7 +411,7 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
     and stores all users in database with batch processing.
     """
     cursor = conn.cursor()
-    BATCH_SIZE = 1000  # Commit every 1000 users to prevent hanging
+    BATCH_SIZE = 10000  # Commit every 10000 users to prevent hanging
 
     try:
         logger.info(f"Downloading and processing user file s3://{bucket_name}/{object_key}")
@@ -428,8 +428,8 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
             for line in f:
                 total_count += 1
                 
-                # Progress logging every 10,000 lines
-                if total_count % 10000 == 0:
+                # Progress logging every 50,000 lines
+                if total_count % 50000 == 0:
                     logger.info(f"Progress: {total_count:,} lines processed, {stored_count:,} users stored")
                 
                 try:
