@@ -435,10 +435,15 @@ class PipelineRunner:
                 else:
                     print(f"   ℹ️ Process was already finished (return code: {process.returncode})")
                 
-                # Clean up tracking
-                del self.running_processes[pipeline_name][step_id]
-                if not self.running_processes[pipeline_name]:
-                    del self.running_processes[pipeline_name]
+                # Clean up tracking (with safety check for race conditions)
+                if (pipeline_name in self.running_processes and 
+                    step_id in self.running_processes[pipeline_name]):
+                    del self.running_processes[pipeline_name][step_id]
+                    if not self.running_processes[pipeline_name]:
+                        del self.running_processes[pipeline_name]
+                    print(f"   ✓ Cleaned up process tracking for step '{step_id}'")
+                else:
+                    print(f"   ℹ️ Process tracking already cleaned up (likely by background thread)")
                 
                 # Update status
                 self.update_step_status(pipeline_name, step_id, 'cancelled', 'Cancelled by user')
