@@ -293,7 +293,10 @@ def identify_missing_data(conn, latest_date):
     while current_date <= yesterday:
         dates_checked += 1
         # Check if this date has data in database
-        cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (current_date,))
+        if USE_POSTGRES:
+            cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = %s", (current_date,))
+        else:
+            cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (current_date,))
         result = cursor.fetchone()
         
         if not result or result[0] == 0:
