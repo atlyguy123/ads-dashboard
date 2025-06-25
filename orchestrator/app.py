@@ -1606,6 +1606,22 @@ def mixpanel_debug_user_events():
 # Removed conflicting proxy routes - these were overriding the proper dashboard routes
 # The dashboard blueprint handles /api/dashboard/analytics/chart-data properly
 
+# Catch-all route for React app client-side routing
+@app.route('/<path:path>')
+@requires_auth
+def catch_all(path):
+    """Catch-all route to serve React app for client-side routing"""
+    # Don't serve React app for API routes
+    if path.startswith('api/'):
+        return "API endpoint not found", 404
+    
+    # Don't serve React app for static files that don't exist
+    if path.startswith(('static/', 'assets/', 'dashboard-static/')):
+        return "Static file not found", 404
+    
+    # Serve the React app for all other routes
+    return send_from_directory('dashboard/static', 'index.html')
+
 if __name__ == '__main__':
     # Initialize database structure if needed (especially for Heroku)
     if config.is_production:
