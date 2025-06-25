@@ -532,7 +532,10 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
 
         # Check if already downloaded
         cursor = conn.cursor()
-        cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (target_date,))
+        if db_type == 'postgres':
+            cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = %s", (target_date,))
+        else:
+            cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (target_date,))
         result = cursor.fetchone()
         
         if result and result[0] > 0:
