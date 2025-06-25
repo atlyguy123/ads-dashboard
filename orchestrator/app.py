@@ -823,6 +823,38 @@ def dashboard_favicon():
     
     return Response(transparent_png, mimetype='image/png')
 
+@app.route('/debug/static-files')
+def debug_static_files():
+    """Debug route to check what files exist in static directory"""
+    import os
+    from pathlib import Path
+    
+    debug_info = {
+        'current_working_directory': os.getcwd(),
+        'app_root': str(Path(__file__).parent),
+        'static_directories': {}
+    }
+    
+    # Check different possible static directory paths
+    possible_paths = [
+        'dashboard/static',
+        'dashboard/static/static',
+        'orchestrator/dashboard/static',
+        'orchestrator/dashboard/static/static'
+    ]
+    
+    for path in possible_paths:
+        full_path = Path(path)
+        if full_path.exists():
+            debug_info['static_directories'][path] = {
+                'exists': True,
+                'files': list(os.listdir(full_path)) if full_path.is_dir() else 'not_a_directory'
+            }
+        else:
+            debug_info['static_directories'][path] = {'exists': False}
+    
+    return jsonify(debug_info)
+
 # Add a middleware to log requests to see what's happening
 @app.before_request  
 def handle_json_get_requests():
