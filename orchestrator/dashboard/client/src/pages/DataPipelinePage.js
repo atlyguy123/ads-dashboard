@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Settings, Clock, Database, CheckCircle, AlertTriangle, Play, Circle, Loader } from 'lucide-react';
+import { RefreshCw, Settings, Clock, Database, CheckCircle, AlertTriangle, Play, Circle, Loader, X, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
 
@@ -289,6 +289,77 @@ const DataPipelinePage = () => {
     }
   };
 
+  const cancelPipeline = async () => {
+    console.log('🛑 Cancelling master pipeline...');
+    
+    try {
+      const response = await fetch(`/api/cancel/${MASTER_PIPELINE}`, { method: 'POST' });
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Pipeline cancelled successfully');
+        setPipelineStatus('idle');
+        setCurrentModule(null);
+        setEstimatedCompletion(null);
+        
+        // Mark all running modules as cancelled
+        const cancelledModuleStates = {};
+        MASTER_MODULES.forEach(module => {
+          const currentState = moduleStates[module.id] || 'pending';
+          if (currentState === 'running') {
+            cancelledModuleStates[module.id] = 'cancelled';
+          } else {
+            cancelledModuleStates[module.id] = currentState;
+          }
+        });
+        setModuleStates(cancelledModuleStates);
+        
+        showMessage('Pipeline cancelled successfully', 'success');
+        
+        // Calculate next scheduled run
+        calculateNextScheduledRun();
+      } else {
+        console.error('❌ Pipeline cancel failed:', result.message);
+        showMessage(`Cancel failed: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('❌ Pipeline cancel error:', error);
+      showMessage('Error cancelling pipeline', 'error');
+    }
+  };
+
+  const restartPipeline = async () => {
+    console.log('🔄 Restarting master pipeline...');
+    
+    // Reset all module states to pending
+    const resetModuleStates = {};
+    MASTER_MODULES.forEach(module => {
+      resetModuleStates[module.id] = 'pending';
+    });
+    
+    setPipelineStatus('idle');
+    setModuleStates(resetModuleStates);
+    setCurrentModule(null);
+    setEstimatedCompletion(null);
+    setRetryAttempts(0);
+    
+    // Save the reset state
+    saveData({
+      status: 'idle',
+      moduleStates: resetModuleStates,
+      currentModule: null,
+      estimatedCompletion: null,
+      retryAttempts: 0
+    });
+    
+    showMessage('Pipeline reset, starting fresh run...', 'success');
+    
+    // Start the pipeline again after a short delay
+    setTimeout(() => {
+      runMasterPipeline(true);
+    }, 1000);
+  };
+
   const handlePipelineStatusUpdate = (data) => {
     console.log('📡 WebSocket status update received:', data);
     
@@ -313,6 +384,9 @@ const DataPipelinePage = () => {
           break;
         case 'failed':
           frontendStatus = 'failed';
+          break;
+        case 'cancelled':
+          frontendStatus = 'cancelled';
           break;
         default:
           frontendStatus = data.status;
@@ -342,15 +416,22 @@ const DataPipelinePage = () => {
           return;
         }
         
+        // Check if this cancellation means the whole pipeline was cancelled
+        if (frontendStatus === 'cancelled') {
+          console.log('🛑 Module cancelled, pipeline may have been cancelled');
+          return;
+        }
+        
                  // Check if all modules are now complete
          const updatedStates = { ...moduleStates, [stepId]: frontendStatus };
          const completedCount = Object.values(updatedStates).filter(state => state === 'complete').length;
          const failedCount = Object.values(updatedStates).filter(state => state === 'failed').length;
+         const cancelledCount = Object.values(updatedStates).filter(state => state === 'cancelled').length;
          
-         console.log(`📈 Progress check: ${completedCount}/${MASTER_MODULES.length} complete, ${failedCount} failed`);
+         console.log(`📈 Progress check: ${completedCount}/${MASTER_MODULES.length} complete, ${failedCount} failed, ${cancelledCount} cancelled`);
          
          // If all modules are complete and none failed, mark pipeline as complete
-         if (completedCount === MASTER_MODULES.length && failedCount === 0) {
+         if (completedCount === MASTER_MODULES.length && failedCount === 0 && cancelledCount === 0) {
            console.log('🎉 All modules complete! Triggering pipeline completion...');
            handlePipelineComplete();
          }
@@ -468,13 +549,15 @@ const DataPipelinePage = () => {
     const completedModules = Object.values(moduleStates).filter(state => state === 'complete').length;
     const failedModules = Object.values(moduleStates).filter(state => state === 'failed').length;
     const runningModules = Object.values(moduleStates).filter(state => state === 'running').length;
+    const cancelledModules = Object.values(moduleStates).filter(state => state === 'cancelled').length;
     
     return {
       total: totalModules,
       completed: completedModules,
       failed: failedModules,
       running: runningModules,
-      pending: totalModules - completedModules - failedModules - runningModules,
+      cancelled: cancelledModules,
+      pending: totalModules - completedModules - failedModules - runningModules - cancelledModules,
       percentage: Math.round((completedModules / totalModules) * 100)
     };
   };
@@ -519,6 +602,8 @@ const DataPipelinePage = () => {
         return <Loader className="h-4 w-4 text-blue-600 animate-spin" />;
       case 'failed':
         return <AlertTriangle className="h-4 w-4 text-red-600" />;
+      case 'cancelled':
+        return <X className="h-4 w-4 text-orange-600" />;
       default:
         return <Circle className="h-4 w-4 text-gray-400" />;
     }
@@ -624,18 +709,43 @@ const DataPipelinePage = () => {
                 </p>
               </div>
               
-              <button
-                onClick={() => runMasterPipeline(true)}
-                disabled={pipelineStatus === 'running'}
-                className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md transition-colors ${
-                  pipelineStatus === 'running'
-                    ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                    : 'text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
-                }`}
-              >
-                <Play className="mr-2 h-5 w-5" />
-                {pipelineStatus === 'running' ? 'Running...' : 'Run Pipeline'}
-              </button>
+              <div className="flex items-center space-x-3">
+                {/* Cancel Button - only show when running */}
+                {pipelineStatus === 'running' && (
+                  <button
+                    onClick={cancelPipeline}
+                    className="inline-flex items-center px-4 py-2 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-red-600 dark:text-red-300 dark:bg-red-900/20 dark:hover:bg-red-900/40 transition-colors"
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel
+                  </button>
+                )}
+                
+                {/* Restart Button - show when failed or idle with previous results */}
+                {(pipelineStatus === 'failed' || (pipelineStatus === 'idle' && Object.keys(moduleStates).length > 0)) && (
+                  <button
+                    onClick={restartPipeline}
+                    className="inline-flex items-center px-4 py-2 border border-orange-300 text-sm font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-orange-600 dark:text-orange-300 dark:bg-orange-900/20 dark:hover:bg-orange-900/40 transition-colors"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Restart
+                  </button>
+                )}
+                
+                {/* Run Button */}
+                <button
+                  onClick={() => runMasterPipeline(true)}
+                  disabled={pipelineStatus === 'running'}
+                  className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md transition-colors ${
+                    pipelineStatus === 'running'
+                      ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                      : 'text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  }`}
+                >
+                  <Play className="mr-2 h-5 w-5" />
+                  {pipelineStatus === 'running' ? 'Running...' : 'Run Pipeline'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -761,6 +871,8 @@ const DataPipelinePage = () => {
                           ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
                           : state === 'failed'
                           ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                          : state === 'cancelled'
+                          ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
                           : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                       }`}
                     >
@@ -773,6 +885,8 @@ const DataPipelinePage = () => {
                             ? 'text-red-800 dark:text-red-200'
                             : state === 'running'
                             ? 'text-blue-800 dark:text-blue-200'
+                            : state === 'cancelled'
+                            ? 'text-orange-800 dark:text-orange-200'
                             : 'text-gray-700 dark:text-gray-300'
                         }`}>
                           {module.name}
@@ -785,12 +899,15 @@ const DataPipelinePage = () => {
                           ? 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200'
                           : state === 'running'
                           ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200'
+                          : state === 'cancelled'
+                          ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
                       }`}>
                         {state === 'pending' ? 'Pending' : 
                          state === 'running' ? 'Running' :
                          state === 'complete' ? 'Done' :
-                         state === 'failed' ? 'Failed' : state}
+                         state === 'failed' ? 'Failed' :
+                         state === 'cancelled' ? 'Cancelled' : state}
                       </div>
                     </div>
                   );

@@ -466,23 +466,68 @@ class PipelineRunner:
         cancelled_count = 0
         errors = []
         
+        print(f"🛑 ORCHESTRATOR: Cancel pipeline request for '{pipeline_name}'")
+        
+        # First, cancel any processes that are actively tracked
+        tracked_steps = []
         if pipeline_name in self.running_processes:
-            steps_to_cancel = list(self.running_processes[pipeline_name].keys())
-            print(f"🛑 ORCHESTRATOR: Cancelling pipeline '{pipeline_name}' - {len(steps_to_cancel)} running steps")
+            tracked_steps = list(self.running_processes[pipeline_name].keys())
+            print(f"   Found {len(tracked_steps)} tracked running processes")
             
-            for step_id in steps_to_cancel:
+            for step_id in tracked_steps:
                 success, message = self.cancel_step(pipeline_name, step_id)
                 if success:
                     cancelled_count += 1
                 else:
                     errors.append(f"Step {step_id}: {message}")
+        
+        # Second, check the status file for steps marked as "running" but not tracked
+        untracked_running = []
+        status = self.get_pipeline_status(pipeline_name)
+        if status:
+            running_in_status = [step_id for step_id, step_status in status.items() 
+                               if step_status.get('status') == 'running']
             
-            if cancelled_count > 0:
-                return True, f"Cancelled {cancelled_count} steps. Errors: {'; '.join(errors) if errors else 'None'}"
+            untracked_running = [step_id for step_id in running_in_status 
+                               if step_id not in tracked_steps]
+            
+            if untracked_running:
+                print(f"   Found {len(untracked_running)} steps marked as running in status file but not tracked")
+                print(f"   Untracked running steps: {untracked_running}")
+                
+                # Force-cancel these steps by updating their status
+                for step_id in untracked_running:
+                    try:
+                        self.update_step_status(pipeline_name, step_id, 'cancelled', 'Force cancelled - process not tracked')
+                        cancelled_count += 1
+                        print(f"   ✓ Force cancelled untracked step: {step_id}")
+                    except Exception as e:
+                        error_msg = f"Failed to force cancel {step_id}: {str(e)}"
+                        errors.append(error_msg)
+                        print(f"   ❌ {error_msg}")
+        
+        # Return results
+        if cancelled_count > 0:
+            message = f"Cancelled {cancelled_count} steps"
+            if tracked_steps:
+                message += f" ({len(tracked_steps)} tracked processes"
+                if untracked_running:
+                    message += f", {len(untracked_running)} untracked status entries"
+                message += ")"
+            elif untracked_running:
+                message += f" (all were untracked status entries)"
+            
+            if errors:
+                message += f". Errors: {'; '.join(errors)}"
+            
+            return True, message
+        else:
+            if not status:
+                return False, f"No running processes found for pipeline '{pipeline_name}' (no status file)"
+            elif not status or not any(step_status.get('status') == 'running' for step_status in status.values()):
+                return False, f"No running processes found for pipeline '{pipeline_name}' (no running steps in status)"
             else:
                 return False, f"No steps cancelled. Errors: {'; '.join(errors)}"
-        else:
-            return False, f"No running processes found for pipeline '{pipeline_name}'"
 
     def reset_step(self, pipeline_name, step_id):
         """Reset a specific step's status back to pending"""
@@ -608,8 +653,9 @@ print(f"Debug system initialized with {debug_registry.get_module_count()} module
 @app.route('/')
 @requires_auth
 def index():
-    """Main dashboard page"""
-    return render_template('dashboard.html')
+    """Redirect to ads dashboard"""
+    from flask import redirect, url_for
+    return redirect('/ads-dashboard')
 
 @app.route('/pipelines')
 @requires_auth
