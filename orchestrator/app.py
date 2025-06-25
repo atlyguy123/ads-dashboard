@@ -802,7 +802,30 @@ def dashboard_static(filename):
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     """Serve static files at /static/ path for React app"""
-    return send_from_directory('dashboard/static/static', filename)
+    import os
+    from pathlib import Path
+    
+    # Log the request for debugging
+    print(f"🔍 Static file request: {filename}")
+    
+    # Check if file exists
+    static_dir = Path('dashboard/static/static')
+    file_path = static_dir / filename
+    
+    print(f"🔍 Looking for file at: {file_path}")
+    print(f"🔍 Static directory exists: {static_dir.exists()}")
+    print(f"🔍 File exists: {file_path.exists()}")
+    
+    if static_dir.exists():
+        print(f"🔍 Files in static directory: {list(os.listdir(static_dir))}")
+        if file_path.parent.exists():
+            print(f"🔍 Files in {file_path.parent}: {list(os.listdir(file_path.parent))}")
+    
+    try:
+        return send_from_directory('dashboard/static/static', filename)
+    except Exception as e:
+        print(f"❌ Error serving static file: {e}")
+        return f"Error serving file: {str(e)}", 404
 
 @app.route('/manifest.json')
 def dashboard_manifest():
