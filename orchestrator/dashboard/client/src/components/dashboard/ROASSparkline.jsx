@@ -1,7 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { dashboardApi } from '../../services/dashboardApi';
 
-const ROASSparkline = ({ 
+// Cache for sparkline data to prevent unnecessary API calls
+const sparklineCache = new Map();
+
+// Generate cache key for sparkline data
+const getCacheKey = (entityType, entityId, breakdown, startDate, endDate) => {
+  return `${entityType}_${entityId}_${breakdown}_${startDate}_${endDate}`;
+};
+
+// Clear cache function (can be called from parent components if needed)
+export const clearSparklineCache = () => {
+  sparklineCache.clear();
+};
+
+const ROASSparkline = React.memo(({ 
   entityType, 
   entityId, 
   currentROAS,
@@ -18,6 +31,12 @@ const ROASSparkline = ({
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const svgRef = useRef(null);
+  
+  // Memoize cache key to prevent unnecessary recalculations
+  const cacheKey = useMemo(() => 
+    getCacheKey(entityType, entityId, breakdown, startDate, endDate),
+    [entityType, entityId, breakdown, startDate, endDate]
+  );
 
   // Get ROAS performance color based on thresholds
   const getROASPerformanceColor = (roas, conversions = 0) => {
@@ -42,10 +61,18 @@ const ROASSparkline = ({
     return 'text-purple-400';
   };
 
-  // Load chart data
+  // Load chart data with caching
   useEffect(() => {
     const loadChartData = async () => {
       if (!entityId || !startDate || !endDate) {
+        return;
+      }
+      
+      // Check cache first
+      if (sparklineCache.has(cacheKey)) {
+        const cachedData = sparklineCache.get(cacheKey);
+        setChartData(cachedData);
+        setError(null);
         return;
       }
       
@@ -64,6 +91,8 @@ const ROASSparkline = ({
         const response = await dashboardApi.getAnalyticsChartData(apiParams);
         
         if (response && response.success && response.chart_data) {
+          // Cache the successful response
+          sparklineCache.set(cacheKey, response.chart_data);
           setChartData(response.chart_data);
         } else {
           setError('Invalid API response');
@@ -76,10 +105,10 @@ const ROASSparkline = ({
     };
 
     loadChartData();
-  }, [entityType, entityId, breakdown, startDate, endDate]);
+  }, [cacheKey, entityType, entityId, breakdown, startDate, endDate]);
 
-  // Handle mouse move over SVG
-  const handleMouseMove = (event) => {
+  // Handle mouse move over SVG - memoized to prevent unnecessary re-renders
+  const handleMouseMove = useCallback((event) => {
     if (!svgRef.current || chartData.length < 2) return;
     
     const svgRect = svgRef.current.getBoundingClientRect();
@@ -100,11 +129,11 @@ const ROASSparkline = ({
         y: event.clientY - 160  // Move tooltip much higher above cursor
       });
     }
-  };
+  }, [chartData.length]);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     setHoveredPoint(null);
-  };
+  }, []);
 
   // Format date for tooltip
   const formatDate = (dateStr) => {
@@ -123,7 +152,7 @@ const ROASSparkline = ({
   
   // Check if we have enough valid data for sparkline
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
-    parseFloat(d.rolling_7d_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
+    parseFloat(d.rolling_3d_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
   );
 
   return (
@@ -158,7 +187,7 @@ const ROASSparkline = ({
             const height = 20;
             const padding = 2;
             
-            const values = chartData.map(d => parseFloat(d.rolling_7d_roas) || 0);
+            const values = chartData.map(d => parseFloat(d.rolling_3d_roas) || 0);
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
@@ -290,7 +319,7 @@ const ROASSparkline = ({
                       const dayData = chartData[hoveredPoint];
                       const spend = parseFloat(dayData.daily_spend) || 0;
                       const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
-                      const backendROAS = parseFloat(dayData.rolling_7d_roas) || 0;
+                      const backendROAS = parseFloat(dayData.rolling_3d_roas) || 0;
                       
                       // Display backend-calculated rolling ROAS value directly
                       return (
@@ -298,20 +327,20 @@ const ROASSparkline = ({
                           <div className="font-medium text-white">
                             {formatDate(dayData.date)}
                           </div>
-                          <div className={getROASPerformanceColor(backendROAS, dayData.rolling_7d_conversions || 0).replace('text-', 'text-').replace('600', '400')}>
+                          <div className={getROASPerformanceColor(backendROAS, dayData.rolling_3d_conversions || 0).replace('text-', 'text-').replace('600', '400')}>
                             Rolling ROAS: {formatROAS(backendROAS)}
                           </div>
                           <div className="text-gray-400 text-xs">
-                            7-day window ({dayData.rolling_window_days} days)
+                            3-day window ({dayData.rolling_window_days} days)
                           </div>
                         </>
                       );
                     })()}
                           <div className="text-gray-300 text-xs">
-                            Rolling Spend: ${(parseFloat(chartData[hoveredPoint].rolling_7d_spend) || 0).toFixed(2)}
+                            Rolling Spend: ${(parseFloat(chartData[hoveredPoint].rolling_3d_spend) || 0).toFixed(2)}
                           </div>
                           <div className="text-gray-300 text-xs">
-                            Rolling Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_7d_revenue) || 0).toFixed(2)}
+                            Rolling Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_3d_revenue) || 0).toFixed(2)}
                           </div>
                           {/* Display accuracy ratio using same logic as main dashboard */}
                           {chartData[hoveredPoint].period_accuracy_ratio && chartData[hoveredPoint].period_accuracy_ratio !== 1.0 && (
@@ -327,15 +356,15 @@ const ROASSparkline = ({
                           )}
           {/* Show rolling conversion counts for confidence assessment */}
           <div className="text-green-300 text-xs">
-            Rolling Conversions: {chartData[hoveredPoint].rolling_7d_conversions || 0}
+            Rolling Conversions: {chartData[hoveredPoint].rolling_3d_conversions || 0}
           </div>
           <div className="text-blue-300 text-xs">
-            Rolling Trials: {chartData[hoveredPoint].rolling_7d_trials || 0}
+            Rolling Trials: {chartData[hoveredPoint].rolling_3d_trials || 0}
           </div>
           {/* Show Meta comparison if available */}
-          {chartData[hoveredPoint].rolling_7d_meta_trials && (
+          {chartData[hoveredPoint].rolling_3d_meta_trials && (
             <div className="text-gray-400 text-xs">
-              Rolling Meta Trials: {chartData[hoveredPoint].rolling_7d_meta_trials}
+              Rolling Meta Trials: {chartData[hoveredPoint].rolling_3d_meta_trials}
             </div>
           )}
                   </div>
@@ -363,6 +392,6 @@ const ROASSparkline = ({
       </div>
     </div>
   );
-};
+});
 
 export default ROASSparkline; 

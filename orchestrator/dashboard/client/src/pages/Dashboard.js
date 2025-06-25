@@ -591,24 +591,27 @@ export const Dashboard = () => {
     }
   }, []);
 
-  // Auto-refresh on component mount (after functions are defined)
+  // Initialize component state on mount (no automatic data refresh)
   useEffect(() => {
     if (hasInitialLoadRef.current) return; // Prevent multiple initial loads
     
     const hasValidData = dashboardData && dashboardData.length > 0;
     
     if (hasValidData) {
-      // If we have cached data, show it immediately and refresh in background
-      console.log('🔄 Loading cached data and refreshing in background');
-      handleBackgroundRefresh();
+      // Show cached data without refreshing - user must manually refresh
+      console.log('📋 Loading cached data (no auto-refresh)');
+      
+      // Initialize row order with cached data IDs only if no column sorting is active
+      if (dashboardData.length > 0 && rowOrder.length === 0 && (!sortConfig.column)) {
+        setRowOrder(dashboardData.map(r => r.id));
+      }
     } else {
-      // If no cached data, do a regular refresh
-      console.log('🔄 No cached data, performing initial load');
-      handleRefresh();
+      // No cached data - show empty state, user must click refresh
+      console.log('📋 No cached data available - waiting for user action');
     }
     
     hasInitialLoadRef.current = true;
-  }, [handleBackgroundRefresh, handleRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run once on mount
 
   // REMOVED: Auto-refresh on parameter changes - now only refresh when user clicks "Refresh Data"
   // This gives users full control over when data is fetched

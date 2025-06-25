@@ -15,38 +15,41 @@
  */
 
 export const AVAILABLE_COLUMNS = [
+  // User's required columns in exact order
   { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true },
-  { key: 'campaign_name', label: 'Campaign', defaultVisible: true },
-  { key: 'adset_name', label: 'Ad Set', defaultVisible: true },
-  { key: 'impressions', label: 'Impressions', defaultVisible: true },
-  { key: 'clicks', label: 'Clicks', defaultVisible: true },
-  { key: 'spend', label: 'Spend', defaultVisible: true },
   { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
   { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
-  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
-  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
   { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
-  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_refunds_usd', label: 'Actual Refunds (Events)', defaultVisible: true },
-  { key: 'mixpanel_revenue_usd', label: 'Actual Revenue (Events)', defaultVisible: true },
-  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
-  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
-  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
-  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: true },
   { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
   { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
-  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
+  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
+  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
+  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: true },
   { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
+  { key: 'spend', label: 'Spend', defaultVisible: true },
   { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
-  { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
   { key: 'performance_impact_score', label: 'Performance Impact Score', defaultVisible: true },
-  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
+  
+  // All other columns - set to defaultVisible: false
+  { key: 'campaign_name', label: 'Campaign', defaultVisible: false },
+  { key: 'adset_name', label: 'Ad Set', defaultVisible: false },
+  { key: 'impressions', label: 'Impressions', defaultVisible: false },
+  { key: 'clicks', label: 'Clicks', defaultVisible: false },
+  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_refunds_usd', label: 'Actual Refunds (Events)', defaultVisible: false },
+  { key: 'mixpanel_revenue_usd', label: 'Actual Revenue (Events)', defaultVisible: false },
+  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: false },
+  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: false },
+  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
+  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
+  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: false },
+  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
+  { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: false },
+  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: false }
 ];
 
 /**

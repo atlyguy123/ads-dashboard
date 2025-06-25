@@ -1650,8 +1650,8 @@ class AnalyticsQueryService:
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
             display_start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
             
-            # Calculate data fetch period: need 7 additional days before display period for rolling calculations
-            data_start_date = display_start_date - timedelta(days=6)  # 6 days before display (7 total including display start)
+            # Calculate data fetch period: need 3 additional days before display period for rolling calculations
+            data_start_date = display_start_date - timedelta(days=2)  # 2 days before display (3 total including display start)
             
             # Calculate expanded date range for activity analysis (1 week before and after)
             expanded_start_date = display_start_date - timedelta(days=7)  # 1 week before display period
@@ -1875,10 +1875,10 @@ class AnalyticsQueryService:
                 
                 all_data.append(day_data)
             
-            # Calculate rolling 7-day ROAS for each day in the full dataset
+            # Calculate rolling 3-day ROAS for each day in the full dataset
             for i, day_data in enumerate(all_data):
-                # Calculate rolling window (this day + up to 6 days back)
-                rolling_start_idx = max(0, i - 6)  # Don't go before array start
+                # Calculate rolling window (this day + up to 2 days back)
+                rolling_start_idx = max(0, i - 2)  # Don't go before array start
                 rolling_days = all_data[rolling_start_idx:i + 1]
                 
                 # Sum spend and accuracy-adjusted revenue for the rolling window
@@ -1904,19 +1904,19 @@ class AnalyticsQueryService:
                     rolling_roas = 0.0
                 
                 # Add rolling metrics to day data
-                day_data['rolling_7d_roas'] = round(rolling_roas, 2)
-                day_data['rolling_7d_spend'] = rolling_spend
-                day_data['rolling_7d_revenue'] = rolling_revenue
-                day_data['rolling_7d_conversions'] = rolling_conversions
-                day_data['rolling_7d_trials'] = rolling_trials
-                day_data['rolling_7d_meta_trials'] = rolling_meta_trials
+                day_data['rolling_3d_roas'] = round(rolling_roas, 2)
+                day_data['rolling_3d_spend'] = rolling_spend
+                day_data['rolling_3d_revenue'] = rolling_revenue
+                day_data['rolling_3d_conversions'] = rolling_conversions
+                day_data['rolling_3d_trials'] = rolling_trials
+                day_data['rolling_3d_meta_trials'] = rolling_meta_trials
                 day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
             
-            # Extract only the 14-day display period (skip the first 6 days used for rolling calculations)
-            chart_data = all_data[6:]  # Return only the last 14 days for display
+            # Extract only the 14-day display period (skip the first 2 days used for rolling calculations)
+            chart_data = all_data[2:]  # Return only the last 14 days for display
             
             logger.info(f"📊 CHART RESULT: {len(chart_data)} display days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
-            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for proper 7-day rolling averages")
+            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for proper 3-day rolling averages")
             
             return {
                 'success': True,
@@ -1926,7 +1926,7 @@ class AnalyticsQueryService:
                 'date_range': f"{display_start_str} to {chart_end_date}",
                 'total_days': len(chart_data),
                 'period_info': f"14-day period ending {chart_end_date}",
-                'rolling_calculation_info': f"Used 20-day dataset for accurate 7-day rolling averages",
+                'rolling_calculation_info': f"Used 16-day dataset for accurate 3-day rolling averages",
                 'activity_analysis': {
                     'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
                     'first_spend_date': first_spend_date,
@@ -1970,7 +1970,7 @@ class AnalyticsQueryService:
             # Calculate date ranges (same as regular chart data)
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
             display_start_date = end_date - timedelta(days=13)
-            data_start_date = display_start_date - timedelta(days=6)
+            data_start_date = display_start_date - timedelta(days=2)
             expanded_start_date = display_start_date - timedelta(days=7)
             expanded_end_date = end_date + timedelta(days=7)
             
@@ -2173,10 +2173,10 @@ class AnalyticsQueryService:
                 
                 all_data.append(day_data)
             
-            # Calculate rolling 7-day ROAS for each day in the full dataset
+            # Calculate rolling 3-day ROAS for each day in the full dataset
             for i, day_data in enumerate(all_data):
-                # Calculate rolling window (this day + up to 6 days back)
-                rolling_start_idx = max(0, i - 6)
+                # Calculate rolling window (this day + up to 2 days back)
+                rolling_start_idx = max(0, i - 2)
                 rolling_days = all_data[rolling_start_idx:i + 1]
                 
                 # Sum spend and accuracy-adjusted revenue for the rolling window
@@ -2201,16 +2201,16 @@ class AnalyticsQueryService:
                     rolling_roas = 0.0
                 
                 # Add rolling metrics to day data
-                day_data['rolling_7d_roas'] = round(rolling_roas, 2)
-                day_data['rolling_7d_spend'] = rolling_spend
-                day_data['rolling_7d_revenue'] = rolling_revenue
-                day_data['rolling_7d_conversions'] = rolling_conversions
-                day_data['rolling_7d_trials'] = rolling_trials
-                day_data['rolling_7d_meta_trials'] = rolling_meta_trials
+                day_data['rolling_3d_roas'] = round(rolling_roas, 2)
+                day_data['rolling_3d_spend'] = rolling_spend
+                day_data['rolling_3d_revenue'] = rolling_revenue
+                day_data['rolling_3d_conversions'] = rolling_conversions
+                day_data['rolling_3d_trials'] = rolling_trials
+                day_data['rolling_3d_meta_trials'] = rolling_meta_trials
                 day_data['rolling_window_days'] = len(rolling_days)
             
-            # Extract only the 14-day display period (skip the first 6 days used for rolling calculations)
-            chart_data = all_data[6:]  # Return only the last 14 days for display
+            # Extract only the 14-day display period (skip the first 2 days used for rolling calculations)
+            chart_data = all_data[2:]  # Return only the last 14 days for display
             
             logger.info(f"📊 BREAKDOWN CHART RESULT: {len(chart_data)} display days for {breakdown_value} breakdown")
             
@@ -2223,7 +2223,7 @@ class AnalyticsQueryService:
                     'breakdown_type': config.breakdown,
                     'breakdown_value': breakdown_value,
                     'period_days': 14,
-                    'rolling_window_days': 7,
+                    'rolling_window_days': 3,
                     'generated_at': datetime.now().isoformat()
                 }
             }

@@ -59,10 +59,10 @@ def debug_sparkline_mismatch():
         if chart_data:
             last_day = chart_data[-1]  # Last day should match dashboard totals
             print(f"Last day date: {last_day['date']}")
-            print(f"Rolling 7d Meta trials: {last_day.get('rolling_7d_meta_trials', 0)}")
-            print(f"Rolling 7d Mixpanel trials: {last_day.get('rolling_7d_trials', 0)}")
-            print(f"Rolling 7d spend: ${last_day.get('rolling_7d_spend', 0):.2f}")
-            print(f"Rolling 7d revenue: ${last_day.get('rolling_7d_revenue', 0):.2f}")
+            print(f"Rolling 3d Meta trials: {last_day.get('rolling_3d_meta_trials', 0)}")
+            print(f"Rolling 3d Mixpanel trials: {last_day.get('rolling_3d_trials', 0)}")
+            print(f"Rolling 3d spend: ${last_day.get('rolling_3d_spend', 0):.2f}")
+            print(f"Rolling 3d revenue: ${last_day.get('rolling_3d_revenue', 0):.2f}")
             print(f"Period accuracy ratio: {last_day.get('period_accuracy_ratio', 0) * 100:.1f}%")
             
             print(f"\nChart data date range: {chart_data[0]['date']} to {chart_data[-1]['date']}")
