@@ -145,3 +145,7 @@ database/*.db-wal
 database/*.db-shm
 database/mixpanel_data.db-wal
 database/mixpanel_data.db-shm
+
+# Pipeline status files - exclude runtime status to prevent stale state in deployment
+pipelines/*/.status.json
+**/.status.json

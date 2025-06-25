@@ -42,6 +42,16 @@ const DataPipelinePage = () => {
     { id: "🔮 Meta - Update Data", name: "Meta Data" }
   ];
 
+  // Add WebSocket ID validation for debugging
+  const validateWebSocketId = (stepId) => {
+    const moduleExists = MASTER_MODULES.some(module => module.id === stepId);
+    if (!moduleExists) {
+      console.warn(`⚠️ WebSocket step ID not found in MASTER_MODULES: "${stepId}"`);
+      console.warn('Available module IDs:', MASTER_MODULES.map(m => m.id));
+    }
+    return moduleExists;
+  };
+
   // Initialize socket connection
   useEffect(() => {
     socketRef.current = io();
@@ -101,6 +111,8 @@ const DataPipelinePage = () => {
     if (saved) {
       try {
         const data = JSON.parse(saved);
+        console.log('📂 Loading saved pipeline data:', data);
+        
         setLastSuccessfulRun(data.lastSuccessfulRun ? new Date(data.lastSuccessfulRun) : null);
         setLastRunDuration(data.lastRunDuration || null);
         setRetryCount(data.retryCount || 0);
@@ -120,14 +132,33 @@ const DataPipelinePage = () => {
           setModuleTimestamps(timestamps);
         }
         
-        // Check if pipeline is actually complete but frontend missed it
-        if (data.status === 'running' && data.moduleStates) {
-          setTimeout(() => {
-            checkPipelineCompletion(data.moduleStates);
-          }, 500); // Small delay to ensure all state is loaded
+        // Always check backend sync on page load - especially important for running states
+        // This handles cases where:
+        // 1. Pipeline completed but frontend missed it
+        // 2. Pipeline failed but frontend shows running
+        // 3. Stale state from previous sessions
+        console.log('🔄 Scheduling backend sync check...');
+        setTimeout(() => {
+          checkPipelineCompletion(data.moduleStates);
+        }, 1000); // Delay to ensure all state is loaded
+        
+        // Clear obviously stale state (running for >6 hours)
+        if (data.status === 'running' && data.currentRunStart) {
+          const runStart = new Date(data.currentRunStart);
+          const hoursRunning = (Date.now() - runStart.getTime()) / (1000 * 60 * 60);
+          if (hoursRunning > 6) {
+            console.warn('⚠️ Detected stale running state (>6 hours), clearing...');
+            localStorage.removeItem('masterPipelineData');
+            setPipelineStatus('idle');
+            setModuleStates({});
+            setCurrentModule(null);
+            setCurrentRunStart(null);
+            setEstimatedCompletion(null);
+          }
         }
       } catch (e) {
         console.warn('Failed to parse saved pipeline data:', e);
+        localStorage.removeItem('masterPipelineData');
       }
     }
   };
@@ -305,6 +336,12 @@ const DataPipelinePage = () => {
     // Handle step-level updates from backend
     if (data.step && data.status) {
       const stepId = data.step;
+      
+      // Validate that we can handle this step ID
+      if (!validateWebSocketId(stepId)) {
+        console.error(`❌ Received update for unknown step ID: "${stepId}"`);
+        return;
+      }
       
       // Map backend status to frontend status
       let frontendStatus;

@@ -224,10 +224,36 @@ const DataPipelinePage = () => {
   };
 
   const handleStatusUpdate = (data) => {
+    console.log('📡 DEBUG PAGE: WebSocket status update received:', data);
+    
+    // Update the pipeline list to reflect status changes
+    setPipelines(prev => {
+      const updated = prev.map(pipeline => {
+        if (pipeline.name === data.pipeline) {
+          const updatedPipeline = { ...pipeline };
+          if (!updatedPipeline.status) {
+            updatedPipeline.status = {};
+          }
+          updatedPipeline.status[data.step] = {
+            status: data.status,
+            timestamp: data.timestamp,
+            error_message: data.error_message
+          };
+          return updatedPipeline;
+        }
+        return pipeline;
+      });
+      return updated;
+    });
+    
+    // Also update the selected pipeline if it matches
     if (selectedPipeline && selectedPipeline.name === data.pipeline) {
       setSelectedPipeline(prev => {
         if (!prev) return prev;
         const updatedPipeline = { ...prev };
+        if (!updatedPipeline.status) {
+          updatedPipeline.status = {};
+        }
         updatedPipeline.status[data.step] = {
           status: data.status,
           timestamp: data.timestamp,
