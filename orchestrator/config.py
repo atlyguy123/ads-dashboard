@@ -28,8 +28,8 @@ class Config:
     FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
     
     # Server Configuration
-    HOST = os.getenv('ORCHESTRATOR_HOST', os.getenv('HOST', '127.0.0.1'))
-    PORT = int(os.getenv('ORCHESTRATOR_PORT', os.getenv('PORT', '5001')))
+    HOST = os.getenv('HOST', '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1')
+    PORT = int(os.getenv('PORT', '5001'))
     
     # Meta API Configuration
     META_ACCESS_TOKEN = os.getenv('META_ACCESS_TOKEN', '')
