@@ -7,13 +7,13 @@ This module ingests downloaded Mixpanel data into the database with:
 - Memory-efficient streaming processing
 - Comprehensive data validation and filtering
 - Production-grade optimizations and monitoring
-- Now reads from Postgres raw data tables instead of filesystem
+- Now reads from database tables instead of filesystem
+- Supports both SQLite (local) and PostgreSQL (production)
 """
 
 import os
 import sys
 import sqlite3
-import psycopg2
 import json
 import logging
 import time
@@ -24,6 +24,15 @@ from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass
 
 from urllib.parse import urlparse
+
+# Try to import psycopg2, but don't fail if not available (for local SQLite testing)
+try:
+    import psycopg2
+    import psycopg2.extensions
+    HAS_POSTGRES = True
+except ImportError:
+    HAS_POSTGRES = False
+    psycopg2 = None
 
 # Add utils directory to path for database utilities
 utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
@@ -37,8 +46,9 @@ logger = logging.getLogger(__name__)
 # Configuration - Use centralized database path discovery
 DATABASE_PATH = Path(get_database_path('mixpanel_data'))
 
-# Database configuration - use Heroku Postgres for raw data
+# Database configuration - use Heroku Postgres if available, otherwise SQLite
 DATABASE_URL = os.environ.get('DATABASE_URL')
+USE_POSTGRES = DATABASE_URL is not None and HAS_POSTGRES
 
 # Event names to process (important events only)
 IMPORTANT_EVENTS = {
@@ -57,23 +67,33 @@ CONNECTION_TIMEOUT = 60.0
 MAX_RETRY_ATTEMPTS = 3
 RETRY_DELAY = 1.0
 
-def get_postgres_connection():
-    """Get connection to Postgres database for raw data"""
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL environment variable not set")
-    
-    # Parse DATABASE_URL (Heroku format: postgres://user:pass@host:port/dbname)
-    url = urlparse(DATABASE_URL)
-    
-    conn = psycopg2.connect(
-        host=url.hostname,
-        port=url.port,
-        database=url.path[1:],  # Remove leading slash
-        user=url.username,
-        password=url.password,
-        sslmode='require'  # Heroku requires SSL
-    )
-    return conn
+def get_raw_data_connection():
+    """Get connection to database for raw data (PostgreSQL if available, otherwise SQLite)"""
+    if USE_POSTGRES:
+        logger.info("Using PostgreSQL for raw data")
+        # Parse DATABASE_URL (Heroku format: postgres://user:pass@host:port/dbname)
+        url = urlparse(DATABASE_URL)
+        
+        conn = psycopg2.connect(
+            host=url.hostname,
+            port=url.port,
+            database=url.path[1:],  # Remove leading slash
+            user=url.username,
+            password=url.password,
+            sslmode='require'  # Heroku requires SSL
+        )
+        return conn, 'postgres'
+    else:
+        logger.info("Using SQLite for raw data (local mode)")
+        # Use local SQLite database for testing
+        project_root = DATABASE_PATH.parent.parent  # Go up from database directory
+        db_path = project_root / "database" / "raw_data.db"
+        
+        if not db_path.exists():
+            raise FileNotFoundError(f"Raw data database not found at {db_path}. Run Module 1 first.")
+        
+        conn = sqlite3.connect(str(db_path))
+        return conn, 'sqlite'
 
 @dataclass
 class IngestionMetrics:
@@ -102,32 +122,38 @@ def main():
     metrics.start_time = datetime.datetime.now()
     
     try:
-        logger.info("=== Module 3: Data Ingestion ===")
-        logger.info("Starting production data ingestion pipeline...")
+        logger.info("Starting data ingestion pipeline...")
         
         # Validate prerequisites
         validate_prerequisites()
         
         # Create database connections
-        postgres_conn = get_postgres_connection()
+        raw_data_conn, raw_db_type = get_raw_data_connection()
         sqlite_conn = create_sqlite_connection()
         
         try:
+            # Show raw data summary
+            show_raw_data_summary(raw_data_conn, raw_db_type)
+            
             # Validate database schema before proceeding
             validate_database_schema(sqlite_conn)
             
             # Process all data with comprehensive error handling
-            process_all_data(postgres_conn, sqlite_conn, metrics)
+            process_all_data(raw_data_conn, raw_db_type, sqlite_conn, metrics)
             
             # Verify data integrity
             verify_ingestion(sqlite_conn, metrics)
             
+            # Show processed data summary
+            show_processed_data_summary(sqlite_conn)
+            
         finally:
-            postgres_conn.close()
+            raw_data_conn.close()
             sqlite_conn.close()
         
         metrics.end_time = datetime.datetime.now()
         log_final_metrics(metrics)
+        show_ingestion_metrics(metrics)
         
         logger.info("Data ingestion completed successfully")
         return 0
@@ -147,9 +173,15 @@ def validate_prerequisites():
     if not DATABASE_PATH.exists():
         raise FileNotFoundError(f"Database not found at {DATABASE_PATH}. Run Module 2 first.")
     
-    # Check Postgres connection
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL environment variable not set")
+    # Check raw data source (either PostgreSQL or SQLite)
+    if USE_POSTGRES:
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL environment variable not set but PostgreSQL mode detected")
+    else:
+        project_root = DATABASE_PATH.parent.parent
+        raw_db_path = project_root / "database" / "raw_data.db"
+        if not raw_db_path.exists():
+            raise FileNotFoundError(f"Raw data database not found at {raw_db_path}. Run Module 1 first.")
     
     logger.info("Prerequisites validated successfully")
 
@@ -175,6 +207,96 @@ def create_sqlite_connection():
     
     logger.info("SQLite database connection established with optimizations")
     return conn
+
+def show_raw_data_summary(raw_data_conn, raw_db_type: str):
+    """Show summary of raw data available for processing"""
+    cursor = raw_data_conn.cursor()
+    
+    try:
+        # Count users
+        cursor.execute("SELECT COUNT(*) FROM raw_user_data")
+        user_count = cursor.fetchone()[0]
+        
+        # Count events by date (limit to recent dates for readability)
+        cursor.execute("""
+            SELECT date_day, COUNT(*) as event_count
+            FROM raw_event_data 
+            GROUP BY date_day 
+            ORDER BY date_day DESC 
+            LIMIT 15
+        """)
+        recent_dates = cursor.fetchall()
+        
+        # Total events
+        cursor.execute("SELECT COUNT(*) FROM raw_event_data")
+        total_events = cursor.fetchone()[0]
+        
+        print(f"\n📊 === RAW DATA SUMMARY ({raw_db_type.upper()}) ===")
+        print(f"👥 Raw users available: {user_count:,}")
+        print(f"📅 Raw event data by date:")
+        for date_day, event_count in recent_dates:
+            print(f"  - {date_day}: {event_count} events")
+        print(f"📊 Total events available: {total_events:,}")
+        print(f"🗃️  Raw events in database: {total_events:,}")
+        
+    except Exception as e:
+        logger.error(f"Error generating raw data summary: {e}")
+
+def show_processed_data_summary(sqlite_conn: sqlite3.Connection):
+    """Show summary of processed data in SQLite"""
+    cursor = sqlite_conn.cursor()
+    
+    try:
+        # Count processed users
+        cursor.execute("SELECT COUNT(*) FROM mixpanel_user")
+        user_count = cursor.fetchone()[0]
+        
+        # Count valid users (non-filtered)
+        cursor.execute("SELECT COUNT(*) FROM mixpanel_user WHERE is_valid = 1")
+        valid_user_count = cursor.fetchone()[0]
+        
+        # Count processed events
+        cursor.execute("SELECT COUNT(*) FROM mixpanel_event")
+        event_count = cursor.fetchone()[0]
+        
+        # Count processed dates
+        cursor.execute("SELECT COUNT(*) FROM processed_event_days")
+        dates_count = cursor.fetchone()[0]
+        
+        # Recent processed dates
+        cursor.execute("""
+            SELECT date_day, events_processed
+            FROM processed_event_days 
+            ORDER BY date_day DESC 
+            LIMIT 15
+        """)
+        recent_dates = cursor.fetchall()
+        
+        print(f"\n📊 === PROCESSED DATA SUMMARY (SQLITE) ===")
+        print(f"👥 Processed users: {user_count:,}")
+        print(f"✅ Valid users: {valid_user_count:,}")
+        print(f"📊 Processed events: {event_count:,}")
+        print(f"📅 Processed dates: {dates_count}")
+        for date_day, event_count in recent_dates:
+            print(f"  - {date_day}: {event_count} events")
+        
+    except Exception as e:
+        logger.error(f"Error generating processed data summary: {e}")
+
+def show_ingestion_metrics(metrics: IngestionMetrics):
+    """Show ingestion metrics in a test-style format"""
+    print(f"\n🧪 === INGESTION METRICS ===")
+    print(f"⏱️  Total Processing Time: {metrics.elapsed_time():.2f} seconds")
+    print(f"📅 Dates Processed: {metrics.dates_processed}")
+    print(f"👥 Users Processed: {metrics.users_processed}")
+    print(f"🚫 Users Filtered (@atly.com): {metrics.users_filtered_atly}")
+    print(f"🚫 Users Filtered (test): {metrics.users_filtered_test}")
+    print(f"🚫 Users Filtered (@steps.me): {metrics.users_filtered_steps}")
+    print(f"📊 Events Processed: {metrics.events_processed}")
+    print(f"⏭️  Events Skipped (unimportant): {metrics.events_skipped_unimportant}")
+    print(f"❌ Events Skipped (invalid): {metrics.events_skipped_invalid}")
+    print(f"🔗 Events Skipped (missing users): {metrics.events_skipped_missing_users}")
+    print(f"🎉 Data ingestion completed successfully")
 
 def validate_database_schema(conn: sqlite3.Connection):
     """Validate database has the required schema from Module 2"""
@@ -216,34 +338,34 @@ def validate_database_schema(conn: sqlite3.Connection):
     
     logger.info("Database schema validation passed")
 
-def process_all_data(postgres_conn: psycopg2.extensions.connection, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
+def process_all_data(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
     """Process all user and event data with comprehensive error handling"""
     
     # Step 1: Refresh all users
     logger.info("=== Step 1: Refreshing User Data ===")
-    refresh_all_users(postgres_conn, sqlite_conn, metrics)
+    refresh_all_users(raw_data_conn, raw_db_type, sqlite_conn, metrics)
     
     # Step 2: Process events incrementally  
     logger.info("=== Step 2: Processing Events Incrementally ===")
-    process_events_incrementally(postgres_conn, sqlite_conn, metrics)
+    process_events_incrementally(raw_data_conn, raw_db_type, sqlite_conn, metrics)
 
-def refresh_all_users(postgres_conn: psycopg2.extensions.connection, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
-    """Process users from Postgres raw_user_data table"""
+def refresh_all_users(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
+    """Process users from raw_user_data table"""
     sqlite_cursor = sqlite_conn.cursor()
     
     try:
-        logger.info("Processing user data from Postgres...")
+        logger.info(f"Processing user data from {raw_db_type} database...")
         sqlite_cursor.execute("BEGIN IMMEDIATE")
         
-        # Get user count from Postgres
-        postgres_cursor = postgres_conn.cursor()
-        postgres_cursor.execute("SELECT COUNT(*) FROM raw_user_data")
-        user_count = postgres_cursor.fetchone()[0]
+        # Get user count from raw data database
+        raw_cursor = raw_data_conn.cursor()
+        raw_cursor.execute("SELECT COUNT(*) FROM raw_user_data")
+        user_count = raw_cursor.fetchone()[0]
         
-        logger.info(f"Found {user_count} users to process from Postgres")
+        logger.info(f"Found {user_count} users to process from {raw_db_type}")
         
         if user_count == 0:
-            logger.warning("No user data found in Postgres raw_user_data table")
+            logger.warning(f"No user data found in {raw_db_type} raw_user_data table")
             sqlite_cursor.execute("COMMIT")
             return
         
@@ -254,19 +376,27 @@ def refresh_all_users(postgres_conn: psycopg2.extensions.connection, sqlite_conn
         while offset < user_count:
             logger.info(f"Processing users {offset+1} to {min(offset+batch_size, user_count)}")
             
-            postgres_cursor.execute("""
-                SELECT distinct_id, user_data 
-                FROM raw_user_data 
-                ORDER BY distinct_id 
-                LIMIT %s OFFSET %s
-            """, (batch_size, offset))
+            if raw_db_type == 'postgres':
+                raw_cursor.execute("""
+                    SELECT distinct_id, user_data 
+                    FROM raw_user_data 
+                    ORDER BY distinct_id 
+                    LIMIT %s OFFSET %s
+                """, (batch_size, offset))
+            else:
+                raw_cursor.execute("""
+                    SELECT distinct_id, user_data 
+                    FROM raw_user_data 
+                    ORDER BY distinct_id 
+                    LIMIT ? OFFSET ?
+                """, (batch_size, offset))
             
-            users_batch = postgres_cursor.fetchall()
+            users_batch = raw_cursor.fetchall()
             
             if not users_batch:
                 break
                 
-            batch_metrics = process_user_batch_from_postgres(sqlite_conn, users_batch)
+            batch_metrics = process_user_batch_from_raw_data(sqlite_conn, users_batch)
             metrics.users_processed += batch_metrics['users_processed']
             metrics.users_filtered_atly += batch_metrics['users_filtered_atly']
             metrics.users_filtered_test += batch_metrics['users_filtered_test']
@@ -282,8 +412,8 @@ def refresh_all_users(postgres_conn: psycopg2.extensions.connection, sqlite_conn
         logger.error(f"User processing failed: {e}")
         raise
 
-def process_user_batch_from_postgres(sqlite_conn: sqlite3.Connection, users_batch: List[Tuple]) -> Dict[str, int]:
-    """Process users from Postgres batch with comprehensive validation and error handling"""
+def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batch: List[Tuple]) -> Dict[str, int]:
+    """Process users from raw data batch with comprehensive validation and error handling"""
     sqlite_cursor = sqlite_conn.cursor()
     
     batch_metrics = {
@@ -355,33 +485,50 @@ def process_user_batch_from_postgres(sqlite_conn: sqlite3.Connection, users_batc
         
         # Log filtering examples and invalid record summary
         if batch_metrics['users_filtered_atly'] > 0 or batch_metrics['users_filtered_test'] > 0 or batch_metrics['users_filtered_steps'] > 0:
-            log_user_filtering_examples("Postgres batch", atly_examples, test_examples, steps_examples, batch_metrics)
+            log_user_filtering_examples("Raw data batch", atly_examples, test_examples, steps_examples, batch_metrics)
         
         return batch_metrics
         
     except Exception as e:
-        logger.error(f"Failed to process user batch from Postgres: {e}")
+        logger.error(f"Failed to process user batch from raw data: {e}")
         raise
 
-def process_events_incrementally(postgres_conn: psycopg2.extensions.connection, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
-    """Process events incrementally by date from Postgres raw_event_data table"""
+def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
+    """Process events incrementally by date from raw_event_data table"""
     
     # Get already processed dates from SQLite
     processed_dates = get_processed_dates(sqlite_conn)
     logger.info(f"Found {len(processed_dates)} already processed dates in SQLite")
     
-    # Find unprocessed event dates in Postgres
-    postgres_cursor = postgres_conn.cursor()
-    postgres_cursor.execute("""
+    # Find unprocessed event dates in raw data database
+    raw_cursor = raw_data_conn.cursor()
+    raw_cursor.execute("""
         SELECT DISTINCT date_day 
         FROM raw_event_data 
         ORDER BY date_day
     """)
     
-    available_dates = [row[0] for row in postgres_cursor.fetchall()]
-    unprocessed_dates = [date for date in available_dates if date.strftime('%Y-%m-%d') not in processed_dates]
+    available_dates = [row[0] for row in raw_cursor.fetchall()]
     
-    logger.info(f"Found {len(unprocessed_dates)} dates to process from Postgres")
+    # Handle date formatting differences between PostgreSQL and SQLite
+    if raw_db_type == 'postgres':
+        unprocessed_dates = [date for date in available_dates if date.strftime('%Y-%m-%d') not in processed_dates]
+    else:
+        # SQLite stores dates as strings, so we need to parse them
+        unprocessed_dates = []
+        for date_str in available_dates:
+            try:
+                if isinstance(date_str, str):
+                    date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+                else:
+                    date_obj = date_str
+                
+                if date_obj.strftime('%Y-%m-%d') not in processed_dates:
+                    unprocessed_dates.append(date_obj)
+            except ValueError:
+                logger.warning(f"Invalid date format in raw data: {date_str}")
+    
+    logger.info(f"Found {len(unprocessed_dates)} dates to process from {raw_db_type}")
     if not unprocessed_dates:
         logger.info("No new event dates to process")
         return
@@ -396,18 +543,26 @@ def process_events_incrementally(postgres_conn: psycopg2.extensions.connection, 
             sqlite_cursor = sqlite_conn.cursor()
             sqlite_cursor.execute("BEGIN IMMEDIATE")
             
-            # Get events for this date from Postgres
-            postgres_cursor.execute("""
-                SELECT event_data 
-                FROM raw_event_data 
-                WHERE date_day = %s
-                ORDER BY file_sequence
-            """, (date_obj,))
+            # Get events for this date from raw data database
+            if raw_db_type == 'postgres':
+                raw_cursor.execute("""
+                    SELECT event_data 
+                    FROM raw_event_data 
+                    WHERE date_day = %s
+                    ORDER BY file_sequence
+                """, (date_obj,))
+            else:
+                raw_cursor.execute("""
+                    SELECT event_data 
+                    FROM raw_event_data 
+                    WHERE date_day = ?
+                    ORDER BY file_sequence
+                """, (date_str,))
             
             date_events = 0
             event_batch = []
             
-            for (event_data_json,) in postgres_cursor:
+            for (event_data_json,) in raw_cursor:
                 try:
                     event_data = json.loads(event_data_json)
                     event_name = event_data.get('event')
@@ -418,7 +573,7 @@ def process_events_incrementally(postgres_conn: psycopg2.extensions.connection, 
                         continue
                     
                     # Extract and validate event data
-                    event_record = prepare_event_record(event_data, f"postgres:{date_str}", 0)
+                    event_record = prepare_event_record(event_data, f"{raw_db_type}:{date_str}", 0)
                     if not event_record:
                         metrics.events_skipped_invalid += 1
                         continue
