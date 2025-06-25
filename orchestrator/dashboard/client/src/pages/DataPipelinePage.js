@@ -8,11 +8,8 @@ const DataPipelinePage = () => {
   const [lastSuccessfulRun, setLastSuccessfulRun] = useState(null);
   const [lastRunDuration, setLastRunDuration] = useState(null);
   const [estimatedCompletion, setEstimatedCompletion] = useState(null);
-  const [nextScheduledRun, setNextScheduledRun] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const [retryAttempts, setRetryAttempts] = useState(0);
-  const [countdown, setCountdown] = useState('');
-  const [isManualRun, setIsManualRun] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [messageType, setMessageType] = useState('');
   const [currentRunStart, setCurrentRunStart] = useState(null);
@@ -21,15 +18,12 @@ const DataPipelinePage = () => {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   
   const socketRef = useRef(null);
-  const countdownIntervalRef = useRef(null);
   const retryTimeoutRef = useRef(null);
 
   // Constants
   const MASTER_PIPELINE = 'master_pipeline';
   const MAX_RETRY_ATTEMPTS = 5;
   const RETRY_INTERVAL_MINUTES = 30;
-  const SCHEDULED_HOUR = 9; // 9 AM
-  const JERUSALEM_TIMEZONE = 'Asia/Jerusalem';
   
   // Master pipeline modules (from pipeline.yaml)
   const MASTER_MODULES = [
@@ -71,24 +65,13 @@ const DataPipelinePage = () => {
   // Load saved data and initialize
   useEffect(() => {
     loadSavedData();
-    // loadSavedData() now handles setting nextScheduledRun and will call calculateNextScheduledRun if needed
     
     return () => {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-      }
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
       }
     };
   }, []);
-
-  // Start countdown timer when nextScheduledRun is set
-  useEffect(() => {
-    if (nextScheduledRun) {
-      startCountdownTimer();
-    }
-  }, [nextScheduledRun]);
 
   // Mark that initial load is complete after first render
   useEffect(() => {
@@ -112,51 +95,6 @@ const DataPipelinePage = () => {
     }
   }, [isInitialLoad, pipelineStatus, moduleStates, currentModule, retryAttempts]);
 
-  // Check for scheduled runs every minute
-  useEffect(() => {
-    const checkScheduledRun = () => {
-      const now = new Date();
-      const jerusalemTime = new Date(now.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
-      
-      // Add a unique tab identifier to prevent multiple tabs from triggering simultaneously
-      const tabId = sessionStorage.getItem('pipelineTabId') || Date.now().toString();
-      sessionStorage.setItem('pipelineTabId', tabId);
-      
-      // Check if another tab recently triggered a run (within the last 5 minutes)
-      const lastTriggerData = localStorage.getItem('pipelineLastTrigger');
-      if (lastTriggerData) {
-        try {
-          const lastTrigger = JSON.parse(lastTriggerData);
-          const timeSinceLastTrigger = now - new Date(lastTrigger.timestamp);
-          const lastTriggerTabId = lastTrigger.tabId;
-          
-          // If another tab triggered within the last 5 minutes, skip this check
-          if (timeSinceLastTrigger < 5 * 60 * 1000 && lastTriggerTabId !== tabId) {
-            console.log('⏭️ Skipping scheduled run check - another tab recently triggered');
-            return;
-          }
-        } catch (e) {
-          console.warn('Failed to parse last trigger data:', e);
-        }
-      }
-      
-      if (nextScheduledRun && jerusalemTime >= nextScheduledRun && pipelineStatus === 'idle') {
-        console.log('🕘 Scheduled run triggered at', jerusalemTime.toLocaleString());
-        
-        // Record this trigger to prevent other tabs from also triggering
-        localStorage.setItem('pipelineLastTrigger', JSON.stringify({
-          timestamp: now.toISOString(),
-          tabId: tabId
-        }));
-        
-        runMasterPipeline(false); // false = automatic run
-      }
-    };
-
-    const interval = setInterval(checkScheduledRun, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, [nextScheduledRun, pipelineStatus]);
-
   const loadSavedData = () => {
     const saved = localStorage.getItem('masterPipelineData');
     if (saved) {
@@ -172,23 +110,6 @@ const DataPipelinePage = () => {
         setCurrentRunStart(data.currentRunStart ? new Date(data.currentRunStart) : null);
         setEstimatedCompletion(data.estimatedCompletion ? new Date(data.estimatedCompletion) : null);
         
-        // Restore next scheduled run, but recalculate if it's in the past
-        if (data.nextScheduledRun) {
-          const savedNextRun = new Date(data.nextScheduledRun);
-          const now = new Date();
-          const jerusalemTime = new Date(now.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
-          
-          if (savedNextRun > jerusalemTime) {
-            setNextScheduledRun(savedNextRun);
-          } else {
-            // If saved run time is in the past, calculate next one and save it
-            calculateNextScheduledRun(true);
-          }
-        } else {
-          // No saved next run, calculate it and save it
-          calculateNextScheduledRun(true);
-        }
-        
         // Check if pipeline is actually complete but frontend missed it
         if (data.status === 'running' && data.moduleStates) {
           setTimeout(() => {
@@ -197,12 +118,7 @@ const DataPipelinePage = () => {
         }
       } catch (e) {
         console.warn('Failed to parse saved pipeline data:', e);
-        // If parsing fails, still calculate next scheduled run and save it
-        calculateNextScheduledRun(true);
       }
-    } else {
-      // No saved data, calculate initial next scheduled run and save it
-      calculateNextScheduledRun(true);
     }
   };
 
@@ -228,8 +144,7 @@ const DataPipelinePage = () => {
       moduleStates,
       currentModule,
       currentRunStart: currentRunStart?.toISOString(),
-      estimatedCompletion: estimatedCompletion?.toISOString(),
-      nextScheduledRun: nextScheduledRun?.toISOString()
+      estimatedCompletion: estimatedCompletion?.toISOString()
     };
     
     // Only save if we have meaningful data
@@ -238,78 +153,7 @@ const DataPipelinePage = () => {
     }
   };
 
-  const calculateNextScheduledRun = (shouldSave = true) => {
-    const now = new Date();
-    const jerusalemTime = new Date(now.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
-    
-    // Calculate next 9 AM Jerusalem time
-    const nextRun = new Date(jerusalemTime);
-    nextRun.setHours(SCHEDULED_HOUR, 0, 0, 0);
-    
-    // If we're past 9 AM today, schedule for tomorrow
-    if (jerusalemTime.getHours() >= SCHEDULED_HOUR) {
-      nextRun.setDate(nextRun.getDate() + 1);
-    }
-    
-    // Additional safety check: if we have a recent successful run today, schedule for tomorrow
-    if (lastSuccessfulRun) {
-      const lastRunJerusalem = new Date(lastSuccessfulRun.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
-      const todayJerusalem = new Date(jerusalemTime);
-      todayJerusalem.setHours(0, 0, 0, 0);
-      
-      // If last successful run was today, schedule for tomorrow
-      if (lastRunJerusalem >= todayJerusalem) {
-        const tomorrow = new Date(jerusalemTime);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(SCHEDULED_HOUR, 0, 0, 0);
-        
-        // Only update if tomorrow is later than currently calculated nextRun
-        if (tomorrow > nextRun) {
-          nextRun.setTime(tomorrow.getTime());
-        }
-      }
-    }
-    
-    setNextScheduledRun(nextRun);
-    
-    // Save the calculated next run time only if requested
-    if (shouldSave) {
-      saveData({
-        nextScheduledRun: nextRun.toISOString()
-      });
-    }
-    
-    console.log(`📅 Next scheduled run calculated: ${nextRun.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE})} Jerusalem time`);
-    
-    return nextRun;
-  };
-
-  const startCountdownTimer = () => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
-
-    countdownIntervalRef.current = setInterval(() => {
-      const now = new Date();
-      const jerusalemTime = new Date(now.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
-      
-      if (nextScheduledRun) {
-        const diff = nextScheduledRun - jerusalemTime;
-        
-        if (diff > 0) {
-          const hours = Math.floor(diff / (1000 * 60 * 60));
-          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-          const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-          
-          setCountdown(`${hours}h ${minutes}m ${seconds}s`);
-        } else {
-          setCountdown('Checking for scheduled run...');
-        }
-      }
-    }, 1000);
-  };
-
-  const runMasterPipeline = async (isManual = true) => {
+  const runMasterPipeline = async () => {
     // Safety check: prevent multiple concurrent runs
     if (pipelineStatus === 'running') {
       console.log('⚠️ Pipeline is already running, skipping duplicate request');
@@ -318,7 +162,6 @@ const DataPipelinePage = () => {
     }
     
     console.log('🚀 Starting master pipeline...');
-    setIsManualRun(isManual);
     setPipelineStatus('running');
     setStatusMessage('');
     setCurrentRunStart(new Date());
@@ -344,7 +187,7 @@ const DataPipelinePage = () => {
       
       if (result.success) {
         console.log('✅ Pipeline started successfully');
-        showMessage(`Pipeline ${isManual ? 'started manually' : 'started automatically'}`, 'success');
+        showMessage('Pipeline started successfully', 'success');
       } else {
         console.error('❌ Pipeline failed to start:', result.message);
         setPipelineStatus('failed');
@@ -385,9 +228,6 @@ const DataPipelinePage = () => {
         setModuleStates(cancelledModuleStates);
         
         showMessage(result.message || 'Pipeline cancelled successfully', 'success');
-        
-        // Calculate next scheduled run
-        calculateNextScheduledRun();
       } else {
         console.error('❌ Pipeline cancel failed:', result.message);
         showMessage(`Cancel failed: ${result.message}`, 'error');
@@ -426,7 +266,7 @@ const DataPipelinePage = () => {
     
     // Start the pipeline again after a short delay
     setTimeout(() => {
-      runMasterPipeline(true);
+      runMasterPipeline();
     }, 1000);
   };
 
@@ -551,12 +391,6 @@ const DataPipelinePage = () => {
     });
     
     showMessage('Pipeline completed successfully! Database updated.', 'success');
-    
-    // Calculate next scheduled run with the new lastSuccessfulRun value 
-    // This will ensure it schedules for tomorrow if the run completed today
-    setTimeout(() => {
-      calculateNextScheduledRun();
-    }, 100); // Small delay to ensure state is updated
   };
 
   const handlePipelineFailure = (failedStep = null) => {
@@ -601,7 +435,7 @@ const DataPipelinePage = () => {
       
       retryTimeoutRef.current = setTimeout(() => {
         console.log(`🔄 Automatic retry ${newRetryAttempts} triggered`);
-        runMasterPipeline(false);
+        runMasterPipeline();
       }, RETRY_INTERVAL_MINUTES * 60 * 1000);
       
     } else {
@@ -743,7 +577,7 @@ const DataPipelinePage = () => {
         return {
           icon: <Clock className="h-8 w-8 text-gray-600" />,
           title: 'Pipeline Ready',
-          description: 'Waiting for next scheduled run',
+          description: 'Ready to run when triggered',
           color: 'border-gray-300 bg-gray-50 dark:bg-gray-800'
         };
     }
@@ -857,11 +691,6 @@ const DataPipelinePage = () => {
           
           showMessage('Pipeline completed successfully! Database updated.', 'success');
           
-          // Calculate next scheduled run
-          setTimeout(() => {
-            calculateNextScheduledRun();
-          }, 100);
-          
         } else {
           console.log('❌ Not all modules complete yet. Status check:');
           moduleIds.forEach(id => {
@@ -935,7 +764,7 @@ const DataPipelinePage = () => {
                     if (Object.keys(moduleStates).length > 0 && pipelineStatus !== 'running') {
                       restartPipeline();
                     } else {
-                      runMasterPipeline(true);
+                      runMasterPipeline();
                     }
                   }}
                   disabled={pipelineStatus === 'running'}
@@ -953,7 +782,7 @@ const DataPipelinePage = () => {
           </div>
 
           {/* Status Information Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Last Successful Run */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center space-x-3">
@@ -973,24 +802,6 @@ const DataPipelinePage = () => {
                       {retryAttempts} failed attempt{retryAttempts > 1 ? 's' : ''}
                     </p>
                   )}
-                </div>
-              </div>
-            </div>
-
-            {/* Next Scheduled Run */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-              <div className="flex items-center space-x-3">
-                <Clock className="h-8 w-8 text-blue-600" />
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    Next Scheduled Run
-                  </h3>
-                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">
-                    9:00 AM (Jerusalem)
-                  </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    {countdown || 'Calculating...'}
-                  </p>
                 </div>
               </div>
             </div>

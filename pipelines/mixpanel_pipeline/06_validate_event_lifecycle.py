@@ -525,15 +525,32 @@ def validate_lifecycle_pattern(events, distinct_id, product_id):
     
     # Final validation checks
     if state.trial_started and not state.trial_ended:
-        increment_invalid_stat('trial_without_end')
-        log_invalid_lifecycle(distinct_id, product_id, 'trial_without_end', events)
-        return False, "trial_without_end"
+        # Check if trial started more than 31 days ago
+        # If so, it should have ended by now, so it's invalid
+        # If not, the trial could still be legitimately active
+        try:
+            current_time = datetime.now(state.trial_start_time.tzinfo)
+            days_since_trial_start = (current_time - state.trial_start_time).days
+            
+            if days_since_trial_start > 31:
+                increment_invalid_stat('trial_without_end')
+                log_invalid_lifecycle(distinct_id, product_id, 'trial_without_end', events)
+                return False, "trial_without_end"
+            # If trial started within last 31 days, it's still potentially valid
+            # so we don't mark it as invalid here
+        except Exception as e:
+            # If we can't parse the trial start time, fall back to marking as invalid
+            increment_invalid_stat('trial_without_end')
+            log_invalid_lifecycle(distinct_id, product_id, 'trial_without_end', events)
+            return False, "trial_without_end"
     
     # Valid lifecycle must have either:
     # 1. A subscription (trial converted or initial purchase), OR
-    # 2. A complete trial lifecycle (trial started and ended, even if cancelled)
+    # 2. A complete trial lifecycle (trial started and ended, even if cancelled), OR
+    # 3. An active trial within the 31-day window
     has_valid_lifecycle = (state.has_subscription or 
-                          (state.trial_started and state.trial_ended))
+                          (state.trial_started and state.trial_ended) or
+                          (state.trial_started and not state.trial_ended))  # Active trial case
     
     if not has_valid_lifecycle:
         increment_invalid_stat('no_subscription_event')

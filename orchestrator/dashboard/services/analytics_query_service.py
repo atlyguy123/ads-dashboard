@@ -229,6 +229,12 @@ class AnalyticsQueryService:
                     'mixpanel_revenue_usd': bd.mixpanel_data.get('mixpanel_revenue', 0),
                     'total_attributed_users': bd.mixpanel_data.get('total_users', 0),
                     'estimated_revenue_usd': bd.mixpanel_data.get('estimated_revenue', 0),  # CRITICAL ADD: Use estimated revenue from breakdown service
+                    
+                    # CRITICAL ADD: Include rate fields from breakdown data for DatabaseCalculators
+                    'avg_trial_conversion_rate': bd.mixpanel_data.get('avg_trial_conversion_rate', 0),
+                    'avg_trial_refund_rate': bd.mixpanel_data.get('avg_trial_refund_rate', 0),
+                    'avg_purchase_refund_rate': bd.mixpanel_data.get('avg_purchase_refund_rate', 0),
+                    
                     # Add other fields that might be needed for calculations
                     'mixpanel_trials_in_progress': 0,
                     'mixpanel_trials_ended': 0,
@@ -290,6 +296,8 @@ class AnalyticsQueryService:
                     'click_to_trial_rate': RateCalculators.calculate_click_to_trial_rate(calc_input),
                     'trial_conversion_rate': DatabaseCalculators.calculate_trial_conversion_rate(calc_input),
                     'trial_to_purchase_rate': DatabaseCalculators.calculate_trial_to_purchase_rate(calc_input),
+                    'avg_trial_refund_rate': DatabaseCalculators.calculate_avg_trial_refund_rate(calc_input),
+                    'purchase_refund_rate': DatabaseCalculators.calculate_purchase_refund_rate(calc_input),
                     'mixpanel_revenue_net': RevenueCalculators.calculate_mixpanel_revenue_net(calc_input),
                     'profit': RevenueCalculators.calculate_profit(calc_input),
                 }
@@ -1036,7 +1044,11 @@ class AnalyticsQueryService:
                     'mixpanel_revenue_usd': 0.0,
                     'estimated_revenue_usd': 0.0,
                     'trial_accuracy_ratio': 0.0,
-                    'total_attributed_users': 0
+                    'total_attributed_users': 0,
+                    # CRITICAL ADD: Initialize rate fields
+                    'avg_trial_conversion_rate': 0.0,
+                    'avg_trial_refund_rate': 0.0,
+                    'avg_purchase_refund_rate': 0.0
                 })
                 if 'children' in record:
                     for child in record['children']:
@@ -1233,16 +1245,16 @@ class AnalyticsQueryService:
         except Exception as e:
             logger.error(f"Error fetching ESTIMATED revenue data from user_product_metrics: {e}", exc_info=True)
 
-        # Step 2C: Get AVERAGE CONVERSION AND REFUND RATES from user_product_metrics (CRITICAL MISSING PIECE)
-        average_rates_data_map = {}
+        # Step 2C: Get AVERAGE CONVERSION AND REFUND RATES from user_product_metrics (CRITICAL ADD)
+        rate_data_map = {}
         try:
             with sqlite3.connect(self.mixpanel_db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
                 ad_placeholders = ','.join(['?' for _ in all_ad_ids])
-                # Query for AVERAGE conversion and refund rates (the user requested functionality)
-                average_rates_query = f"""
+                # Query for AVERAGE rates from user lifecycle predictions
+                rates_query = f"""
                 SELECT 
                     u.abi_ad_id,
                     AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
@@ -1259,32 +1271,32 @@ class AnalyticsQueryService:
                 GROUP BY u.abi_ad_id
                 """
                 
-                average_rates_params = [
+                rates_params = [
                     *list(all_ad_ids),
                     config.start_date, config.end_date  # credited_date filter
                 ]
                 
-                logger.info(f"🎯 Executing AVERAGE RATES query from user_product_metrics (USER REQUESTED)")
-                cursor.execute(average_rates_query, average_rates_params)
+                logger.info(f"🔍 Executing STEP 2C: RATE queries from user_product_metrics by credited_date")
+                cursor.execute(rates_query, rates_params)
                 
                 results = cursor.fetchall()
-                logger.info(f"📊 Average rates query returned {len(results)} rows")
+                logger.info(f"📊 Step 2C rate query returned {len(results)} rows")
                 
                 for row in results:
                     ad_id = row['abi_ad_id']
-                    average_rates_data_map[ad_id] = dict(row)
-                    logger.debug(f"📊 Ad {ad_id}: Trial conversion: {row['avg_trial_conversion_rate']:.4f}, Trial refund: {row['avg_trial_refund_rate']:.4f}, Purchase refund: {row['avg_purchase_refund_rate']:.4f} (from {row['users_with_rates']} users)")
+                    rate_data_map[ad_id] = dict(row)
+                    logger.debug(f"📊 Ad {ad_id}: {row['avg_trial_conversion_rate']:.3f} trial conv, {row['avg_trial_refund_rate']:.3f} trial refund, {row['avg_purchase_refund_rate']:.3f} purchase refund rates")
         
         except Exception as e:
-            logger.error(f"Error fetching AVERAGE RATES data from user_product_metrics: {e}", exc_info=True)
+            logger.error(f"Error fetching STEP 2C rate data from user_product_metrics: {e}", exc_info=True)
 
-        # Step 3: Combine event, actual revenue, estimated revenue, and average rates data
+        # Step 3: Combine event, actual revenue, estimated revenue, and rate data
         mixpanel_data_map = {}
         for ad_id in all_ad_ids:
             event_data = event_data_map.get(ad_id, {})
             actual_revenue_data = actual_revenue_data_map.get(ad_id, {})
             estimated_revenue_data = estimated_revenue_data_map.get(ad_id, {})
-            average_rates_data = average_rates_data_map.get(ad_id, {})
+            rate_data = rate_data_map.get(ad_id, {})
             
             mixpanel_data_map[ad_id] = {
                 # Event metrics
@@ -1299,19 +1311,18 @@ class AnalyticsQueryService:
                 # ESTIMATED revenue from user lifecycle predictions
                 'estimated_revenue_usd': estimated_revenue_data.get('estimated_revenue_usd', 0.0),
                 
-                # AVERAGE CONVERSION AND REFUND RATES (USER REQUESTED)
-                'avg_trial_conversion_rate': average_rates_data.get('avg_trial_conversion_rate', 0.0),
-                'avg_trial_refund_rate': average_rates_data.get('avg_trial_refund_rate', 0.0),
-                'avg_purchase_refund_rate': average_rates_data.get('avg_purchase_refund_rate', 0.0),
-                'users_with_rates': average_rates_data.get('users_with_rates', 0)
+                # AVERAGE rates from user lifecycle predictions
+                'avg_trial_conversion_rate': rate_data.get('avg_trial_conversion_rate', 0.0),
+                'avg_trial_refund_rate': rate_data.get('avg_trial_refund_rate', 0.0),
+                'avg_purchase_refund_rate': rate_data.get('avg_purchase_refund_rate', 0.0),
             }
         
-        logger.info(f"✅ Successfully combined event, revenue, and rates data for {len(mixpanel_data_map)} ads")
+        logger.info(f"✅ Successfully combined event and revenue data for {len(mixpanel_data_map)} ads")
 
-        # Step 4: Apply data to records with proper separation of actual vs estimated revenue AND average rates
+        # Step 4: Apply data to records with proper separation of actual vs estimated revenue
         def process_and_aggregate(items):
             for item in items:
-                # Initialize Mixpanel metrics to 0 with CLEAR separation of actual vs estimated AND average rates
+                # Initialize Mixpanel metrics to 0 with CLEAR separation of actual vs estimated
                 item.update({
                     'mixpanel_trials_started': 0,
                     'mixpanel_purchases': 0,
@@ -1323,11 +1334,10 @@ class AnalyticsQueryService:
                     # ESTIMATED revenue from user lifecycle predictions
                     'estimated_revenue_usd': 0.0,  # This remains estimated revenue
                     
-                    # AVERAGE CONVERSION AND REFUND RATES (USER REQUESTED)
+                    # AVERAGE rates from user lifecycle predictions (CRITICAL ADD)
                     'avg_trial_conversion_rate': 0.0,
                     'avg_trial_refund_rate': 0.0,
                     'avg_purchase_refund_rate': 0.0,
-                    'users_with_rates': 0,
                     
                     'total_attributed_users': 0
                 })
@@ -1347,15 +1357,14 @@ class AnalyticsQueryService:
                             # ESTIMATED revenue from lifecycle predictions
                             'estimated_revenue_usd': float(ad_metrics.get('estimated_revenue_usd', 0)),
                             
-                            # AVERAGE CONVERSION AND REFUND RATES (USER REQUESTED)
+                            # AVERAGE rates from lifecycle predictions (CRITICAL ADD)
                             'avg_trial_conversion_rate': float(ad_metrics.get('avg_trial_conversion_rate', 0)),
                             'avg_trial_refund_rate': float(ad_metrics.get('avg_trial_refund_rate', 0)),
                             'avg_purchase_refund_rate': float(ad_metrics.get('avg_purchase_refund_rate', 0)),
-                            'users_with_rates': int(ad_metrics.get('users_with_rates', 0)),
                             
                             'total_attributed_users': int(ad_metrics.get('total_attributed_users', 0))
                         })
-                        logger.debug(f"✅ Ad {item['ad_id']}: {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases, ACTUAL: ${item['mixpanel_revenue_usd']:.2f}, ESTIMATED: ${item['estimated_revenue_usd']:.2f}, RATES: {item['avg_trial_conversion_rate']:.4f}/{item['avg_trial_refund_rate']:.4f}/{item['avg_purchase_refund_rate']:.4f}")
+                        logger.debug(f"✅ Ad {item['ad_id']}: {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases, ACTUAL: ${item['mixpanel_revenue_usd']:.2f}, ESTIMATED: ${item['estimated_revenue_usd']:.2f}")
                     else:
                         logger.debug(f"❌ Ad {item['ad_id']}: No Mixpanel data found")
                         
@@ -1364,11 +1373,10 @@ class AnalyticsQueryService:
                     process_and_aggregate(item['children'])
                     
                     # Aggregate metrics from children (preserving actual vs estimated separation)
-                    # For rates, we need to calculate WEIGHTED AVERAGES based on users_with_rates
-                    total_users_with_rates = 0
-                    weighted_trial_conversion = 0.0
-                    weighted_trial_refund = 0.0
-                    weighted_purchase_refund = 0.0
+                    total_users_for_rates = 0
+                    weighted_trial_conv_sum = 0
+                    weighted_trial_refund_sum = 0 
+                    weighted_purchase_refund_sum = 0
                     
                     for child in item['children']:
                         item['mixpanel_trials_started'] += child.get('mixpanel_trials_started', 0)
@@ -1383,24 +1391,27 @@ class AnalyticsQueryService:
                         
                         item['total_attributed_users'] += child.get('total_attributed_users', 0)
                         
-                        # WEIGHTED AVERAGE RATES calculation (USER REQUESTED)
-                        child_users = child.get('users_with_rates', 0)
+                        # WEIGHTED rate aggregation (CRITICAL ADD)
+                        child_users = child.get('total_attributed_users', 0)
                         if child_users > 0:
-                            weighted_trial_conversion += child.get('avg_trial_conversion_rate', 0) * child_users
-                            weighted_trial_refund += child.get('avg_trial_refund_rate', 0) * child_users
-                            weighted_purchase_refund += child.get('avg_purchase_refund_rate', 0) * child_users
-                            total_users_with_rates += child_users
+                            weighted_trial_conv_sum += child.get('avg_trial_conversion_rate', 0) * child_users
+                            weighted_trial_refund_sum += child.get('avg_trial_refund_rate', 0) * child_users
+                            weighted_purchase_refund_sum += child.get('avg_purchase_refund_rate', 0) * child_users
+                            total_users_for_rates += child_users
                     
-                    # Calculate final weighted averages
-                    if total_users_with_rates > 0:
-                        item['avg_trial_conversion_rate'] = weighted_trial_conversion / total_users_with_rates
-                        item['avg_trial_refund_rate'] = weighted_trial_refund / total_users_with_rates
-                        item['avg_purchase_refund_rate'] = weighted_purchase_refund / total_users_with_rates
-                    item['users_with_rates'] = total_users_with_rates
+                    # Calculate weighted average rates for parent entity
+                    if total_users_for_rates > 0:
+                        item['avg_trial_conversion_rate'] = weighted_trial_conv_sum / total_users_for_rates
+                        item['avg_trial_refund_rate'] = weighted_trial_refund_sum / total_users_for_rates
+                        item['avg_purchase_refund_rate'] = weighted_purchase_refund_sum / total_users_for_rates
+                    else:
+                        item['avg_trial_conversion_rate'] = 0.0
+                        item['avg_trial_refund_rate'] = 0.0
+                        item['avg_purchase_refund_rate'] = 0.0
                     
                     entity_type = 'campaign' if item.get('campaign_id') else 'adset'
                     entity_id = item.get('campaign_id') or item.get('adset_id')
-                    logger.debug(f"✅ {entity_type.title()} {entity_id}: Aggregated from {len(item['children'])} children - {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases, ACTUAL: ${item['mixpanel_revenue_usd']:.2f}, ESTIMATED: ${item['estimated_revenue_usd']:.2f}, RATES: {item['avg_trial_conversion_rate']:.4f}/{item['avg_trial_refund_rate']:.4f}/{item['avg_purchase_refund_rate']:.4f} (from {item['users_with_rates']} users)")
+                    logger.debug(f"✅ {entity_type.title()} {entity_id}: Aggregated from {len(item['children'])} children - {item['mixpanel_trials_started']} trials, {item['mixpanel_purchases']} purchases, ACTUAL: ${item['mixpanel_revenue_usd']:.2f}, ESTIMATED: ${item['estimated_revenue_usd']:.2f}")
 
                 # Add derived metrics
                 meta_trials = item.get('meta_trials_started', 0)
@@ -1490,8 +1501,16 @@ class AnalyticsQueryService:
         
         # === USE MODULAR CALCULATOR SYSTEM ===
         # Create standardized input for all calculations
+        # CRITICAL FIX: Ensure rate fields are available for DatabaseCalculators
+        enhanced_record = dict(record)
+        enhanced_record.update({
+            'avg_trial_conversion_rate': record.get('avg_trial_conversion_rate', 0.0),
+            'avg_trial_refund_rate': record.get('avg_trial_refund_rate', 0.0),
+            'avg_purchase_refund_rate': record.get('avg_purchase_refund_rate', 0.0)
+        })
+        
         calc_input = CalculationInput(
-            raw_record=record,
+            raw_record=enhanced_record,
             config=config.__dict__ if config else None,
             start_date=config.start_date if config else None,
             end_date=config.end_date if config else None
@@ -1515,10 +1534,13 @@ class AnalyticsQueryService:
         formatted['click_to_trial_rate'] = RateCalculators.calculate_click_to_trial_rate(calc_input)
         
         # Database pass-through calculations (conversion rates)
-        formatted['trial_conversion_rate'] = DatabaseCalculators.calculate_trial_conversion_rate(calc_input)
-        formatted['trial_to_purchase_rate'] = DatabaseCalculators.calculate_trial_to_purchase_rate(calc_input)
-        formatted['avg_trial_refund_rate'] = DatabaseCalculators.calculate_avg_trial_refund_rate(calc_input)
-        formatted['purchase_refund_rate'] = DatabaseCalculators.calculate_purchase_refund_rate(calc_input)
+        # CRITICAL FIX: Calculate rates directly from database for this entity
+        trial_conv_rate, trial_refund_rate, purchase_refund_rate = self._calculate_entity_rates(entity_type, record, config)
+        
+        formatted['trial_conversion_rate'] = trial_conv_rate
+        formatted['trial_to_purchase_rate'] = trial_conv_rate  # Same as trial conversion rate
+        formatted['avg_trial_refund_rate'] = trial_refund_rate
+        formatted['purchase_refund_rate'] = purchase_refund_rate
         
         # Revenue calculations
         formatted['mixpanel_revenue_net'] = RevenueCalculators.calculate_mixpanel_revenue_net(calc_input)
@@ -1533,194 +1555,391 @@ class AnalyticsQueryService:
         
         return formatted
     
-    def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
+    def _calculate_entity_rates(self, entity_type: str, record: Dict[str, Any], config: QueryConfig = None) -> tuple:
         """
-        Get chart data for a specific entity (campaign, adset, or ad)
+        Calculate conversion rates directly from database for the specific entity
         
-        Args:
-            config: Query configuration
-            entity_type: Type of entity ('campaign', 'adset', 'ad')
-            entity_id: ID of the entity
-            
         Returns:
-            Dict containing chart data
+            tuple: (trial_conversion_rate, trial_refund_rate, purchase_refund_rate) as percentages (0-100)
         """
         try:
-            logger.info(f"🔍 Getting chart data for {entity_type} {entity_id}")
-            
-            # For breakdown charts, handle differently
-            if '_' in entity_id and not entity_id.startswith(('campaign_', 'adset_', 'ad_')):
-                # This is a breakdown entity (e.g., "US_120217904661980178")
-                breakdown_value, parent_entity_id = entity_id.split('_', 1)
-                return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value)
-            
-            # Remove the entity type prefix if present (e.g., "campaign_123" -> "123")
-            if entity_id.startswith(f"{entity_type}_"):
-                entity_id = entity_id.replace(f"{entity_type}_", "")
-            
-            # Get daily data for the specific entity
+            # Get entity ID based on type
             if entity_type == 'campaign':
-                chart_data = self._get_campaign_chart_data(config, entity_id)
+                entity_id = record.get('campaign_id')
+                entity_field = 'u.abi_campaign_id'
             elif entity_type == 'adset':
-                chart_data = self._get_adset_chart_data(config, entity_id)
-            else:  # ad
-                chart_data = self._get_ad_chart_data(config, entity_id)
+                entity_id = record.get('adset_id')
+                entity_field = 'u.abi_ad_set_id'
+            elif entity_type == 'ad':
+                entity_id = record.get('ad_id')
+                entity_field = 'u.abi_ad_id'
+            else:
+                return 0.0, 0.0, 0.0
             
-            return {
-                'success': True,
-                'data': chart_data,
-                'metadata': {
-                    'entity_type': entity_type,
-                    'entity_id': entity_id,
-                    'breakdown': config.breakdown,
-                    'date_range': f"{config.start_date} to {config.end_date}",
-                    'generated_at': datetime.now().isoformat()
-                }
-            }
+            if not entity_id:
+                return 0.0, 0.0, 0.0
             
-        except Exception as e:
-            logger.error(f"Error getting chart data for {entity_type} {entity_id}: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'metadata': {
-                    'entity_type': entity_type,
-                    'entity_id': entity_id,
-                    'generated_at': datetime.now().isoformat()
-                }
-            }
-
-    def get_user_details_for_tooltip(self, entity_type: str, entity_id: str, start_date: str, end_date: str, breakdown: str = 'all', breakdown_value: str = None) -> Dict[str, Any]:
-        """
-        Get individual user details for tooltip display on conversion rates
-        
-        Args:
-            entity_type: Type of entity ('campaign', 'adset', 'ad')
-            entity_id: ID of the entity
-            start_date: Start date for filtering
-            end_date: End date for filtering
-            breakdown: Breakdown type ('all', 'country', 'device', etc.)
-            breakdown_value: Specific breakdown value if applicable (e.g., 'US', 'mobile')
+            # Use config dates or default to recent period
+            if config:
+                start_date = config.start_date
+                end_date = config.end_date
+            else:
+                from datetime import datetime, timedelta
+                end_date = datetime.now().date().strftime('%Y-%m-%d')
+                start_date = (datetime.now().date() - timedelta(days=7)).strftime('%Y-%m-%d')
             
-        Returns:
-            Dict containing user details for tooltip
-        """
-        try:
-            logger.info(f"🔍 Getting user details for tooltip: {entity_type} {entity_id}, breakdown: {breakdown}:{breakdown_value}")
-            
-            # Remove the entity type prefix if present (e.g., "campaign_123" -> "123")
-            if entity_id.startswith(f"{entity_type}_"):
-                entity_id = entity_id.replace(f"{entity_type}_", "")
-            
-            # Handle breakdown entities (e.g., "US_120217904661980178")
-            if breakdown_value is None and '_' in entity_id and not entity_id.startswith(('campaign_', 'adset_', 'ad_')):
-                breakdown_value, entity_id = entity_id.split('_', 1)
-            
+            # Query database for rates
             with sqlite3.connect(self.mixpanel_db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                # Build the query based on entity type and breakdown
-                base_query = """
+                rates_query = f"""
                 SELECT 
-                    upm.distinct_id,
-                    upm.trial_conversion_rate,
-                    upm.trial_converted_to_refund_rate as trial_refund_rate,
-                    upm.initial_purchase_to_refund_rate as purchase_refund_rate,
-                    ROW_NUMBER() OVER (ORDER BY upm.distinct_id) as user_number
+                    AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                    AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                    AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                    COUNT(DISTINCT upm.distinct_id) as total_users
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE upm.credited_date BETWEEN ? AND ?
+                WHERE {entity_field} = ?
+                  AND upm.credited_date BETWEEN ? AND ?
                   AND upm.trial_conversion_rate IS NOT NULL
                   AND upm.trial_converted_to_refund_rate IS NOT NULL  
                   AND upm.initial_purchase_to_refund_rate IS NOT NULL
                 """
                 
-                params = [start_date, end_date]
+                cursor.execute(rates_query, [entity_id, start_date, end_date])
+                result = cursor.fetchone()
                 
-                # Add entity filtering
-                if entity_type == 'campaign':
-                    base_query += " AND u.abi_campaign_id = ?"
-                    params.append(entity_id)
-                elif entity_type == 'adset':
-                    base_query += " AND u.abi_adset_id = ?"
-                    params.append(entity_id)
-                else:  # ad
-                    base_query += " AND u.abi_ad_id = ?"
-                    params.append(entity_id)
-                
-                # Add breakdown filtering if applicable
-                if breakdown != 'all' and breakdown_value:
-                    if breakdown == 'country':
-                        base_query += " AND u.country_code_iso = ?"
-                        params.append(breakdown_value)
-                    elif breakdown == 'device':
-                        base_query += " AND u.device_type = ?"
-                        params.append(breakdown_value)
-                    # Add other breakdown types as needed
-                
-                base_query += " ORDER BY upm.distinct_id LIMIT 100"  # Limit to prevent huge tooltips
-                
-                cursor.execute(base_query, params)
-                results = cursor.fetchall()
-                
-                # Format results for tooltip
-                users = []
-                for row in results:
-                    users.append({
-                        'user_number': row['user_number'],
-                        'trial_conversion_rate': float(row['trial_conversion_rate']) * 100,  # Convert to percentage
-                        'trial_refund_rate': float(row['trial_refund_rate']) * 100,
-                        'purchase_refund_rate': float(row['purchase_refund_rate']) * 100
-                    })
-                
-                # Calculate summary statistics
-                if users:
-                    trial_conv_rates = [u['trial_conversion_rate'] for u in users]
-                    trial_refund_rates = [u['trial_refund_rate'] for u in users]
-                    purchase_refund_rates = [u['purchase_refund_rate'] for u in users]
+                if result and result['total_users'] > 0:
+                    # Convert from decimals to percentages (0-100)
+                    trial_conv = (result['avg_trial_conversion_rate'] or 0) * 100
+                    trial_refund = (result['avg_trial_refund_rate'] or 0) * 100
+                    purchase_refund = (result['avg_purchase_refund_rate'] or 0) * 100
                     
-                    summary = {
-                        'total_users': len(users),
-                        'avg_trial_conversion_rate': sum(trial_conv_rates) / len(trial_conv_rates),
-                        'avg_trial_refund_rate': sum(trial_refund_rates) / len(trial_refund_rates),
-                        'avg_purchase_refund_rate': sum(purchase_refund_rates) / len(purchase_refund_rates)
-                    }
+                    # Ensure rates are within 0-100% range
+                    trial_conv = max(0.0, min(100.0, trial_conv))
+                    trial_refund = max(0.0, min(100.0, trial_refund))
+                    purchase_refund = max(0.0, min(100.0, purchase_refund))
+                    
+                    logger.debug(f"✅ {entity_type} {entity_id}: {trial_conv:.1f}%/{trial_refund:.1f}%/{purchase_refund:.1f}% from {result['total_users']} users")
+                    return trial_conv, trial_refund, purchase_refund
                 else:
-                    summary = {
-                        'total_users': 0,
-                        'avg_trial_conversion_rate': 0,
-                        'avg_trial_refund_rate': 0,
-                        'avg_purchase_refund_rate': 0
-                    }
+                    return 0.0, 0.0, 0.0
+                    
+        except Exception as e:
+            logger.error(f"Error calculating entity rates for {entity_type} {entity_id}: {e}")
+            return 0.0, 0.0, 0.0
+
+    def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
+        """Get detailed daily metrics for sparkline charts - ALWAYS returns exactly 14 days ending on config.end_date"""
+        try:
+            # Check if this is a breakdown entity (format: "US_120217904661980178")
+            is_breakdown_entity = '_' in entity_id and not entity_id.startswith(('campaign_', 'adset_', 'ad_'))
+            
+            if is_breakdown_entity:
+                # Parse breakdown entity ID
+                breakdown_value, parent_entity_id = entity_id.split('_', 1)
+                logger.info(f"📊 BREAKDOWN CHART: {breakdown_value} breakdown for {entity_type} {parent_entity_id}")
+                return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value)
+            
+            # Regular entity chart data
+            table_name = self.get_table_name(config.breakdown)
+            
+            # Calculate the exact 14-day period ending on config.end_date
+            end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
+            display_start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
+            
+            # Calculate data fetch period: need 7 additional days before display period for rolling calculations
+            data_start_date = display_start_date - timedelta(days=6)  # 6 days before display (7 total including display start)
+            
+            # Calculate expanded date range for activity analysis (1 week before and after)
+            expanded_start_date = display_start_date - timedelta(days=7)  # 1 week before display period
+            expanded_end_date = end_date + timedelta(days=7)      # 1 week after display period
+            
+            # Format dates for queries
+            chart_start_date = data_start_date.strftime('%Y-%m-%d')  # Fetch from earlier date
+            chart_end_date = config.end_date
+            display_start_str = display_start_date.strftime('%Y-%m-%d')  # Display period start
+            expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
+            expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
+            
+            logger.info(f"📊 CHART DATA: Fetching 20 days from {chart_start_date} to {chart_end_date} for rolling calculations")
+            logger.info(f"📊 DISPLAY PERIOD: Showing 14 days from {display_start_str} to {chart_end_date}")
+            logger.info(f"📊 ACTIVITY ANALYSIS: Checking spend activity from {expanded_start_str} to {expanded_end_str}")
+            
+            # Build WHERE clause for Meta data based on entity type
+            if entity_type == 'campaign':
+                meta_where = "campaign_id = ?"
+                mixpanel_attr_field = "abi_campaign_id"
+            elif entity_type == 'adset':
+                meta_where = "adset_id = ?"
+                mixpanel_attr_field = "abi_ad_set_id"
+            elif entity_type == 'ad':
+                meta_where = "ad_id = ?"
+                mixpanel_attr_field = "abi_ad_id"
+            else:
+                raise ValueError(f"Invalid entity_type: {entity_type}")
+            
+            # Get daily Meta data for the EXPANDED period to determine activity range
+            expanded_meta_query = f"""
+            SELECT date,
+                   SUM(spend) as daily_spend
+            FROM {table_name}
+            WHERE {meta_where} AND date BETWEEN ? AND ? AND spend > 0
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            expanded_meta_data = self._execute_meta_query(expanded_meta_query, [entity_id, expanded_start_str, expanded_end_str])
+            
+            # Determine first and last spend dates from expanded data
+            first_spend_date = None
+            last_spend_date = None
+            
+            if expanded_meta_data:
+                spend_dates = [row['date'] for row in expanded_meta_data if row['daily_spend'] > 0]
+                if spend_dates:
+                    first_spend_date = min(spend_dates)
+                    last_spend_date = max(spend_dates)
+            
+            logger.info(f"📊 ACTIVITY PERIOD: First spend: {first_spend_date}, Last spend: {last_spend_date}")
+            
+            # Get daily Meta data for the 14-day display period
+            meta_query = f"""
+            SELECT date,
+                   SUM(spend) as daily_spend,
+                   SUM(impressions) as daily_impressions,
+                   SUM(clicks) as daily_clicks,
+                   SUM(meta_trials) as daily_meta_trials,
+                   SUM(meta_purchases) as daily_meta_purchases
+            FROM {table_name}
+            WHERE {meta_where} AND date BETWEEN ? AND ?
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            meta_data = self._execute_meta_query(meta_query, [entity_id, chart_start_date, chart_end_date])
+            
+            # Get daily Mixpanel data for the 14-day period (attributed to credited_date)
+            mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
+            mixpanel_conn.row_factory = sqlite3.Row
+            
+            mixpanel_query = f"""
+            SELECT 
+                upm.credited_date as date,
+                -- Trial metrics by credited date
+                COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
                 
-                return {
-                    'success': True,
-                    'data': {
-                        'users': users,
-                        'summary': summary,
-                        'truncated': len(users) >= 100
-                    },
-                    'metadata': {
-                        'entity_type': entity_type,
-                        'entity_id': entity_id,
-                        'breakdown': breakdown,
-                        'breakdown_value': breakdown_value,
-                        'date_range': f"{start_date} to {end_date}",
-                        'generated_at': datetime.now().isoformat()
-                    }
+                -- Purchase metrics by credited date
+                COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
+                COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
+                
+                -- Revenue metrics by credited date (sum of current_value attributed to this date)
+                SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
+                SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
+                SUM(upm.current_value) as daily_estimated_revenue,
+                
+                -- User count for statistical significance
+                COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
+                
+            FROM user_product_metrics upm
+            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+            WHERE u.{mixpanel_attr_field} = ? 
+              AND upm.credited_date BETWEEN ? AND ?
+            GROUP BY upm.credited_date
+            ORDER BY upm.credited_date ASC
+            """
+            
+            cursor = mixpanel_conn.cursor()
+            cursor.execute(mixpanel_query, [entity_id, chart_start_date, chart_end_date])
+            mixpanel_data = [dict(row) for row in cursor.fetchall()]
+            mixpanel_conn.close()
+            
+            # Generate ALL data fetch days (20 total: 6 days before + 14 display days), filling missing days with zeros
+            daily_data = {}
+            current_date = data_start_date
+            
+            # Initialize all 20 days with zero values and activity status
+            for i in range(20):
+                date_str = current_date.strftime('%Y-%m-%d')
+                
+                # Determine if this day should be grey (inactive)
+                is_inactive = False
+                if first_spend_date and last_spend_date:
+                    # Grey if before first spend or after last spend
+                    is_inactive = date_str < first_spend_date or date_str > last_spend_date
+                elif first_spend_date:
+                    # Only first spend found, grey before first spend
+                    is_inactive = date_str < first_spend_date
+                elif last_spend_date:
+                    # Only last spend found, grey after last spend
+                    is_inactive = date_str > last_spend_date
+                else:
+                    # No spend found in expanded period, all days are inactive
+                    is_inactive = True
+                
+                daily_data[date_str] = {
+                    'date': date_str,
+                    'daily_spend': 0.0,
+                    'daily_impressions': 0,
+                    'daily_clicks': 0,
+                    'daily_meta_trials': 0,
+                    'daily_meta_purchases': 0,
+                    'daily_mixpanel_trials': 0,
+                    'daily_mixpanel_purchases': 0,
+                    'daily_mixpanel_conversions': 0,
+                    'daily_mixpanel_revenue': 0.0,
+                    'daily_mixpanel_refunds': 0.0,
+                    'daily_estimated_revenue': 0.0,
+                    'daily_attributed_users': 0,
+                    'is_inactive': is_inactive  # New field for frontend styling
+                }
+                current_date += timedelta(days=1)
+            
+            # Overlay actual Meta data where it exists
+            for row in meta_data:
+                date = row['date']
+                if date in daily_data:
+                    daily_data[date].update({
+                        'daily_spend': float(row.get('daily_spend', 0) or 0),
+                        'daily_impressions': int(row.get('daily_impressions', 0) or 0),
+                        'daily_clicks': int(row.get('daily_clicks', 0) or 0),
+                        'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
+                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0)
+                    })
+            
+            # Overlay actual Mixpanel data where it exists
+            for row in mixpanel_data:
+                date = row['date']
+                if date in daily_data:
+                    daily_data[date].update({
+                        'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
+                        'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
+                        'daily_mixpanel_conversions': int(row.get('daily_mixpanel_conversions', 0) or 0),
+                        'daily_mixpanel_revenue': float(row.get('daily_mixpanel_revenue', 0) or 0),
+                        'daily_mixpanel_refunds': float(row.get('daily_mixpanel_refunds', 0) or 0),
+                        'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
+                        'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
+                    })
+            
+            # Calculate accuracy ratio for the entire period
+            total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
+            total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
+            total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
+            total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
+            
+            # Determine event priority and accuracy ratio
+            if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
+                event_priority = 'trials'
+                overall_accuracy_ratio = 0.0
+            elif total_mixpanel_trials > total_mixpanel_purchases:
+                event_priority = 'trials'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+            elif total_mixpanel_purchases > total_mixpanel_trials:
+                event_priority = 'purchases'
+                overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
+            else:
+                event_priority = 'equal'
+                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+            
+            logger.info(f"📊 CHART ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
+            
+            # Calculate daily metrics using the modular calculator system for ALL 20 days
+            all_data = []
+            for date in sorted(daily_data.keys()):  # This will be exactly 20 days
+                day_data = daily_data[date]
+                
+                # Map daily fields to standard calculator field names
+                calculator_record = {
+                    'spend': day_data['daily_spend'],
+                    'estimated_revenue_usd': day_data['daily_estimated_revenue'],
+                    'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
+                    'mixpanel_refunds_usd': day_data.get('daily_mixpanel_refunds', 0),
+                    'mixpanel_trials_started': day_data.get('daily_mixpanel_trials', 0),
+                    'meta_trials_started': day_data.get('daily_meta_trials', 0),
+                    'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
+                    'meta_purchases': day_data.get('daily_meta_purchases', 0),
+                    **day_data  # Keep original daily fields for reference
                 }
                 
+                # Use the modular calculator system for ROAS and profit calculations
+                calc_input = CalculationInput(raw_record=calculator_record)
+                day_data['daily_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
+                day_data['daily_profit'] = RevenueCalculators.calculate_profit(calc_input)
+                
+                # Store accuracy ratio and event priority for tooltips
+                day_data['period_accuracy_ratio'] = overall_accuracy_ratio
+                day_data['event_priority'] = event_priority
+                day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
+                
+                all_data.append(day_data)
+            
+            # Calculate rolling 7-day ROAS for each day in the full dataset
+            for i, day_data in enumerate(all_data):
+                # Calculate rolling window (this day + up to 6 days back)
+                rolling_start_idx = max(0, i - 6)  # Don't go before array start
+                rolling_days = all_data[rolling_start_idx:i + 1]
+                
+                # Sum spend and accuracy-adjusted revenue for the rolling window
+                rolling_spend = sum(d['daily_spend'] for d in rolling_days)
+                # Use accuracy-adjusted revenue from daily calculation for consistency
+                rolling_revenue = sum(RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
+                    CalculationInput(raw_record={
+                        'estimated_revenue_usd': d['daily_estimated_revenue'],
+                        'mixpanel_trials_started': d['daily_mixpanel_trials'],
+                        'mixpanel_purchases': d['daily_mixpanel_purchases'],
+                        'meta_trials_started': d['daily_meta_trials'],
+                        'meta_purchases': d['daily_meta_purchases']
+                    })
+                ) for d in rolling_days)
+                rolling_conversions = sum(d['daily_mixpanel_purchases'] for d in rolling_days)
+                rolling_trials = sum(d['daily_mixpanel_trials'] for d in rolling_days)
+                rolling_meta_trials = sum(d['daily_meta_trials'] for d in rolling_days)
+                
+                # Calculate rolling ROAS
+                if rolling_spend > 0:
+                    rolling_roas = rolling_revenue / rolling_spend
+                else:
+                    rolling_roas = 0.0
+                
+                # Add rolling metrics to day data
+                day_data['rolling_7d_roas'] = round(rolling_roas, 2)
+                day_data['rolling_7d_spend'] = rolling_spend
+                day_data['rolling_7d_revenue'] = rolling_revenue
+                day_data['rolling_7d_conversions'] = rolling_conversions
+                day_data['rolling_7d_trials'] = rolling_trials
+                day_data['rolling_7d_meta_trials'] = rolling_meta_trials
+                day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
+            
+            # Extract only the 14-day display period (skip the first 6 days used for rolling calculations)
+            chart_data = all_data[6:]  # Return only the last 14 days for display
+            
+            logger.info(f"📊 CHART RESULT: {len(chart_data)} display days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
+            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for proper 7-day rolling averages")
+            
+            return {
+                'success': True,
+                'chart_data': chart_data,
+                'entity_type': entity_type,
+                'entity_id': entity_id,
+                'date_range': f"{display_start_str} to {chart_end_date}",
+                'total_days': len(chart_data),
+                'period_info': f"14-day period ending {chart_end_date}",
+                'rolling_calculation_info': f"Used 20-day dataset for accurate 7-day rolling averages",
+                'activity_analysis': {
+                    'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
+                    'first_spend_date': first_spend_date,
+                    'last_spend_date': last_spend_date,
+                    'inactive_days_count': sum(1 for d in chart_data if d.get('is_inactive', False))
+                }
+            }
+            
         except Exception as e:
-            logger.error(f"Error getting user details for tooltip: {e}", exc_info=True)
+            logger.error(f"Error getting chart data: {e}")
             return {
                 'success': False,
-                'error': str(e),
-                'metadata': {
-                    'entity_type': entity_type,
-                    'entity_id': entity_id,
-                    'generated_at': datetime.now().isoformat()
-                }
+                'error': str(e)
             }
     
     def _get_breakdown_chart_data(self, config: QueryConfig, entity_type: str, parent_entity_id: str, breakdown_value: str) -> Dict[str, Any]:
@@ -2016,3 +2235,151 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'chart_data': []
             } 
+
+    def get_user_details_for_tooltip(self, entity_type: str, entity_id: str, start_date: str, end_date: str, 
+                                    breakdown: str = 'all', breakdown_value: str = None) -> Dict[str, Any]:
+        """
+        Get individual user details for tooltip display on conversion rates
+        
+        Returns user-level breakdown of trial conversion rates, trial refund rates, and purchase refund rates
+        for the specified entity and date range.
+        """
+        try:
+            logger.info(f"🔍 Getting user details for tooltip: {entity_type} {entity_id}, {start_date} to {end_date}, breakdown={breakdown}")
+            
+            # Extract the actual entity ID from the prefixed ID format (e.g., "campaign_123" -> "123")
+            if entity_id.startswith(f"{entity_type}_"):
+                actual_entity_id = entity_id[len(f"{entity_type}_"):]
+            else:
+                actual_entity_id = entity_id
+            
+            # Build the query based on entity type and breakdown
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Base query to get user-level rate data
+                if entity_type == 'campaign':
+                    entity_field = 'u.abi_campaign_id'
+                elif entity_type == 'adset':
+                    entity_field = 'u.abi_ad_set_id'
+                else:  # ad
+                    entity_field = 'u.abi_ad_id'
+                
+                # Add breakdown filter if specified
+                breakdown_filter = ""
+                breakdown_params = []
+                if breakdown == 'country' and breakdown_value:
+                    breakdown_filter = "AND u.country = ?"
+                    breakdown_params.append(breakdown_value)
+                
+                # Query for individual user rate data - ENHANCED: Include accuracy score and product_id, NO LIMIT
+                user_details_query = f"""
+                SELECT 
+                    upm.distinct_id,
+                    u.country,
+                    u.region,
+                    upm.store as device_category,
+                    upm.current_status,
+                    upm.trial_conversion_rate,
+                    upm.trial_converted_to_refund_rate,
+                    upm.initial_purchase_to_refund_rate,
+                    upm.current_value,
+                    upm.credited_date,
+                    upm.price_bucket,
+                    u.economic_tier,
+                    upm.accuracy_score,
+                    upm.product_id
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE {entity_field} = ?
+                  AND upm.credited_date BETWEEN ? AND ?
+                  {breakdown_filter}
+                  AND upm.trial_conversion_rate IS NOT NULL
+                  AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                  AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM mixpanel_event e 
+                      WHERE e.distinct_id = upm.distinct_id 
+                      AND e.event_name = 'RC Trial started'
+                      AND DATE(e.event_time) BETWEEN ? AND ?
+                  )
+                ORDER BY upm.trial_conversion_rate DESC
+                """
+                
+                query_params = [actual_entity_id, start_date, end_date] + breakdown_params + [start_date, end_date]
+                cursor.execute(user_details_query, query_params)
+                user_records = [dict(row) for row in cursor.fetchall()]
+                
+                # Calculate summary statistics
+                if user_records:
+                    trial_conversion_rates = [r['trial_conversion_rate'] for r in user_records if r['trial_conversion_rate'] is not None]
+                    trial_refund_rates = [r['trial_converted_to_refund_rate'] for r in user_records if r['trial_converted_to_refund_rate'] is not None]
+                    purchase_refund_rates = [r['initial_purchase_to_refund_rate'] for r in user_records if r['initial_purchase_to_refund_rate'] is not None]
+                    
+                    summary_stats = {
+                        'total_users': len(user_records),
+                        'avg_trial_conversion_rate': (sum(trial_conversion_rates) / len(trial_conversion_rates) * 100) if trial_conversion_rates else 0,
+                        'avg_trial_refund_rate': (sum(trial_refund_rates) / len(trial_refund_rates) * 100) if trial_refund_rates else 0,
+                        'avg_purchase_refund_rate': (sum(purchase_refund_rates) / len(purchase_refund_rates) * 100) if purchase_refund_rates else 0,
+                        'total_estimated_revenue': sum(r['current_value'] for r in user_records if r['current_value']),
+                        'breakdown_applied': breakdown,
+                        'breakdown_value': breakdown_value
+                    }
+                else:
+                    summary_stats = {
+                        'total_users': 0,
+                        'avg_trial_conversion_rate': 0,
+                        'avg_trial_refund_rate': 0,
+                        'avg_purchase_refund_rate': 0,
+                        'total_estimated_revenue': 0,
+                        'breakdown_applied': breakdown,
+                        'breakdown_value': breakdown_value
+                    }
+                
+                # Format user records for display (convert rates to percentages) - ENHANCED: Include accuracy score and product_id
+                formatted_users = []
+                for record in user_records:  # Return ALL users (no limit)
+                    formatted_users.append({
+                        'distinct_id': record['distinct_id'],  # Full ID for copy functionality
+                        'country': record['country'] or 'N/A',
+                        'region': record['region'] or 'N/A',
+                        'device_category': record['device_category'] or 'N/A',
+                        'status': record['current_status'],
+                        'trial_conversion_rate': round(record['trial_conversion_rate'] * 100, 1) if record['trial_conversion_rate'] else 0,
+                        'trial_refund_rate': round(record['trial_converted_to_refund_rate'] * 100, 1) if record['trial_converted_to_refund_rate'] else 0,
+                        'purchase_refund_rate': round(record['initial_purchase_to_refund_rate'] * 100, 1) if record['initial_purchase_to_refund_rate'] else 0,
+                        'estimated_value': round(record['current_value'], 2) if record['current_value'] else 0,
+                        'credited_date': record['credited_date'],
+                        'price_bucket': f"${record['price_bucket']:.2f}" if record['price_bucket'] else 'N/A',
+                        'economic_tier': record['economic_tier'] or 'N/A',
+                        'accuracy_score': record['accuracy_score'] or 'N/A',
+                        'product_id': record['product_id'] or 'N/A'
+                    })
+                
+                logger.info(f"✅ Retrieved user details: {summary_stats['total_users']} users, avg rates: {summary_stats['avg_trial_conversion_rate']:.1f}%/{summary_stats['avg_trial_refund_rate']:.1f}%/{summary_stats['avg_purchase_refund_rate']:.1f}%")
+                
+                return {
+                    'success': True,
+                    'summary': summary_stats,
+                    'users': formatted_users,
+                    'entity_info': {
+                        'entity_type': entity_type,
+                        'entity_id': entity_id,
+                        'actual_entity_id': actual_entity_id
+                    },
+                    'date_range': f"{start_date} to {end_date}",
+                    'generated_at': datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting user details for tooltip: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'entity_info': {
+                    'entity_type': entity_type,
+                    'entity_id': entity_id
+                },
+                'generated_at': datetime.now().isoformat()
+            }

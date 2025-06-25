@@ -216,6 +216,554 @@ const RefundRateTooltip = ({ value, type, colorClass, pipelineUpdatedClass }) =>
   );
 };
 
+// Conversion Rate Tooltip Component for showing individual user details
+const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardParams }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [userDetails, setUserDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [allUsers, setAllUsers] = useState([]);
+  const [copiedUserId, setCopiedUserId] = useState(null);
+  
+  // Filter states for modal
+  const [filters, setFilters] = useState({
+    country: '',
+    region: '',
+    device_category: '',
+    economic_tier: '',
+    product_id: ''
+  });
+
+  const handleMouseEnter = async (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    
+    // Calculate initial position (above the element)
+    let x = rect.left + rect.width / 2;
+    let y = rect.top - 10;
+    
+    // Adjust horizontal position to stay within window bounds
+    if (x < 100) {
+      x = 100;
+    } else if (x > windowWidth - 100) {
+      x = windowWidth - 100;
+    }
+    
+    // If too close to top, position below instead
+    if (y < 300) {
+      y = rect.bottom + 10;
+    }
+    
+    setTooltipPosition({ x, y });
+    setShowTooltip(true);
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Extract entity information from row
+      // For breakdown rows, use the parent entity type instead of row.type
+      let entityType = row.type; // 'campaign', 'adset', or 'ad'
+      const entityId = row.id; // e.g., 'campaign_123' or 'US_123' for breakdowns
+      
+      // Handle breakdown rows - they might not have proper entity_type
+      if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
+        // This is a breakdown row like "US_123" - use the parent entity type
+        entityType = row.entity_type || 'campaign'; // fallback to campaign if not specified
+      }
+      
+      // Build API parameters
+      let apiEntityId = entityId;
+      let breakdownValue = null;
+      
+      // Extract breakdown_value and actual entity_id for breakdown rows
+      if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
+        const parts = entityId.split('_');
+        breakdownValue = parts[0]; // e.g., "US" from "US_120215772671800178"
+        apiEntityId = parts.slice(1).join('_'); // e.g., "120215772671800178" from "US_120215772671800178"
+      }
+      
+      const params = new URLSearchParams({
+        entity_type: entityType,
+        entity_id: apiEntityId,
+        start_date: dashboardParams?.start_date || '2025-01-01',
+        end_date: dashboardParams?.end_date || '2025-12-31',
+        breakdown: dashboardParams?.breakdown || 'all'
+      });
+      
+      // Add breakdown_value if this is a breakdown row
+      if (breakdownValue) {
+        params.append('breakdown_value', breakdownValue);
+      }
+      
+      const response = await fetch(`/api/dashboard/analytics/user-details?${params.toString()}`);
+      const result = await response.json();
+      
+      if (result.success) {
+        // API returns data directly, not nested under 'data' property
+        setUserDetails(result);
+        // Store all users for modal (API returns up to 100)
+        setAllUsers(result.users || []);
+      } else {
+        setError(result.error || 'Failed to load user details');
+      }
+    } catch (err) {
+      setError('Network error loading user details');
+      console.error('Error fetching user details:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setShowTooltip(false);
+    setUserDetails(null);
+    setError(null);
+  };
+
+  const handleClick = () => {
+    if (userDetails && allUsers.length > 0) {
+      setShowModal(true);
+      setShowTooltip(false);
+      // Reset filters when opening modal
+      resetFilters();
+    }
+  };
+
+  // Helper function to get all three rates for a user
+  const getAllRates = (user) => {
+    return {
+      trial_conversion_rate: user.trial_conversion_rate || 0,
+      trial_refund_rate: user.trial_refund_rate || 0,
+      purchase_refund_rate: user.purchase_refund_rate || 0
+    };
+  };
+
+  // Helper function to get unique filter options
+  const getFilterOptions = (field) => {
+    const values = allUsers.map(user => user[field]).filter(value => value && value !== 'N/A');
+    return [...new Set(values)].sort();
+  };
+
+  // Helper function to filter users based on current filters
+  const getFilteredUsers = () => {
+    return allUsers.filter(user => {
+      return Object.entries(filters).every(([key, value]) => {
+        if (!value) return true; // No filter applied
+        return user[key] === value;
+      });
+    });
+  };
+
+  // Helper function to reset filters
+  const resetFilters = () => {
+    setFilters({
+      country: '',
+      region: '',
+      device_category: '',
+      economic_tier: '',
+      product_id: ''
+    });
+  };
+
+  // Helper function to get the rate value for the specific column
+  const getRateForColumn = (user) => {
+    switch (columnKey) {
+      case 'trial_conversion_rate':
+        return user.trial_conversion_rate;
+      case 'avg_trial_refund_rate':
+        return user.trial_refund_rate;
+      case 'purchase_refund_rate':
+        return user.purchase_refund_rate;
+      default:
+        return 0;
+    }
+  };
+
+  // Helper function to get rate label
+  const getRateLabel = () => {
+    switch (columnKey) {
+      case 'trial_conversion_rate':
+        return 'Trial Conversion Rate';
+      case 'avg_trial_refund_rate':
+        return 'Trial Refund Rate';
+      case 'purchase_refund_rate':
+        return 'Purchase Refund Rate';
+      default:
+        return 'Rate';
+    }
+  };
+
+  // Copy user ID to clipboard
+  const copyUserId = async (userId, index) => {
+    try {
+      await navigator.clipboard.writeText(userId);
+      setCopiedUserId(index);
+      setTimeout(() => setCopiedUserId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy user ID:', err);
+    }
+  };
+
+  return (
+    <>
+      <span
+        className={`${colorClass} cursor-pointer hover:underline`}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onClick={handleClick}
+        title="Click to see all users"
+      >
+        {value !== undefined && value !== null ? `${formatNumber(value, 2)}%` : 'N/A'}
+      </span>
+      {showTooltip && (
+        <div
+          className="fixed z-50 bg-gray-900 text-white text-xs rounded-lg shadow-lg border border-gray-700 max-w-lg"
+          style={{
+            left: tooltipPosition.x,
+            top: tooltipPosition.y,
+            transform: tooltipPosition.y > 300 ? 'translateX(-50%) translateY(-100%)' : 'translateX(-50%)'
+          }}
+        >
+          <div className="p-3">
+            <div className="font-semibold text-blue-300 mb-2">{getRateLabel()}</div>
+            
+            {loading && (
+              <div className="text-center py-2">
+                <div className="text-gray-300">Loading user details...</div>
+              </div>
+            )}
+            
+            {error && (
+              <div className="text-center py-2">
+                <div className="text-red-300">Error: {error}</div>
+              </div>
+            )}
+            
+            {userDetails && !loading && (
+              <div className="space-y-4">
+                {/* Enhanced Summary Section */}
+                <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 p-3 rounded-lg border border-blue-700/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                      <span className="font-semibold text-blue-300">{getRateLabel()}</span>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {userDetails.users.length} users
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-white">
+                        {userDetails.summary.total_users}
+                      </div>
+                      <div className="text-xs text-gray-300">Total Users</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-green-400">
+                        {formatNumber(
+                          columnKey === 'trial_conversion_rate' ? userDetails.summary.avg_trial_conversion_rate :
+                          columnKey === 'avg_trial_refund_rate' ? userDetails.summary.avg_trial_refund_rate :
+                          userDetails.summary.avg_purchase_refund_rate, 1
+                        )}%
+                      </div>
+                      <div className="text-xs text-gray-300">Average Rate</div>
+                    </div>
+                  </div>
+                </div>
+                
+                {userDetails.users.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+                        <span className="font-medium text-yellow-300">Top Performers</span>
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        Click to see all
+                      </div>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
+                      {userDetails.users.slice(0, 10).map((user, index) => (
+                        <div key={index} className="bg-gray-800/50 p-3 rounded-lg border border-gray-700/50 hover:border-gray-600/50 transition-all">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center space-x-2 mb-2">
+                                <div className="w-6 h-6 bg-blue-600 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                                  {index + 1}
+                                </div>
+                                <div className="text-sm font-medium text-white truncate">
+                                  U{index + 1} • {user.product_id}
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+                                <div>📍 {user.country}, {user.region}</div>
+                                <div>💰 {user.price_bucket}</div>
+                                <div>📱 {user.device_category}</div>
+                                <div>🎯 {user.economic_tier}</div>
+                              </div>
+                            </div>
+                            <div className="text-right ml-3 flex-shrink-0">
+                              <div className="text-lg font-bold text-green-400">
+                                {formatNumber(getRateForColumn(user), 1)}%
+                              </div>
+                              <div className="text-xs text-gray-400 bg-gray-700/50 px-2 py-1 rounded mt-1">
+                                {user.accuracy_score}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {userDetails.users.length > 10 && (
+                      <div className="mt-3 text-center">
+                        <div className="text-xs text-blue-300 bg-blue-900/30 px-3 py-2 rounded-lg border border-blue-700/50">
+                          Showing top 10 of {userDetails.users.length} users • Click anywhere to see all
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {userDetails.users.length === 0 && (
+                  <div className="text-center py-8 text-gray-400">
+                    <div className="text-4xl mb-2">📊</div>
+                    <div className="font-medium">No users found</div>
+                    <div className="text-xs mt-1">Try adjusting your filters</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Modal for all users */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowModal(false)}>
+          <div className="bg-gray-900 text-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-700">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold text-white mb-3">{getRateLabel()} - All Users</h2>
+                  <div className="flex items-center space-x-8 text-sm mb-4">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                      <span className="text-gray-300">Total Users: <span className="font-bold text-white text-lg">{userDetails?.summary?.total_users || allUsers.length}</span></span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                      <span className="text-gray-300">Average Rate: <span className="font-bold text-green-400 text-lg">{(() => {
+                        const rate = columnKey === 'trial_conversion_rate' ? userDetails?.summary?.avg_trial_conversion_rate :
+                                    columnKey === 'avg_trial_refund_rate' ? userDetails?.summary?.avg_trial_refund_rate :
+                                    userDetails?.summary?.avg_purchase_refund_rate;
+                        return formatNumber(rate, 2);
+                      })()}%</span></span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                      <span className="text-gray-300">Filtered: <span className="font-bold text-purple-400 text-lg">{getFilteredUsers().length}</span></span>
+                    </div>
+                  </div>
+                  
+                  {/* Filter Controls */}
+                  <div className="grid grid-cols-5 gap-3 mb-2">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Country</label>
+                      <select 
+                        value={filters.country} 
+                        onChange={(e) => setFilters({...filters, country: e.target.value})}
+                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500"
+                      >
+                        <option value="">All Countries</option>
+                        {getFilterOptions('country').map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Region</label>
+                      <select 
+                        value={filters.region} 
+                        onChange={(e) => setFilters({...filters, region: e.target.value})}
+                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500"
+                      >
+                        <option value="">All Regions</option>
+                        {getFilterOptions('region').map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Device</label>
+                      <select 
+                        value={filters.device_category} 
+                        onChange={(e) => setFilters({...filters, device_category: e.target.value})}
+                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500"
+                      >
+                        <option value="">All Devices</option>
+                        {getFilterOptions('device_category').map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Tier</label>
+                      <select 
+                        value={filters.economic_tier} 
+                        onChange={(e) => setFilters({...filters, economic_tier: e.target.value})}
+                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500"
+                      >
+                        <option value="">All Tiers</option>
+                        {getFilterOptions('economic_tier').map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Product</label>
+                      <select 
+                        value={filters.product_id} 
+                        onChange={(e) => setFilters({...filters, product_id: e.target.value})}
+                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500"
+                      >
+                        <option value="">All Products</option>
+                        {getFilterOptions('product_id').map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end">
+                    <button 
+                      onClick={resetFilters}
+                      className="text-xs bg-gray-600 hover:bg-gray-500 text-white px-3 py-1 rounded transition-colors"
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowModal(false)}
+                  className="text-gray-400 hover:text-white p-2 hover:bg-gray-600 rounded-full transition-colors ml-4"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[65vh]">
+              {getFilteredUsers().length > 0 ? (
+                <div className="space-y-3">
+                  {/* Sort filtered users by conversion rate (highest to lowest) */}
+                  {getFilteredUsers()
+                    .sort((a, b) => getRateForColumn(b) - getRateForColumn(a))
+                    .map((user, index) => {
+                      const allRates = getAllRates(user);
+                      const activeRate = getRateForColumn(user);
+                      const rateColor = activeRate >= 50 ? 'text-green-400' : activeRate >= 25 ? 'text-yellow-400' : 'text-orange-400';
+                      
+                      return (
+                        <div key={index} className="flex justify-between items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors border border-gray-700 hover:border-gray-600">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3 mb-3">
+                              <div className="text-white font-bold text-lg bg-blue-600 rounded-full w-8 h-8 flex items-center justify-center">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-white font-semibold">U{index + 1}</div>
+                                <div className="flex items-center space-x-2 mt-1">
+                                  <div className="text-xs text-gray-400 font-mono bg-gray-700 px-2 py-1 rounded">
+                                    {user.distinct_id}
+                                  </div>
+                                  <button
+                                    onClick={() => copyUserId(user.distinct_id, index)}
+                                    className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded transition-colors"
+                                    title="Copy User ID"
+                                  >
+                                    {copiedUserId === index ? '✓ Copied' : 'Copy ID'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="text-gray-300">
+                                <span className="font-medium">Location:</span> {user.country} • {user.region}
+                              </div>
+                              <div className="text-gray-300">
+                                <span className="font-medium">Store:</span> {user.device_category}
+                              </div>
+                              <div className="text-gray-300">
+                                <span className="font-medium">Price:</span> {user.price_bucket}
+                              </div>
+                              <div className="text-gray-300">
+                                <span className="font-medium">Tier:</span> {user.economic_tier}
+                              </div>
+                              <div className="text-gray-300">
+                                <span className="font-medium">Product:</span> {user.product_id}
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-4 mt-3 text-xs text-gray-500">
+                              <span>Status: <span className="text-gray-400">{user.status}</span></span>
+                              <span>Credited: <span className="text-gray-400">{user.credited_date}</span></span>
+                              <span>Value: <span className="text-gray-400">${user.estimated_value}</span></span>
+                            </div>
+                          </div>
+                          <div className="text-right ml-6">
+                            {/* All three rates with highlighting for active one */}
+                            <div className="space-y-2 mb-3">
+                              <div className={`text-sm ${columnKey === 'trial_conversion_rate' ? 'font-bold text-blue-400 bg-blue-900/30 px-2 py-1 rounded' : 'text-gray-300'}`}>
+                                Trial Conv: {formatNumber(allRates.trial_conversion_rate, 1)}%
+                              </div>
+                              <div className={`text-sm ${columnKey === 'avg_trial_refund_rate' ? 'font-bold text-blue-400 bg-blue-900/30 px-2 py-1 rounded' : 'text-gray-300'}`}>
+                                Trial Refund: {formatNumber(allRates.trial_refund_rate, 1)}%
+                              </div>
+                              <div className={`text-sm ${columnKey === 'purchase_refund_rate' ? 'font-bold text-blue-400 bg-blue-900/30 px-2 py-1 rounded' : 'text-gray-300'}`}>
+                                Purchase Refund: {formatNumber(allRates.purchase_refund_rate, 1)}%
+                              </div>
+                            </div>
+                            {/* Accuracy score instead of High/Medium/Low */}
+                            <div className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                              Accuracy: {user.accuracy_score}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-400">
+                  <div className="text-4xl mb-4">📊</div>
+                  <div className="text-lg font-medium">
+                    {allUsers.length > 0 ? 'No users match your filters' : 'No users found for this metric'}
+                  </div>
+                  <div className="text-sm mt-2">
+                    {allUsers.length > 0 ? 'Try adjusting your filters above' : 'Try adjusting your date range'}
+                  </div>
+                  {allUsers.length > 0 && (
+                    <button 
+                      onClick={resetFilters}
+                      className="mt-4 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded transition-colors"
+                    >
+                      Reset Filters
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 // Helper to format numbers, e.g., with commas
 const formatNumber = (num, digits = 0) => {
   if (num === undefined || num === null) return 'N/A';
@@ -614,7 +1162,7 @@ const getCountryName = (countryCode) => {
 
 // Helper function to render a cell value with proper formatting and coloring
 // 📋 ADDING NEW COLUMN FORMATTING? Read: src/config/Column README.md for instructions
-const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriority = null) => {
+const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriority = null, dashboardParams = null) => {
     const calculatedRow = calculateDerivedValues(row);
     let value = calculatedRow[columnKey];
     let formattedValue = 'N/A';
@@ -649,18 +1197,39 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         formattedValue = formatNumber(value);
         break;
       case 'click_to_trial_rate':
-      case 'trial_conversion_rate':
       case 'trial_accuracy_ratio':
       case 'purchase_accuracy_ratio':
         formattedValue = value !== undefined && value !== null ? `${formatNumber(value * 100, 2)}%` : 'N/A';
         break;
+      case 'trial_conversion_rate':
+        if (value !== undefined && value !== null) {
+          // Use the new ConversionRateTooltip for trial conversion rate
+          // Backend already returns percentage (0-100), no need to multiply by 100
+          formattedValue = (
+            <ConversionRateTooltip 
+              row={row}
+              columnKey={columnKey}
+              value={value} // Already in percentage
+              colorClass=""
+              dashboardParams={dashboardParams}
+            />
+          );
+        } else {
+          formattedValue = 'N/A';
+        }
+        break;
       case 'avg_trial_refund_rate':
         if (value !== undefined && value !== null) {
-          const roundedValue = formatNumber(value, 2);
           const hasMinimumFlag = Math.abs(value - 5.0) < 0.01;
           formattedValue = (
             <span>
-              {roundedValue}%
+              <ConversionRateTooltip 
+                row={row}
+                columnKey={columnKey}
+                value={value} // Already in percentage
+                colorClass=""
+                dashboardParams={dashboardParams}
+              />
               {hasMinimumFlag && (
                 <RefundRateTooltip 
                   value={value} 
@@ -677,11 +1246,16 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         break;
       case 'purchase_refund_rate':
         if (value !== undefined && value !== null) {
-          const roundedValue = formatNumber(value, 2);
           const hasMinimumFlag = Math.abs(value - 15.0) < 0.01;
           formattedValue = (
             <span>
-              {roundedValue}%
+              <ConversionRateTooltip 
+                row={row}
+                columnKey={columnKey}
+                value={value} // Already in percentage
+                colorClass=""
+                dashboardParams={dashboardParams}
+              />
               {hasMinimumFlag && (
                 <RefundRateTooltip 
                   value={value} 
@@ -1040,7 +1614,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               return (
                 <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right">
                   <span className={`${getFieldColor(column.key, calculatedValue[column.key])}`}>
-                    {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue))}
+                    {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue), dashboardParams)}
                   </span>
                 </td>
               );
@@ -1160,7 +1734,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
 
                       return (
               <td key={column.key} className={`px-3 py-2 whitespace-nowrap text-right ${grayedOutColor} ${isRoasColumn ? 'font-medium' : ''} ${columnBackgroundClass}`}>
-                {renderCellValue(calculatedRow, column.key, false, eventPriority)}
+                {renderCellValue(calculatedRow, column.key, false, eventPriority, dashboardParams)}
               </td>
             );
         })}
