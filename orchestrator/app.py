@@ -827,6 +827,11 @@ def serve_static(filename):
         print(f"❌ Error serving static file: {e}")
         return f"Error serving file: {str(e)}", 404
 
+@app.route('/assets/<path:filename>')
+def serve_assets(filename):
+    """Alternative route for serving static files"""
+    return send_from_directory('dashboard/static/static', filename)
+
 @app.route('/test-static')
 def test_static():
     """Test route to verify routing is working"""
