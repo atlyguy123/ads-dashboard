@@ -94,8 +94,7 @@ def ensure_raw_data_tables(conn, db_type):
                 date_day DATE NOT NULL,
                 file_sequence INTEGER NOT NULL,
                 event_data JSONB NOT NULL,
-                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (date_day, file_sequence, (event_data->>'event'), (event_data->'properties'->>'distinct_id'))
+                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
@@ -381,7 +380,6 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                             cursor.execute("""
                                 INSERT INTO raw_event_data (date_day, file_sequence, event_data)
                                 VALUES (%s, %s, %s)
-                                ON CONFLICT (date_day, file_sequence, (event_data->>'event'), (event_data->'properties'->>'distinct_id')) DO NOTHING
                             """, (target_date, file_sequence, json.dumps(event_data)))
                         else:
                             cursor.execute("""
