@@ -389,7 +389,7 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                                 INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
                                 VALUES (?, ?, ?)
                             """, (target_date, file_sequence, json.dumps(event_data)))
-                            filtered_count += 1
+                        filtered_count += 1
                         
                 except json.JSONDecodeError as e:
                     logger.warning(f"Skipping invalid JSON line: {e}")
@@ -408,9 +408,10 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
 def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_key):
     """
     Downloads a user profile .json.gz file from S3, decompresses it,
-    and stores all users in database.
+    and stores all users in database with batch processing.
     """
     cursor = conn.cursor()
+    BATCH_SIZE = 1000  # Commit every 1000 users to prevent hanging
 
     try:
         logger.info(f"Downloading and processing user file s3://{bucket_name}/{object_key}")
@@ -420,11 +421,17 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
         
         total_count = 0
         stored_count = 0
+        batch_count = 0
         
-        # Process gzipped content
+        # Process gzipped content with batch commits
         with gzip.GzipFile(fileobj=response['Body']) as f:
             for line in f:
                 total_count += 1
+                
+                # Progress logging every 10,000 lines
+                if total_count % 10000 == 0:
+                    logger.info(f"Progress: {total_count:,} lines processed, {stored_count:,} users stored")
+                
                 try:
                     user_data = json.loads(line.decode('utf-8').strip())
                     distinct_id = user_data.get('mp_distinct_id') or user_data.get('abi_distinct_id')
@@ -445,13 +452,24 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
                                 VALUES (?, ?)
                             """, (distinct_id, json.dumps(user_data)))
                         stored_count += 1
+                        batch_count += 1
+                        
+                        # Commit every BATCH_SIZE records to prevent hanging
+                        if batch_count >= BATCH_SIZE:
+                            conn.commit()
+                            logger.info(f"Committed batch: {stored_count:,} users processed so far...")
+                            batch_count = 0
                         
                 except json.JSONDecodeError as e:
                     logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing user line: {e}")
         
-        conn.commit()
+        # Final commit for remaining records
+        if batch_count > 0:
+            conn.commit()
+            logger.info(f"Final commit: {stored_count:,} total users processed")
+        
         logger.info(f"Stored {stored_count} out of {total_count} users from {object_key}")
         return stored_count
         
