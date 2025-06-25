@@ -862,6 +862,8 @@ def debug_static_files():
     possible_paths = [
         'dashboard/static',
         'dashboard/static/static',
+        'dashboard/static/static/css',
+        'dashboard/static/static/js',
         'orchestrator/dashboard/static',
         'orchestrator/dashboard/static/static'
     ]
