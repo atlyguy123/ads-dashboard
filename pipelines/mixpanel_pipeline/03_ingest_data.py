@@ -437,7 +437,14 @@ def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batc
     try:
         for distinct_id, user_data_json in users_batch:
             try:
-                user_data = json.loads(user_data_json)
+                # Handle both JSON string and dict data types
+                if isinstance(user_data_json, str):
+                    user_data = json.loads(user_data_json)
+                elif isinstance(user_data_json, dict):
+                    user_data = user_data_json
+                else:
+                    logger.warning(f"Unexpected user_data type for {distinct_id}: {type(user_data_json)}")
+                    continue
                 
                 # Validate distinct_id
                 if not distinct_id or not isinstance(distinct_id, str):
@@ -564,7 +571,16 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
             
             for (event_data_json,) in raw_cursor:
                 try:
-                    event_data = json.loads(event_data_json)
+                    # Handle both JSON string and dict data types
+                    if isinstance(event_data_json, str):
+                        event_data = json.loads(event_data_json)
+                    elif isinstance(event_data_json, dict):
+                        event_data = event_data_json
+                    else:
+                        logger.warning(f"Unexpected event_data type: {type(event_data_json)}")
+                        metrics.events_skipped_invalid += 1
+                        continue
+                    
                     event_name = event_data.get('event')
                     
                     # Skip unimportant events
@@ -689,7 +705,7 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
         'region': region, 
         'city': city,
         'has_abi_attribution': has_abi_attribution,
-        'profile_json': json.dumps(user_data),
+        'profile_json': json.dumps(user_data) if isinstance(user_data, dict) else str(user_data),
         'first_seen': first_seen_dt.isoformat(),
         'last_updated': last_updated_dt.isoformat(),
         'valid_user': True,  # Set to TRUE during ingestion
@@ -857,7 +873,7 @@ def prepare_event_record(event_data: Dict[str, Any], file_path: str, line_num: i
             refund_flag,
             is_late_event,
             trial_expiration_at_calc.isoformat() if trial_expiration_at_calc else None,
-            json.dumps(event_data)
+            json.dumps(event_data) if isinstance(event_data, dict) else str(event_data)
         )
         
     except Exception as e:
