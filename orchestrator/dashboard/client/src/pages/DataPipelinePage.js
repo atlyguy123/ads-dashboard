@@ -52,19 +52,43 @@ const DataPipelinePage = () => {
     return moduleExists;
   };
 
-  // Initialize socket connection
+  // Initialize socket connection with reconnection logic
   useEffect(() => {
-    socketRef.current = io();
-    
-    socketRef.current.on('connect', () => {
-      console.log('Connected to server');
-    });
-    
-    socketRef.current.on('status_update', (data) => {
-      if (data.pipeline === MASTER_PIPELINE) {
-        handlePipelineStatusUpdate(data);
-      }
-    });
+    const connectSocket = () => {
+      socketRef.current = io({
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 10,
+        timeout: 20000,
+      });
+      
+      socketRef.current.on('connect', () => {
+        console.log('✅ Connected to server');
+        showMessage('Connected to server', 'success');
+      });
+      
+      socketRef.current.on('disconnect', (reason) => {
+        console.log('❌ Disconnected from server:', reason);
+        showMessage('Disconnected from server - attempting to reconnect...', 'warning');
+      });
+      
+      socketRef.current.on('reconnect', (attemptNumber) => {
+        console.log(`🔄 Reconnected to server (attempt ${attemptNumber})`);
+        showMessage('Reconnected to server', 'success');
+      });
+      
+      socketRef.current.on('reconnect_error', (error) => {
+        console.log('❌ Reconnection failed:', error);
+      });
+      
+      socketRef.current.on('status_update', (data) => {
+        if (data.pipeline === MASTER_PIPELINE) {
+          handlePipelineStatusUpdate(data);
+        }
+      });
+    };
+
+    connectSocket();
 
     return () => {
       if (socketRef.current) {
@@ -322,6 +346,58 @@ const DataPipelinePage = () => {
     setTimeout(() => {
       runMasterPipeline();
     }, 1000);
+  };
+
+  const resetAllSteps = async () => {
+    console.log(`🔄 RESET ALL: Resetting all steps in pipeline '${MASTER_PIPELINE}'`);
+    
+    if (!window.confirm(`Are you sure you want to reset ALL steps in the master pipeline?\n\nThis will:\n• Cancel any running steps\n• Reset all step statuses to pending\n• Clear all progress and error states\n\nThis action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/reset-all/${MASTER_PIPELINE}`, {
+        method: 'POST'
+      });
+      
+      const result = await response.json();
+      console.log(`🔄 RESET ALL: Reset response:`, result);
+      
+      if (result.success) {
+        showMessage(result.message, 'success');
+        console.log(`✅ RESET ALL: Successfully reset all steps in pipeline '${MASTER_PIPELINE}'`);
+        
+        // Reset local state
+        const resetModuleStates = {};
+        MASTER_MODULES.forEach(module => {
+          resetModuleStates[module.id] = 'pending';
+        });
+        
+        setPipelineStatus('idle');
+        setModuleStates(resetModuleStates);
+        setCurrentModule(null);
+        setEstimatedCompletion(null);
+        setRetryAttempts(0);
+        setModuleTimestamps({});
+        
+        // Save the reset state
+        saveData({
+          status: 'idle',
+          moduleStates: resetModuleStates,
+          currentModule: null,
+          estimatedCompletion: null,
+          retryAttempts: 0,
+          moduleTimestamps: {}
+        });
+        
+      } else {
+        showMessage(`Reset all failed: ${result.message}`, 'error');
+        console.log(`❌ RESET ALL: Failed to reset all steps in pipeline '${MASTER_PIPELINE}': ${result.message}`);
+      }
+    } catch (error) {
+      console.error(`❌ RESET ALL: Error resetting all steps in pipeline '${MASTER_PIPELINE}':`, error);
+      showMessage(`Error resetting all steps: ${error.message}`, 'error');
+    }
   };
 
   const handlePipelineStatusUpdate = (data) => {
@@ -865,6 +941,21 @@ const DataPipelinePage = () => {
                   {pipelineStatus === 'running' ? 'Running Pipeline...' : 
                    (pipelineStatus === 'success' && Object.keys(moduleStates).length > 0) ? 'Restart Pipeline' : 
                    'Run Pipeline'}
+                </button>
+
+                {/* Reset All Button */}
+                <button
+                  onClick={resetAllSteps}
+                  disabled={pipelineStatus === 'running'}
+                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md transition-colors ${
+                    pipelineStatus === 'running'
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      : 'text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500'
+                  }`}
+                  title="Reset all pipeline steps to pending status"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset All
                 </button>
               </div>
             </div>
