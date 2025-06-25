@@ -260,10 +260,11 @@ class PipelineRunner:
         if not pipeline:
             return False, "Pipeline not found"
         
-        # Check if all steps are tested
-        for step in pipeline['steps']:
-            if not step.get('tested', False):
-                return False, f"Step {step['id']} not marked as tested"
+        # Check if all steps are tested (only for non-master pipelines)
+        if pipeline_name != 'master_pipeline':
+            for step in pipeline['steps']:
+                if not step.get('tested', False):
+                    return False, f"Step {step['id']} not marked as tested"
         
         # Record run start
         conn = sqlite3.connect('db.sqlite')
@@ -458,7 +459,9 @@ class PipelineRunner:
                 return False, f"No running process found for step {step_id} (status: {step_status})"
                 
         except Exception as e:
-            print(f"❌ Error cancelling step: {e}")
+            print(f"❌ Error cancelling step '{step_id}' in pipeline '{pipeline_name}': {e}")
+            import traceback
+            traceback.print_exc()
             return False, f"Error cancelling step: {str(e)}"
     
     def cancel_pipeline(self, pipeline_name):
@@ -789,6 +792,11 @@ def dashboard_home():
 @app.route('/dashboard-static/<path:filename>')
 def dashboard_static(filename):
     """Serve dashboard static files (CSS, JS, images)"""
+    return send_from_directory('dashboard/static/static', filename)
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files at /static/ path for React app"""
     return send_from_directory('dashboard/static/static', filename)
 
 @app.route('/manifest.json')

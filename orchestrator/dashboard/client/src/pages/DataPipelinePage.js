@@ -314,7 +314,7 @@ const DataPipelinePage = () => {
         });
         setModuleStates(cancelledModuleStates);
         
-        showMessage('Pipeline cancelled successfully', 'success');
+        showMessage(result.message || 'Pipeline cancelled successfully', 'success');
         
         // Calculate next scheduled run
         calculateNextScheduledRun();
@@ -717,24 +717,20 @@ const DataPipelinePage = () => {
                     className="inline-flex items-center px-4 py-2 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-red-600 dark:text-red-300 dark:bg-red-900/20 dark:hover:bg-red-900/40 transition-colors"
                   >
                     <X className="mr-2 h-4 w-4" />
-                    Cancel
+                    Cancel Pipeline
                   </button>
                 )}
                 
-                {/* Restart Button - show when failed or idle with previous results */}
-                {(pipelineStatus === 'failed' || (pipelineStatus === 'idle' && Object.keys(moduleStates).length > 0)) && (
-                  <button
-                    onClick={restartPipeline}
-                    className="inline-flex items-center px-4 py-2 border border-orange-300 text-sm font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-orange-600 dark:text-orange-300 dark:bg-orange-900/20 dark:hover:bg-orange-900/40 transition-colors"
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    Restart
-                  </button>
-                )}
-                
-                {/* Run Button */}
+                {/* Main Run Button */}
                 <button
-                  onClick={() => runMasterPipeline(true)}
+                  onClick={() => {
+                    // If there are previous module states, clear them first (like restart)
+                    if (Object.keys(moduleStates).length > 0 && pipelineStatus !== 'running') {
+                      restartPipeline();
+                    } else {
+                      runMasterPipeline(true);
+                    }
+                  }}
                   disabled={pipelineStatus === 'running'}
                   className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md transition-colors ${
                     pipelineStatus === 'running'
@@ -743,7 +739,7 @@ const DataPipelinePage = () => {
                   }`}
                 >
                   <Play className="mr-2 h-5 w-5" />
-                  {pipelineStatus === 'running' ? 'Running...' : 'Run Pipeline'}
+                  {pipelineStatus === 'running' ? 'Running Pipeline...' : 'Run Pipeline'}
                 </button>
               </div>
             </div>
