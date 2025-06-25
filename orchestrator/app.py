@@ -807,43 +807,8 @@ def dashboard_static(filename):
     """Serve dashboard static files (CSS, JS, images)"""
     return send_from_directory('dashboard/static/static', filename)
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    """Serve static files at /static/ path for React app"""
-    import os
-    from pathlib import Path
-    
-    # Log the request for debugging
-    print(f"🔍 Static file request: {filename}")
-    
-    # Check if file exists
-    static_dir = Path('dashboard/static/static')
-    file_path = static_dir / filename
-    
-    print(f"🔍 Looking for file at: {file_path}")
-    print(f"🔍 Static directory exists: {static_dir.exists()}")
-    print(f"🔍 File exists: {file_path.exists()}")
-    
-    if static_dir.exists():
-        print(f"🔍 Files in static directory: {list(os.listdir(static_dir))}")
-        if file_path.parent.exists():
-            print(f"🔍 Files in {file_path.parent}: {list(os.listdir(file_path.parent))}")
-    
-    try:
-        return send_from_directory('dashboard/static/static', filename)
-    except Exception as e:
-        print(f"❌ Error serving static file: {e}")
-        return f"Error serving file: {str(e)}", 404
-
-@app.route('/assets/<path:filename>')
-def serve_assets(filename):
-    """Alternative route for serving static files"""
-    return send_from_directory('dashboard/static/static', filename)
-
-@app.route('/test-static')
-def test_static():
-    """Test route to verify routing is working"""
-    return "Static routing test successful!"
+# Custom static file routes removed - using Flask's built-in static file handling
+# Flask app is configured with static_folder='dashboard/static/static', static_url_path='/static'
 
 @app.route('/manifest.json')
 def dashboard_manifest():
