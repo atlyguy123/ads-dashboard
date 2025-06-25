@@ -189,22 +189,22 @@ def create_sqlite_connection():
     """Create optimized SQLite database connection with proper resource management"""
     logger.info(f"Connecting to SQLite database: {DATABASE_PATH}")
     
-        conn = sqlite3.connect(
-            str(DATABASE_PATH), 
-            timeout=CONNECTION_TIMEOUT,
-            check_same_thread=False
-        )
-        
-        # Apply production optimizations
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON")
-        cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA synchronous = NORMAL")
-        cursor.execute("PRAGMA cache_size = -64000")  # 64MB cache
-        cursor.execute("PRAGMA temp_store = MEMORY")
-        cursor.execute("PRAGMA mmap_size = 268435456")  # 256MB memory-mapped I/O
-        cursor.execute("PRAGMA optimize")
-        
+    conn = sqlite3.connect(
+        str(DATABASE_PATH), 
+        timeout=CONNECTION_TIMEOUT,
+        check_same_thread=False
+    )
+    
+    # Apply production optimizations
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON")
+    cursor.execute("PRAGMA journal_mode = WAL")
+    cursor.execute("PRAGMA synchronous = NORMAL")
+    cursor.execute("PRAGMA cache_size = -64000")  # 64MB cache
+    cursor.execute("PRAGMA temp_store = MEMORY")
+    cursor.execute("PRAGMA mmap_size = 268435456")  # 256MB memory-mapped I/O
+    cursor.execute("PRAGMA optimize")
+    
     logger.info("SQLite database connection established with optimizations")
     return conn
 
@@ -436,47 +436,47 @@ def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batc
     
     try:
         for distinct_id, user_data_json in users_batch:
-                try:
+            try:
                 user_data = json.loads(user_data_json)
-                        
+                
                 # Validate distinct_id
-                    if not distinct_id or not isinstance(distinct_id, str):
-                        invalid_distinct_id_count += 1
-                        continue
-                    
-                    # Apply user filtering logic
-                    email = user_data.get('email2') or user_data.get('mp_email', '')
-                    filter_result = should_filter_user(distinct_id, email)
-                    
-                    if filter_result['filter']:
-                        if filter_result['reason'] == 'atly':
+                if not distinct_id or not isinstance(distinct_id, str):
+                    invalid_distinct_id_count += 1
+                    continue
+                
+                # Apply user filtering logic
+                email = user_data.get('email2') or user_data.get('mp_email', '')
+                filter_result = should_filter_user(distinct_id, email)
+                
+                if filter_result['filter']:
+                    if filter_result['reason'] == 'atly':
                         batch_metrics['users_filtered_atly'] += 1
-                            if len(atly_examples) < 3:
-                                atly_examples.append((distinct_id, email))
-                        elif filter_result['reason'] == 'test':
+                        if len(atly_examples) < 3:
+                            atly_examples.append((distinct_id, email))
+                    elif filter_result['reason'] == 'test':
                         batch_metrics['users_filtered_test'] += 1
-                            if len(test_examples) < 3:
-                                test_examples.append((distinct_id, email))
-                        elif filter_result['reason'] == 'steps':
+                        if len(test_examples) < 3:
+                            test_examples.append((distinct_id, email))
+                    elif filter_result['reason'] == 'steps':
                         batch_metrics['users_filtered_steps'] += 1
-                            if len(steps_examples) < 3:
-                                steps_examples.append((distinct_id, email))
-                        continue
-                    
-                    # Prepare user record
-                    user_record = prepare_user_record(user_data, distinct_id)
-                    user_batch.append(user_record)
-                    
+                        if len(steps_examples) < 3:
+                            steps_examples.append((distinct_id, email))
+                    continue
+                
+                # Prepare user record
+                user_record = prepare_user_record(user_data, distinct_id)
+                user_batch.append(user_record)
+                
                 batch_metrics['users_processed'] += 1
-                    
-                    # Process in batches for memory management
-                    if len(user_batch) >= BATCH_SIZE:
+                
+                # Process in batches for memory management
+                if len(user_batch) >= BATCH_SIZE:
                     process_user_batch(sqlite_cursor, user_batch)
-                        user_batch.clear()
-                    
-                except json.JSONDecodeError:
+                    user_batch.clear()
+                
+            except json.JSONDecodeError:
                 logger.warning(f"Invalid JSON for user {distinct_id}")
-                except Exception as e:
+            except Exception as e:
                 logger.error(f"Error processing user {distinct_id}: {e}")
         
         # Process remaining batch
@@ -589,7 +589,7 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON in event data for {date_str}")
                     metrics.events_skipped_invalid += 1
-    except Exception as e:
+                except Exception as e:
                     logger.error(f"Error processing event for {date_str}: {e}")
                     metrics.events_skipped_invalid += 1
             
@@ -611,7 +611,7 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
         except Exception as e:
             sqlite_cursor.execute("ROLLBACK")
             logger.error(f"Failed to process date {date_str}: {e}")
-        raise
+            raise
     
     # Log summary of event processing
     if metrics.dates_processed > 0:
