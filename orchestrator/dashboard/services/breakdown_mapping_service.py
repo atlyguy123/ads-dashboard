@@ -312,7 +312,7 @@ class BreakdownMappingService:
             return {'unmapped_countries': [], 'unmapped_devices': []}
 
     def get_breakdown_data(self, breakdown_type: str, start_date: str, end_date: str, 
-                          group_by: str = 'campaign') -> List[BreakdownData]:
+                          group_by: str = 'campaign', fetch_all_levels: bool = False) -> List[BreakdownData]:
         """
         Get unified breakdown data combining Meta and Mixpanel data
         
@@ -321,10 +321,15 @@ class BreakdownMappingService:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD) 
             group_by: 'campaign', 'adset', or 'ad'
+            fetch_all_levels: If True, fetch breakdown data for all hierarchy levels (campaign, adset, ad)
             
         Returns:
             List of BreakdownData objects
         """
+        if fetch_all_levels:
+            # Fetch breakdown data for all hierarchy levels
+            return self.get_breakdown_data_all_levels(breakdown_type, start_date, end_date)
+        
         cache_key = f"{breakdown_type}_{start_date}_{end_date}_{group_by}"
         
         # Check cache first
@@ -344,6 +349,39 @@ class BreakdownMappingService:
         self._cache_breakdown_data(cache_key, breakdown_type, start_date, end_date, breakdown_data)
         
         return breakdown_data
+
+    def get_breakdown_data_all_levels(self, breakdown_type: str, start_date: str, end_date: str) -> List[BreakdownData]:
+        """
+        Get breakdown data for ALL hierarchy levels (campaign, adset, ad) to enable 
+        multi-level breakdown enrichment in hierarchical data structures
+        
+        Args:
+            breakdown_type: 'country' or 'device'
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            
+        Returns:
+            List of BreakdownData objects for all levels
+        """
+        all_breakdown_data = []
+        
+        # Fetch breakdown data for each hierarchy level
+        for level in ['campaign', 'adset', 'ad']:
+            try:
+                level_data = self.get_breakdown_data(
+                    breakdown_type=breakdown_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    group_by=level,
+                    fetch_all_levels=False  # Prevent infinite recursion
+                )
+                all_breakdown_data.extend(level_data)
+            except Exception as e:
+                logger.warning(f"Failed to fetch {level}-level breakdown data for {breakdown_type}: {e}")
+                continue
+        
+        logger.info(f"✅ Fetched breakdown data for all levels: {len(all_breakdown_data)} total records")
+        return all_breakdown_data
 
     def _get_country_breakdown_data(self, start_date: str, end_date: str, group_by: str) -> List[BreakdownData]:
         """

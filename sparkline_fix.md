@@ -59,8 +59,8 @@ Surgically modify the chart API to use identical calculation methods and date ra
 
 #### **Task 2.3**: Rolling Window Logic Adjustment
 - [ ] Modify rolling calculation to work with any date range (not just 20 days)
-- [ ] Ensure 7-day rolling window still functions correctly
-- [ ] Handle edge cases where date range < 7 days
+- [ ] Ensure 3-day rolling window still functions correctly
+- [ ] Handle edge cases where date range < 3 days
 - [ ] Maintain backward compatibility
 
 ---
@@ -98,7 +98,7 @@ Surgically modify the chart API to use identical calculation methods and date ra
 - [ ] Log discrepancies for monitoring
 
 #### **Task 4.2**: Integration Testing
-- [ ] Test with multiple date ranges (7 days, 14 days, 30 days)
+- [ ] Test with multiple date ranges (3 days, 14 days, 30 days)
 - [ ] Test with different entity types (campaigns, adsets, ads)
 - [ ] Test with breakdown entities (country breakdowns)
 - [ ] Verify edge cases (zero spend, zero conversions, high accuracy ratios)
@@ -156,7 +156,7 @@ Surgically modify the chart API to use identical calculation methods and date ra
 
 ### **Validation Tests**
 - [ ] **Savannah Old Sale Campaign**: Original problem case must be fixed
-- [ ] **Multiple Date Ranges**: 7-day, 14-day, 30-day periods
+- [ ] **Multiple Date Ranges**: 3-day, 14-day, 30-day periods
 - [ ] **Edge Cases**: Zero conversions, high accuracy ratios, breakdown entities
 - [ ] **Different Entity Types**: Campaigns, adsets, ads
 - [ ] **Performance**: Response times within acceptable limits

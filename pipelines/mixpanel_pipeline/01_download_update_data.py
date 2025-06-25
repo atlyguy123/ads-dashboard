@@ -358,7 +358,7 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
     filters events by name, and stores in database.
     """
     cursor = conn.cursor()
-    
+
     try:
         logger.info(f"Downloading and processing s3://{bucket_name}/{object_key}")
         
@@ -371,13 +371,13 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
         # Process gzipped content
         with gzip.GzipFile(fileobj=response['Body']) as f:
             for line in f:
-                total_count += 1
-                try:
+                    total_count += 1
+                    try:
                     event_data = json.loads(line.decode('utf-8').strip())
-                    event_name = event_data.get("event")
-                    
+                        event_name = event_data.get("event")
+                        
                     # Only store events that match our filter list
-                    if event_name in EVENTS_TO_KEEP:
+                        if event_name in EVENTS_TO_KEEP:
                         # Store in database
                         if db_type == 'postgres':
                             cursor.execute("""
@@ -389,10 +389,10 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                                 INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
                                 VALUES (?, ?, ?)
                             """, (target_date, file_sequence, json.dumps(event_data)))
-                        filtered_count += 1
+                            filtered_count += 1
                         
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Skipping invalid JSON line: {e}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing line: {e}")
         
@@ -411,7 +411,7 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
     and stores all users in database.
     """
     cursor = conn.cursor()
-    
+
     try:
         logger.info(f"Downloading and processing user file s3://{bucket_name}/{object_key}")
         
@@ -424,8 +424,8 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
         # Process gzipped content
         with gzip.GzipFile(fileobj=response['Body']) as f:
             for line in f:
-                total_count += 1
-                try:
+                    total_count += 1
+                    try:
                     user_data = json.loads(line.decode('utf-8').strip())
                     distinct_id = user_data.get('mp_distinct_id') or user_data.get('abi_distinct_id')
                     
@@ -446,8 +446,8 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
                             """, (distinct_id, json.dumps(user_data)))
                         stored_count += 1
                         
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Skipping invalid JSON line: {e}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing user line: {e}")
         
@@ -537,15 +537,15 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
         else:
             cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (target_date,))
         result = cursor.fetchone()
-        
+
         if result and result[0] > 0:
             logger.info(f"Event data for {target_date.strftime('%Y-%m-%d')} already exists in database. Skipping download.")
             return True
 
         # Download and store all files for this date
         total_events = 0
-        for i, s3_key in enumerate(event_export_keys):
-            logger.info(f"Processing file {i+1}/{len(event_export_keys)}: {os.path.basename(s3_key)}")
+                for i, s3_key in enumerate(event_export_keys):
+                    logger.info(f"Processing file {i+1}/{len(event_export_keys)}: {os.path.basename(s3_key)}")
             events_stored = download_and_store_event_file(conn, db_type, s3_client, S3_BUCKET_EVENTS, s3_key, target_date, i)
             total_events += events_stored
 
@@ -559,12 +559,12 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
                     events_downloaded = EXCLUDED.events_downloaded,
                     downloaded_at = CURRENT_TIMESTAMP
             """, (target_date, len(event_export_keys), total_events))
-        else:
+                    else:
             cursor.execute("""
                 INSERT OR REPLACE INTO downloaded_dates (date_day, files_downloaded, events_downloaded)
                 VALUES (?, ?, ?)
             """, (target_date, len(event_export_keys), total_events))
-        
+            
         conn.commit()
         logger.info(f"Stored {total_events} events from {len(event_export_keys)} files for {target_date.strftime('%Y-%m-%d')}")
         return True

@@ -16,6 +16,7 @@ const DataPipelinePage = () => {
   const [moduleStates, setModuleStates] = useState({});
   const [currentModule, setCurrentModule] = useState(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [moduleTimestamps, setModuleTimestamps] = useState({});
   
   const socketRef = useRef(null);
   const retryTimeoutRef = useRef(null);
@@ -110,6 +111,15 @@ const DataPipelinePage = () => {
         setCurrentRunStart(data.currentRunStart ? new Date(data.currentRunStart) : null);
         setEstimatedCompletion(data.estimatedCompletion ? new Date(data.estimatedCompletion) : null);
         
+        // Load module timestamps
+        if (data.moduleTimestamps) {
+          const timestamps = {};
+          Object.entries(data.moduleTimestamps).forEach(([id, timestamp]) => {
+            timestamps[id] = new Date(timestamp);
+          });
+          setModuleTimestamps(timestamps);
+        }
+        
         // Check if pipeline is actually complete but frontend missed it
         if (data.status === 'running' && data.moduleStates) {
           setTimeout(() => {
@@ -144,7 +154,10 @@ const DataPipelinePage = () => {
       moduleStates,
       currentModule,
       currentRunStart: currentRunStart?.toISOString(),
-      estimatedCompletion: estimatedCompletion?.toISOString()
+      estimatedCompletion: estimatedCompletion?.toISOString(),
+      moduleTimestamps: Object.fromEntries(
+        Object.entries(moduleTimestamps).map(([id, timestamp]) => [id, timestamp.toISOString()])
+      )
     };
     
     // Only save if we have meaningful data
@@ -159,6 +172,16 @@ const DataPipelinePage = () => {
       console.log('⚠️ Pipeline is already running, skipping duplicate request');
       showMessage('Pipeline is already running', 'warning');
       return;
+    }
+    
+    // Check if pipeline is already complete - don't run if complete
+    if (pipelineStatus === 'success' && Object.keys(moduleStates).length > 0) {
+      const allComplete = Object.values(moduleStates).every(state => state === 'complete');
+      if (allComplete) {
+        console.log('⚠️ Pipeline is already complete, use restart to run again');
+        showMessage('Pipeline is already complete. Use the restart button to run again.', 'warning');
+        return;
+      }
     }
     
     console.log('🚀 Starting master pipeline...');
@@ -511,6 +534,24 @@ const DataPipelinePage = () => {
     return null;
   };
 
+  const getRelativeTime = (timestamp) => {
+    const now = new Date();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) {
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    } else if (hours > 0) {
+      return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    } else if (minutes > 0) {
+      return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    } else {
+      return 'just now';
+    }
+  };
+
   const getModuleIcon = (state) => {
     switch (state) {
       case 'complete':
@@ -608,7 +649,7 @@ const DataPipelinePage = () => {
       console.log('📊 Backend pipeline status:', masterPipeline.status);
       
       // Check if all modules are marked as success in backend
-      if (masterPipeline.status) {
+      if (masterPipeline.status && Object.keys(masterPipeline.status).length > 0) {
         const moduleIds = MASTER_MODULES.map(m => m.id);
         const allComplete = moduleIds.every(id => 
           masterPipeline.status[id] && masterPipeline.status[id].status === 'success'
@@ -646,13 +687,19 @@ const DataPipelinePage = () => {
           console.log('📅 Actual completion time:', latestTimestamp?.toISOString());
           console.log('⏱️ Actual duration:', actualDuration ? `${Math.round(actualDuration / (1000 * 60))} minutes` : 'unknown');
           
-          // Update module states to reflect completion
+          // Update module states to reflect completion with timestamps
           const completedModuleStates = {};
+          const moduleTimestamps = {};
           MASTER_MODULES.forEach(module => {
             completedModuleStates[module.id] = 'complete';
+            const moduleStatus = masterPipeline.status[module.id];
+            if (moduleStatus && moduleStatus.timestamp) {
+              moduleTimestamps[module.id] = new Date(moduleStatus.timestamp);
+            }
           });
           
           setModuleStates(completedModuleStates);
+          setModuleTimestamps(moduleTimestamps);
           
           // Update pipeline status with actual completion time
           setPipelineStatus('success');
@@ -684,6 +731,9 @@ const DataPipelinePage = () => {
             retryCount: 0,
             retryAttempts: 0,
             moduleStates: completedModuleStates,
+            moduleTimestamps: Object.fromEntries(
+              Object.entries(moduleTimestamps).map(([id, timestamp]) => [id, timestamp.toISOString()])
+            ),
             currentModule: null,
             currentRunStart: null,
             estimatedCompletion: null
@@ -775,7 +825,9 @@ const DataPipelinePage = () => {
                   }`}
                 >
                   <Play className="mr-2 h-5 w-5" />
-                  {pipelineStatus === 'running' ? 'Running Pipeline...' : 'Run Pipeline'}
+                  {pipelineStatus === 'running' ? 'Running Pipeline...' : 
+                   (pipelineStatus === 'success' && Object.keys(moduleStates).length > 0) ? 'Restart Pipeline' : 
+                   'Run Pipeline'}
                 </button>
               </div>
             </div>
@@ -874,6 +926,7 @@ const DataPipelinePage = () => {
                 {MASTER_MODULES.map((module) => {
                   const state = moduleStates[module.id] || 'pending';
                   const isActive = currentModule === module.id;
+                  const moduleTimestamp = moduleTimestamps && moduleTimestamps[module.id];
                   
                   return (
                     <div 
@@ -905,6 +958,11 @@ const DataPipelinePage = () => {
                         }`}>
                           {module.name}
                         </p>
+                        {state === 'complete' && moduleTimestamp && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Completed {getRelativeTime(moduleTimestamp)}
+                          </p>
+                        )}
                       </div>
                       <div className={`text-xs px-2 py-1 rounded-full ${
                         state === 'complete'
@@ -919,7 +977,7 @@ const DataPipelinePage = () => {
                       }`}>
                         {state === 'pending' ? 'Pending' : 
                          state === 'running' ? 'Running' :
-                         state === 'complete' ? 'Done' :
+                         state === 'complete' ? (moduleTimestamp ? moduleTimestamp.toLocaleTimeString() : 'Done') :
                          state === 'failed' ? 'Failed' :
                          state === 'cancelled' ? 'Cancelled' : state}
                       </div>

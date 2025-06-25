@@ -227,9 +227,9 @@ class PipelineRunner:
                     del self.running_processes[pipeline_name][step_id]
                     if not self.running_processes[pipeline_name]:
                         del self.running_processes[pipeline_name]
-                    print(f"   Cleaned up process tracking for {step_id}")
+                    print(f"   ✓ Cleaned up process tracking for step '{step_id}'")
                 else:
-                    print(f"   Warning: Process {step_id} was not in tracking when trying to clean up")
+                    print(f"   ℹ️ Process tracking already cleaned up (likely by background thread)")
                 
                 if return_code != 0:
                     print(f"❌ ORCHESTRATOR: Module '{step_name}' FAILED")
@@ -449,9 +449,9 @@ class PipelineRunner:
                     del self.running_processes[pipeline_name][step_id]
                     if not self.running_processes[pipeline_name]:
                         del self.running_processes[pipeline_name]
-                    print(f"   ✓ Cleaned up process tracking for step '{step_id}'")
-                else:
-                    print(f"   ℹ️ Process tracking already cleaned up (likely by background thread)")
+                        print(f"   ✓ Cleaned up process tracking for step '{step_id}'")
+                    else:
+                        print(f"   ℹ️ Process tracking already cleaned up (likely by background thread)")
                 
                 # Update status
                 self.update_step_status(pipeline_name, step_id, 'cancelled', 'Cancelled by user')
@@ -496,7 +496,7 @@ class PipelineRunner:
                     cancelled_count += 1
                 else:
                     errors.append(f"Step {step_id}: {message}")
-        
+            
         # Second, check the status file for steps marked as "running" but not tracked
         untracked_running = []
         status = self.get_pipeline_status(pipeline_name)

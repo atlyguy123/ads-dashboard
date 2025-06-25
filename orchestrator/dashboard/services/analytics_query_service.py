@@ -182,12 +182,13 @@ class AnalyticsQueryService:
         try:
             logger.info(f"🔍 Enriching hierarchy with {config.breakdown} breakdown data")
             
-            # Get breakdown data from the mapping service
+            # CRITICAL FIX: Get breakdown data for ALL hierarchy levels, not just group_by level
+            # This enables breakdown data to appear at all levels (campaign, adset, and ad)
             breakdown_data = self.breakdown_service.get_breakdown_data(
                 breakdown_type=config.breakdown,
                 start_date=config.start_date,
                 end_date=config.end_date,
-                group_by=config.group_by or 'campaign'
+                fetch_all_levels=True  # NEW: Fetch data for all levels
             )
             
             # Convert breakdown data to a lookup structure keyed by entity ID
@@ -1664,7 +1665,7 @@ class AnalyticsQueryService:
             expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
             expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
             
-            logger.info(f"📊 CHART DATA: Fetching 20 days from {chart_start_date} to {chart_end_date} for rolling calculations")
+            logger.info(f"📊 CHART DATA: Fetching 16 days from {chart_start_date} to {chart_end_date} for rolling calculations")
             logger.info(f"📊 DISPLAY PERIOD: Showing 14 days from {display_start_str} to {chart_end_date}")
             logger.info(f"📊 ACTIVITY ANALYSIS: Checking spend activity from {expanded_start_str} to {expanded_end_str}")
             
@@ -1756,12 +1757,12 @@ class AnalyticsQueryService:
             mixpanel_data = [dict(row) for row in cursor.fetchall()]
             mixpanel_conn.close()
             
-            # Generate ALL data fetch days (20 total: 6 days before + 14 display days), filling missing days with zeros
+            # Generate ALL data fetch days (16 total: 2 days before + 14 display days), filling missing days with zeros
             daily_data = {}
             current_date = data_start_date
             
-            # Initialize all 20 days with zero values and activity status
-            for i in range(20):
+            # Initialize all 16 days with zero values and activity status
+            for i in range(16):
                 date_str = current_date.strftime('%Y-%m-%d')
                 
                 # Determine if this day should be grey (inactive)
@@ -1845,9 +1846,9 @@ class AnalyticsQueryService:
             
             logger.info(f"📊 CHART ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
             
-            # Calculate daily metrics using the modular calculator system for ALL 20 days
+            # Calculate daily metrics using the modular calculator system for ALL 16 days
             all_data = []
-            for date in sorted(daily_data.keys()):  # This will be exactly 20 days
+            for date in sorted(daily_data.keys()):  # This will be exactly 16 days
                 day_data = daily_data[date]
                 
                 # Map daily fields to standard calculator field names
@@ -2061,7 +2062,7 @@ class AnalyticsQueryService:
             daily_data = {}
             current_date = data_start_date
             
-            for i in range(20):  # 20 days total
+            for i in range(16):  # 16 days total
                 date_str = current_date.strftime('%Y-%m-%d')
                 
                 # Determine if this day should be grey (inactive)
