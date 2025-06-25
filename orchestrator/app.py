@@ -624,9 +624,12 @@ class PipelineRunner:
                     if not success:
                         print(f"   Warning: Failed to cancel running step '{step_id}': {message}")
             
-            # Remove the entire status file
+            # Get the existing status data before removing the file
             status_file = os.path.join(pipeline['dir'], '.status.json')
             print(f"   Looking for status file: {status_file}")
+            
+            step_ids_to_reset = []
+            step_count = 0
             
             if os.path.exists(status_file):
                 try:
@@ -634,23 +637,53 @@ class PipelineRunner:
                         status_data = json.load(f)
                     
                     step_count = len(status_data)
-                    print(f"   Found {step_count} steps with status data")
+                    step_ids_to_reset = list(status_data.keys())
+                    print(f"   Found {step_count} steps with status data: {step_ids_to_reset}")
                     
                     # Remove the entire status file
                     os.remove(status_file)
                     print(f"   Removed status file")
                     
-                    print(f"✅ ORCHESTRATOR: All steps in pipeline '{pipeline_name}' reset successfully")
-                    return True, f"All {step_count} steps in pipeline '{pipeline_name}' have been reset to pending status"
-                    
                 except json.JSONDecodeError as e:
                     print(f"   Status file was corrupted: {e}, removing it")
                     os.remove(status_file)
-                    print(f"✅ ORCHESTRATOR: Corrupted status file removed for pipeline '{pipeline_name}'")
-                    return True, f"Corrupted status file removed, all steps reset to pending status"
+                    print(f"   Corrupted status file removed")
             else:
-                print(f"   No status file found, all steps already in pending state")
-                return True, f"All steps in pipeline '{pipeline_name}' are already in pending status"
+                print(f"   No status file found")
+                # Get all possible steps from pipeline definition
+                step_ids_to_reset = [step['id'] for step in pipeline['steps']]
+                step_count = len(step_ids_to_reset)
+                print(f"   Using pipeline definition steps: {step_ids_to_reset}")
+            
+            # Emit WebSocket events for all steps being reset to pending
+            print(f"   Emitting WebSocket reset events for {len(step_ids_to_reset)} steps...")
+            for step_id in step_ids_to_reset:
+                try:
+                    socketio.emit('status_update', {
+                        'pipeline': pipeline_name,
+                        'step': step_id,
+                        'status': 'pending',
+                        'timestamp': datetime.now().isoformat(),
+                        'error_message': None
+                    })
+                    print(f"   📡 Emitted reset event for step: {step_id}")
+                except Exception as e:
+                    print(f"   Warning: Failed to emit WebSocket event for step '{step_id}': {e}")
+            
+            # Emit a special "reset_complete" event to signal frontend to clear all state
+            try:
+                socketio.emit('pipeline_reset', {
+                    'pipeline': pipeline_name,
+                    'message': 'All steps reset to pending status',
+                    'timestamp': datetime.now().isoformat(),
+                    'step_count': len(step_ids_to_reset)
+                })
+                print(f"   📡 Emitted pipeline_reset event")
+            except Exception as e:
+                print(f"   Warning: Failed to emit pipeline_reset event: {e}")
+            
+            print(f"✅ ORCHESTRATOR: All steps in pipeline '{pipeline_name}' reset successfully")
+            return True, f"All {step_count} steps in pipeline '{pipeline_name}' have been reset to pending status"
                 
         except Exception as e:
             print(f"❌ Error resetting all steps: {e}")

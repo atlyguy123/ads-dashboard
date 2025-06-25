@@ -86,6 +86,12 @@ const DataPipelinePage = () => {
           handlePipelineStatusUpdate(data);
         }
       });
+      
+      socketRef.current.on('pipeline_reset', (data) => {
+        if (data.pipeline === MASTER_PIPELINE) {
+          handlePipelineReset(data);
+        }
+      });
     };
 
     connectSocket();
@@ -351,11 +357,36 @@ const DataPipelinePage = () => {
   const resetAllSteps = async () => {
     console.log(`🔄 RESET ALL: Resetting all steps in pipeline '${MASTER_PIPELINE}'`);
     
-    if (!window.confirm(`Are you sure you want to reset ALL steps in the master pipeline?\n\nThis will:\n• Cancel any running steps\n• Reset all step statuses to pending\n• Clear all progress and error states\n\nThis action cannot be undone.`)) {
+    const isStuckState = pipelineStatus === 'running' && Object.keys(moduleStates).length > 0;
+    const confirmMessage = isStuckState 
+      ? `The pipeline appears to be stuck in a running state.\n\nThis will:\n• Force cancel any stuck processes\n• Reset all step statuses to pending\n• Clear all cached state\n• Fix synchronization issues\n\nThis should resolve the stuck state. Continue?`
+      : `Are you sure you want to reset ALL steps in the master pipeline?\n\nThis will:\n• Cancel any running steps\n• Reset all step statuses to pending\n• Clear all progress and error states\n\nThis action cannot be undone.`;
+    
+    if (!window.confirm(confirmMessage)) {
       return;
     }
     
+    // Show immediate feedback for stuck states
+    if (isStuckState) {
+      showMessage('Forcing reset of stuck pipeline state...', 'warning');
+    }
+    
     try {
+      // First, clear all local state immediately to provide instant feedback
+      console.log('🧹 RESET ALL: Clearing all local state immediately');
+      setPipelineStatus('idle');
+      setModuleStates({});
+      setCurrentModule(null);
+      setEstimatedCompletion(null);
+      setRetryAttempts(0);
+      setModuleTimestamps({});
+      setCurrentRunStart(null);
+      
+      // Clear localStorage completely
+      localStorage.removeItem('masterPipelineData');
+      localStorage.removeItem('pipelineLastTrigger');
+      
+      // Call the backend reset API
       const response = await fetch(`/api/reset-all/${MASTER_PIPELINE}`, {
         method: 'POST'
       });
@@ -367,28 +398,33 @@ const DataPipelinePage = () => {
         showMessage(result.message, 'success');
         console.log(`✅ RESET ALL: Successfully reset all steps in pipeline '${MASTER_PIPELINE}'`);
         
-        // Reset local state
+        // Set clean state
         const resetModuleStates = {};
         MASTER_MODULES.forEach(module => {
           resetModuleStates[module.id] = 'pending';
         });
         
-        setPipelineStatus('idle');
         setModuleStates(resetModuleStates);
-        setCurrentModule(null);
-        setEstimatedCompletion(null);
-        setRetryAttempts(0);
-        setModuleTimestamps({});
         
-        // Save the reset state
+        // Save the clean reset state
         saveData({
           status: 'idle',
           moduleStates: resetModuleStates,
           currentModule: null,
           estimatedCompletion: null,
           retryAttempts: 0,
-          moduleTimestamps: {}
+          moduleTimestamps: {},
+          currentRunStart: null
         });
+        
+        // Force a WebSocket reconnection to ensure clean state
+        if (socketRef.current) {
+          console.log('🔌 RESET ALL: Forcing WebSocket reconnection for clean state');
+          socketRef.current.disconnect();
+          setTimeout(() => {
+            socketRef.current.connect();
+          }, 1000);
+        }
         
       } else {
         showMessage(`Reset all failed: ${result.message}`, 'error');
@@ -397,7 +433,33 @@ const DataPipelinePage = () => {
     } catch (error) {
       console.error(`❌ RESET ALL: Error resetting all steps in pipeline '${MASTER_PIPELINE}':`, error);
       showMessage(`Error resetting all steps: ${error.message}`, 'error');
+      
+      // Even if the API call failed, we've already cleared local state, 
+      // which should fix most stuck state issues
+      showMessage('Local state cleared - page refresh may be needed if issues persist', 'warning');
     }
+  };
+
+  const handlePipelineReset = (data) => {
+    console.log('🔄 WebSocket pipeline reset received:', data);
+    
+    // Immediately reset all local state to clean slate
+    setPipelineStatus('idle');
+    setModuleStates({});
+    setCurrentModule(null);
+    setEstimatedCompletion(null);
+    setRetryAttempts(0);
+    setModuleTimestamps({});
+    setCurrentRunStart(null);
+    
+    // Clear localStorage
+    localStorage.removeItem('masterPipelineData');
+    localStorage.removeItem('pipelineLastTrigger');
+    
+    // Show success message
+    showMessage(data.message || 'Pipeline reset completed', 'success');
+    
+    console.log('✅ Pipeline reset completed - all state cleared');
   };
 
   const handlePipelineStatusUpdate = (data) => {
@@ -943,16 +1005,11 @@ const DataPipelinePage = () => {
                    'Run Pipeline'}
                 </button>
 
-                {/* Reset All Button */}
+                {/* Reset All Button - Always Available */}
                 <button
                   onClick={resetAllSteps}
-                  disabled={pipelineStatus === 'running'}
-                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md transition-colors ${
-                    pipelineStatus === 'running'
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                      : 'text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500'
-                  }`}
-                  title="Reset all pipeline steps to pending status"
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md transition-colors text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  title="Reset all pipeline steps to pending status - Always available to fix stuck states"
                 >
                   <RotateCcw className="mr-2 h-4 w-4" />
                   Reset All
