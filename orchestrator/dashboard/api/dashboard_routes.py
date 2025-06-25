@@ -447,3 +447,101 @@ def get_analytics_chart_data():
             'success': False,
             'error': error_msg
         }), 500
+
+
+@dashboard_bp.route('/analytics/user-details', methods=['GET'])
+def get_user_details_for_tooltip():
+    """
+    Get individual user details for tooltip display on conversion rates
+    
+    Query parameters:
+    - entity_type: Entity type ('campaign', 'adset', 'ad')
+    - entity_id: Entity ID
+    - start_date: Start date (YYYY-MM-DD)
+    - end_date: End date (YYYY-MM-DD)
+    - breakdown: Breakdown type ('all', 'country', 'device', etc.)
+    - breakdown_value: Specific breakdown value if applicable (e.g., 'US', 'mobile')
+    """
+    try:
+        # Get query parameters
+        entity_type = request.args.get('entity_type')
+        entity_id = request.args.get('entity_id')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        breakdown = request.args.get('breakdown', 'all')
+        breakdown_value = request.args.get('breakdown_value')
+        
+        # Debug logging
+        logger.info(f"User details request: entity_type={entity_type}, entity_id={entity_id}, start_date={start_date}, end_date={end_date}, breakdown={breakdown}, breakdown_value={breakdown_value}")
+        
+        # Validate required parameters
+        required_params = {
+            'entity_type': entity_type,
+            'entity_id': entity_id,
+            'start_date': start_date,
+            'end_date': end_date
+        }
+        
+        for param_name, param_value in required_params.items():
+            if not param_value:
+                error_msg = f'Missing required parameter: {param_name}'
+                logger.error(f"User details validation error: {error_msg}")
+                return jsonify({
+                    'success': False,
+                    'error': error_msg
+                }), 400
+        
+        # Validate entity_type parameter
+        valid_entity_types = ['campaign', 'adset', 'ad']
+        if entity_type not in valid_entity_types:
+            error_msg = f'Invalid entity_type parameter. Must be one of: {valid_entity_types}'
+            logger.error(f"User details validation error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+        
+        # Validate breakdown parameter
+        valid_breakdowns = ['all', 'country', 'region', 'device']
+        if breakdown not in valid_breakdowns:
+            error_msg = f'Invalid breakdown parameter. Must be one of: {valid_breakdowns}'
+            logger.error(f"User details validation error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+        
+        # Get user details with thread safety
+        try:
+            with analytics_lock:
+                result = analytics_service.get_user_details_for_tooltip(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    breakdown=breakdown,
+                    breakdown_value=breakdown_value
+                )
+            
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                error_msg = result.get('error', 'Unknown analytics service error')
+                logger.error(f"User details analytics error: {error_msg}")
+                return jsonify(result), 500
+            
+        except Exception as analytics_error:
+            error_msg = f"Analytics service exception: {str(analytics_error)}"
+            logger.error(f"User details analytics error for {entity_type} {entity_id}: {error_msg}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"User details endpoint exception: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500

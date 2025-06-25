@@ -448,9 +448,9 @@ class BreakdownMappingService:
                         mixpanel_query = """
                             SELECT 
                                 COUNT(DISTINCT u.distinct_id) as total_users,
-                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
                             FROM mixpanel_user u
                             LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
                             WHERE u.country = ? AND u.abi_campaign_id = ?
@@ -460,9 +460,9 @@ class BreakdownMappingService:
                         mixpanel_query = """
                             SELECT 
                                 COUNT(DISTINCT u.distinct_id) as total_users,
-                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
                             FROM mixpanel_user u
                             LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
                             WHERE u.country = ? AND u.abi_ad_set_id = ?
@@ -472,9 +472,9 @@ class BreakdownMappingService:
                         mixpanel_query = """
                             SELECT 
                                 COUNT(DISTINCT u.distinct_id) as total_users,
-                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
-                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND e.event_time BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
+                                SUM(CASE WHEN e.event_name = 'RC Trial started' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_trials,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN 1 ELSE 0 END) as mixpanel_purchases,
+                                SUM(CASE WHEN e.event_name = 'RC Initial purchase' AND DATE(e.event_time) BETWEEN ? AND ? THEN COALESCE(e.revenue_usd, 0) ELSE 0 END) as mixpanel_revenue
                             FROM mixpanel_user u
                             LEFT JOIN mixpanel_event e ON u.distinct_id = e.distinct_id
                             WHERE u.country = ? AND u.abi_ad_id = ?
@@ -521,6 +521,63 @@ class BreakdownMappingService:
                     estimated_revenue_result = mixpanel_cursor.fetchone()
                     estimated_revenue = float(estimated_revenue_result[0] or 0) if estimated_revenue_result else 0.0
                     
+                    # CRITICAL ADD: Get AVERAGE CONVERSION AND REFUND RATES from user_product_metrics (USER REQUESTED)
+                    if group_by == 'campaign':
+                        average_rates_query = """
+                            SELECT 
+                                AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                                AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                                AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                                COUNT(DISTINCT upm.distinct_id) as users_with_rates
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_campaign_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                              AND upm.trial_conversion_rate IS NOT NULL
+                              AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                              AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                        """
+                        average_rates_params = (mixpanel_country, campaign_id, start_date, end_date)
+                    elif group_by == 'adset':
+                        average_rates_query = """
+                            SELECT 
+                                AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                                AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                                AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                                COUNT(DISTINCT upm.distinct_id) as users_with_rates
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_set_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                              AND upm.trial_conversion_rate IS NOT NULL
+                              AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                              AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                        """
+                        average_rates_params = (mixpanel_country, adset_id, start_date, end_date)
+                    else:  # ad level
+                        average_rates_query = """
+                            SELECT 
+                                AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                                AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                                AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                                COUNT(DISTINCT upm.distinct_id) as users_with_rates
+                            FROM user_product_metrics upm
+                            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                            WHERE u.country = ? AND u.abi_ad_id = ?
+                              AND upm.credited_date BETWEEN ? AND ?
+                              AND upm.trial_conversion_rate IS NOT NULL
+                              AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                              AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                        """
+                        average_rates_params = (mixpanel_country, ad_id, start_date, end_date)
+                    
+                    mixpanel_cursor.execute(average_rates_query, average_rates_params)
+                    average_rates_result = mixpanel_cursor.fetchone()
+                    avg_trial_conversion_rate = float(average_rates_result[0] or 0) if average_rates_result and average_rates_result[0] else 0.0
+                    avg_trial_refund_rate = float(average_rates_result[1] or 0) if average_rates_result and average_rates_result[1] else 0.0
+                    avg_purchase_refund_rate = float(average_rates_result[2] or 0) if average_rates_result and average_rates_result[2] else 0.0
+                    users_with_rates = int(average_rates_result[3] or 0) if average_rates_result and average_rates_result[3] else 0
+                    
                     # Create breakdown data entry for this country
                     breakdown_entry = BreakdownData(
                         breakdown_type='country',
@@ -540,7 +597,12 @@ class BreakdownMappingService:
                             'mixpanel_trials': int(mixpanel_trials or 0),
                             'mixpanel_purchases': int(mixpanel_purchases or 0),
                             'mixpanel_revenue': float(mixpanel_revenue or 0),
-                            'estimated_revenue': estimated_revenue  # CRITICAL ADD: Include estimated revenue
+                            'estimated_revenue': estimated_revenue,  # CRITICAL ADD: Include estimated revenue
+                            # CRITICAL ADD: Include average rates (USER REQUESTED)
+                            'avg_trial_conversion_rate': avg_trial_conversion_rate,
+                            'avg_trial_refund_rate': avg_trial_refund_rate,
+                            'avg_purchase_refund_rate': avg_purchase_refund_rate,
+                            'users_with_rates': users_with_rates
                         },
                         combined_metrics={
                             'estimated_roas': (estimated_revenue / float(spend or 1)) if spend else 0,  # Use estimated revenue for ROAS

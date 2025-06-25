@@ -10,4 +10,188 @@
   .active-nav-link {
     color: #818CF8;
   }
+}
+
+/* Range Slider Improvements */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Range Track */
+input[type="range"]::-webkit-slider-track {
+  background: #e5e7eb;
+  height: 6px;
+  border-radius: 3px;
+}
+
+input[type="range"]:focus::-webkit-slider-track {
+  background: #d1d5db;
+}
+
+/* Dark mode track */
+@media (prefers-color-scheme: dark) {
+  input[type="range"]::-webkit-slider-track {
+    background: #4b5563;
+  }
+  
+  input[type="range"]:focus::-webkit-slider-track {
+    background: #6b7280;
+  }
+}
+
+/* Range Thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #1d4ed8;
+  transform: scale(1.1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+input[type="range"]:focus::-webkit-slider-thumb {
+  outline: none;
+  ring: 2px;
+  ring-color: #2563eb;
+  ring-opacity: 0.5;
+}
+
+/* Firefox specific styles */
+input[type="range"]::-moz-range-track {
+  background: #e5e7eb;
+  height: 6px;
+  border-radius: 3px;
+  border: none;
+}
+
+input[type="range"]::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+/* Status indicator animations */
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-pulse {
+  animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Improved section cards */
+.analytics-section-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.analytics-section-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Filter toggle improvements */
+.filter-toggle-active {
+  box-shadow: 0 0 0 1px #10b981, 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.filter-toggle-inactive {
+  box-shadow: 0 0 0 1px #6b7280, 0 0 0 3px rgba(107, 114, 128, 0.1);
+}
+
+/* Date input improvements - make entire field clickable and styled */
+input[type="date"] {
+  position: relative;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Hide default calendar icon and make entire field clickable */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  color: transparent;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* Firefox date input */
+input[type="date"]::-moz-calendar-picker-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  color: transparent;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* Ensure date input text is visible and properly styled */
+input[type="date"]::-webkit-datetime-edit {
+  padding: 0;
+  color: inherit;
+}
+
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+input[type="date"]::-webkit-datetime-edit-text {
+  color: inherit;
+  padding: 0 2px;
+}
+
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  color: inherit;
+  padding: 0 2px;
+}
+
+/* Focus states for better accessibility */
+input[type="date"]:focus::-webkit-datetime-edit {
+  outline: none;
+}
+
+/* Dark mode improvements */
+@media (prefers-color-scheme: dark) {
+  input[type="date"]::-webkit-datetime-edit,
+  input[type="date"]::-webkit-datetime-edit-text,
+  input[type="date"]::-webkit-datetime-edit-month-field,
+  input[type="date"]::-webkit-datetime-edit-day-field,
+  input[type="date"]::-webkit-datetime-edit-year-field {
+    color: rgb(243, 244, 246);
+  }
 } 

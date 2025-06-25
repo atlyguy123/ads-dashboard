@@ -111,13 +111,16 @@ class BackgroundWorker:
     def run(self):
         """Main worker loop"""
         logger.info("🔄 Background worker starting...")
+        logger.info("   Note: Daily pipeline scheduling is handled by frontend - worker focuses on other background tasks")
         
         while self.running:
             try:
-                # Check if daily job should run
-                if self.should_run_daily_job():
-                    logger.info("⏰ Time for daily pipeline run")
-                    self.run_daily_pipeline()
+                # DISABLED: Daily pipeline scheduling is now handled by the frontend
+                # to prevent conflicts and multiple scheduling systems
+                # 
+                # if self.should_run_daily_job():
+                #     logger.info("⏰ Time for daily pipeline run")
+                #     self.run_daily_pipeline()
                 
                 # Process any other queued jobs
                 self.process_job_queue()
@@ -127,12 +130,12 @@ class BackgroundWorker:
                 if current_minute == 0:  # Top of the hour
                     self.health_check()
                 
-                # Sleep for 1 minute before next check
-                time.sleep(60)
+                # Sleep for 5 minutes before next check (reduced frequency)
+                time.sleep(300)  # 5 minutes instead of 1 minute
                 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(60)  # Sleep before retrying
+                time.sleep(300)  # Sleep before retrying
         
         logger.info("🛑 Background worker stopped")
 

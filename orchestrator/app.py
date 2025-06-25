@@ -260,6 +260,11 @@ class PipelineRunner:
         if not pipeline:
             return False, "Pipeline not found"
         
+        # Check if pipeline is already running
+        if pipeline_name in self.running_processes and self.running_processes[pipeline_name]:
+            running_steps = list(self.running_processes[pipeline_name].keys())
+            return False, f"Pipeline '{pipeline_name}' is already running (steps: {', '.join(running_steps)})"
+        
         # Check if all steps are tested (only for non-master pipelines)
         if pipeline_name != 'master_pipeline':
             for step in pipeline['steps']:
@@ -1078,43 +1083,9 @@ def mixpanel_process_cancel():
     })
 
 # Meta API endpoints
-@app.route('/api/meta/job/<job_id>/status', methods=['GET'])
-def meta_job_status(job_id):
-    """Get Meta job status"""
-    return jsonify({
-        "success": True,
-        "job_id": job_id,
-        "status": "completed",
-        "progress": 100,
-        "message": "Job completed successfully",
-        "result_url": f"/api/meta/job/{job_id}/results",
-        "timestamp": datetime.now().isoformat()
-    })
+# Removed dummy meta job status/results routes - using blueprint routes from meta_routes.py instead
 
-@app.route('/api/meta/job/<job_id>/results', methods=['GET'])
-def meta_job_results(job_id):
-    """Get Meta job results"""
-    return jsonify({
-        "success": True,
-        "job_id": job_id,
-        "data": {
-            "total_records": 0,
-            "results": [],
-            "summary": "No data available"
-        },
-        "timestamp": datetime.now().isoformat()
-    })
-
-@app.route('/api/meta/fetch', methods=['POST'])
-def meta_fetch():
-    """Fetch Meta data"""
-    return jsonify({
-        "success": True,
-        "message": "Meta data fetch initiated",
-        "job_id": f"meta_{int(datetime.now().timestamp())}",
-        "status": "started",
-        "timestamp": datetime.now().isoformat()
-    })
+# Removed dummy meta_fetch route - using blueprint route from meta_routes.py instead
 
 @app.route('/api/meta/analytics/start', methods=['POST'])
 def meta_analytics_start():

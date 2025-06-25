@@ -178,6 +178,14 @@ export const Dashboard = () => {
 
   // Track if initial load has been performed
   const hasInitialLoadRef = useRef(false);
+  
+  // Refs to hold current values without triggering re-renders
+  const currentSettingsRef = useRef({ dateRange, breakdown, hierarchy });
+  
+  // Update refs when settings change
+  useEffect(() => {
+    currentSettingsRef.current = { dateRange, breakdown, hierarchy };
+  }, [dateRange, breakdown, hierarchy]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -499,6 +507,7 @@ export const Dashboard = () => {
     setError(null);
     
     try {
+      const { dateRange, breakdown, hierarchy } = currentSettingsRef.current;
       console.log('🔄 Background refresh - fetching fresh data:', {
         dateRange,
         breakdown,
@@ -532,7 +541,7 @@ export const Dashboard = () => {
     } finally {
       setBackgroundLoading(false);
     }
-  }, [dateRange, breakdown, hierarchy, rowOrder.length]);
+  }, [rowOrder.length]);
 
   // Handle dashboard data refresh (fast, pre-computed data)
   const handleRefresh = useCallback(async () => {
@@ -540,6 +549,7 @@ export const Dashboard = () => {
     setError(null);
     
     try {
+      const { dateRange, breakdown, hierarchy } = currentSettingsRef.current;
       console.log('🔄 Fetching pre-computed analytics data:', {
         dateRange,
         breakdown,
@@ -579,7 +589,7 @@ export const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, breakdown, hierarchy]);
+  }, []);
 
   // Auto-refresh on component mount (after functions are defined)
   useEffect(() => {
@@ -600,23 +610,8 @@ export const Dashboard = () => {
     hasInitialLoadRef.current = true;
   }, [handleBackgroundRefresh, handleRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 🔥 CRITICAL FIX: Auto-refresh when breakdown, dateRange, or hierarchy changes
-  useEffect(() => {
-    if (!hasInitialLoadRef.current) return; // Don't trigger before initial load
-    
-    console.log('🔄 Dashboard parameters changed, refreshing data:', {
-      dateRange,
-      breakdown,
-      hierarchy
-    });
-    
-    // Use background refresh if we have existing data, otherwise regular refresh
-    if (dashboardData && dashboardData.length > 0) {
-      handleBackgroundRefresh();
-    } else {
-      handleRefresh();
-    }
-  }, [dateRange, breakdown, hierarchy, handleBackgroundRefresh, handleRefresh]);
+  // REMOVED: Auto-refresh on parameter changes - now only refresh when user clicks "Refresh Data"
+  // This gives users full control over when data is fetched
 
 
 

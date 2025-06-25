@@ -94,6 +94,12 @@ const DataPipelinePage = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsInitialLoad(false);
+      
+      // Always check if pipeline is complete when page loads
+      // This handles cases where the pipeline completed but frontend missed it
+      setTimeout(() => {
+        checkPipelineCompletion();
+      }, 1000); // Delay to ensure all initial state is loaded
     }, 100); // Small delay to ensure all initial state is loaded
     
     return () => clearTimeout(timer);
@@ -112,8 +118,37 @@ const DataPipelinePage = () => {
       const now = new Date();
       const jerusalemTime = new Date(now.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
       
+      // Add a unique tab identifier to prevent multiple tabs from triggering simultaneously
+      const tabId = sessionStorage.getItem('pipelineTabId') || Date.now().toString();
+      sessionStorage.setItem('pipelineTabId', tabId);
+      
+      // Check if another tab recently triggered a run (within the last 5 minutes)
+      const lastTriggerData = localStorage.getItem('pipelineLastTrigger');
+      if (lastTriggerData) {
+        try {
+          const lastTrigger = JSON.parse(lastTriggerData);
+          const timeSinceLastTrigger = now - new Date(lastTrigger.timestamp);
+          const lastTriggerTabId = lastTrigger.tabId;
+          
+          // If another tab triggered within the last 5 minutes, skip this check
+          if (timeSinceLastTrigger < 5 * 60 * 1000 && lastTriggerTabId !== tabId) {
+            console.log('⏭️ Skipping scheduled run check - another tab recently triggered');
+            return;
+          }
+        } catch (e) {
+          console.warn('Failed to parse last trigger data:', e);
+        }
+      }
+      
       if (nextScheduledRun && jerusalemTime >= nextScheduledRun && pipelineStatus === 'idle') {
         console.log('🕘 Scheduled run triggered at', jerusalemTime.toLocaleString());
+        
+        // Record this trigger to prevent other tabs from also triggering
+        localStorage.setItem('pipelineLastTrigger', JSON.stringify({
+          timestamp: now.toISOString(),
+          tabId: tabId
+        }));
+        
         runMasterPipeline(false); // false = automatic run
       }
     };
@@ -152,6 +187,13 @@ const DataPipelinePage = () => {
         } else {
           // No saved next run, calculate it and save it
           calculateNextScheduledRun(true);
+        }
+        
+        // Check if pipeline is actually complete but frontend missed it
+        if (data.status === 'running' && data.moduleStates) {
+          setTimeout(() => {
+            checkPipelineCompletion(data.moduleStates);
+          }, 500); // Small delay to ensure all state is loaded
         }
       } catch (e) {
         console.warn('Failed to parse saved pipeline data:', e);
@@ -209,6 +251,25 @@ const DataPipelinePage = () => {
       nextRun.setDate(nextRun.getDate() + 1);
     }
     
+    // Additional safety check: if we have a recent successful run today, schedule for tomorrow
+    if (lastSuccessfulRun) {
+      const lastRunJerusalem = new Date(lastSuccessfulRun.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE}));
+      const todayJerusalem = new Date(jerusalemTime);
+      todayJerusalem.setHours(0, 0, 0, 0);
+      
+      // If last successful run was today, schedule for tomorrow
+      if (lastRunJerusalem >= todayJerusalem) {
+        const tomorrow = new Date(jerusalemTime);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(SCHEDULED_HOUR, 0, 0, 0);
+        
+        // Only update if tomorrow is later than currently calculated nextRun
+        if (tomorrow > nextRun) {
+          nextRun.setTime(tomorrow.getTime());
+        }
+      }
+    }
+    
     setNextScheduledRun(nextRun);
     
     // Save the calculated next run time only if requested
@@ -217,6 +278,8 @@ const DataPipelinePage = () => {
         nextScheduledRun: nextRun.toISOString()
       });
     }
+    
+    console.log(`📅 Next scheduled run calculated: ${nextRun.toLocaleString("en-US", {timeZone: JERUSALEM_TIMEZONE})} Jerusalem time`);
     
     return nextRun;
   };
@@ -247,6 +310,13 @@ const DataPipelinePage = () => {
   };
 
   const runMasterPipeline = async (isManual = true) => {
+    // Safety check: prevent multiple concurrent runs
+    if (pipelineStatus === 'running') {
+      console.log('⚠️ Pipeline is already running, skipping duplicate request');
+      showMessage('Pipeline is already running', 'warning');
+      return;
+    }
+    
     console.log('🚀 Starting master pipeline...');
     setIsManualRun(isManual);
     setPipelineStatus('running');
@@ -392,11 +462,28 @@ const DataPipelinePage = () => {
           frontendStatus = data.status;
       }
       
-             // Update module state
+      // Update module state
       console.log(`🔄 Updating module ${stepId} to status: ${frontendStatus}`);
       setModuleStates(prev => {
         const newStates = { ...prev, [stepId]: frontendStatus };
         console.log('📊 Updated module states:', newStates);
+        
+        // Use the newStates directly for completion check
+        const completedCount = Object.values(newStates).filter(state => state === 'complete').length;
+        const failedCount = Object.values(newStates).filter(state => state === 'failed').length;
+        const cancelledCount = Object.values(newStates).filter(state => state === 'cancelled').length;
+        
+        console.log(`📈 Progress check: ${completedCount}/${MASTER_MODULES.length} complete, ${failedCount} failed, ${cancelledCount} cancelled`);
+        
+        // If all modules are complete and none failed, mark pipeline as complete
+        if (completedCount === MASTER_MODULES.length && failedCount === 0 && cancelledCount === 0) {
+          console.log('🎉 All modules complete! Triggering pipeline completion...');
+          // Use setTimeout to avoid race condition with state updates
+          setTimeout(() => {
+            handlePipelineComplete();
+          }, 100);
+        }
+        
         return newStates;
       });
       
@@ -406,9 +493,7 @@ const DataPipelinePage = () => {
         setCurrentModule(stepId);
       } else if (frontendStatus === 'complete' || frontendStatus === 'failed') {
         // Clear current module if this was the running one
-        if (currentModule === stepId) {
-          setCurrentModule(null);
-        }
+        setCurrentModule(currentMod => currentMod === stepId ? null : currentMod);
         
         // Check if this failure means the whole pipeline failed
         if (frontendStatus === 'failed') {
@@ -421,20 +506,6 @@ const DataPipelinePage = () => {
           console.log('🛑 Module cancelled, pipeline may have been cancelled');
           return;
         }
-        
-                 // Check if all modules are now complete
-         const updatedStates = { ...moduleStates, [stepId]: frontendStatus };
-         const completedCount = Object.values(updatedStates).filter(state => state === 'complete').length;
-         const failedCount = Object.values(updatedStates).filter(state => state === 'failed').length;
-         const cancelledCount = Object.values(updatedStates).filter(state => state === 'cancelled').length;
-         
-         console.log(`📈 Progress check: ${completedCount}/${MASTER_MODULES.length} complete, ${failedCount} failed, ${cancelledCount} cancelled`);
-         
-         // If all modules are complete and none failed, mark pipeline as complete
-         if (completedCount === MASTER_MODULES.length && failedCount === 0 && cancelledCount === 0) {
-           console.log('🎉 All modules complete! Triggering pipeline completion...');
-           handlePipelineComplete();
-         }
       }
     }
   };
@@ -458,6 +529,15 @@ const DataPipelinePage = () => {
     });
     setModuleStates(completedModuleStates);
     
+    // Clear any retry timeouts
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+    
+    // Clear trigger data to reset for other tabs
+    localStorage.removeItem('pipelineLastTrigger');
+    
     saveData({
       lastSuccessfulRun: endTime.toISOString(),
       lastRunDuration: duration,
@@ -472,8 +552,11 @@ const DataPipelinePage = () => {
     
     showMessage('Pipeline completed successfully! Database updated.', 'success');
     
-    // Calculate next scheduled run
-    calculateNextScheduledRun();
+    // Calculate next scheduled run with the new lastSuccessfulRun value 
+    // This will ensure it schedules for tomorrow if the run completed today
+    setTimeout(() => {
+      calculateNextScheduledRun();
+    }, 100); // Small delay to ensure state is updated
   };
 
   const handlePipelineFailure = (failedStep = null) => {
@@ -667,6 +750,130 @@ const DataPipelinePage = () => {
   };
 
   const status = getStatusDisplay();
+
+  // Helper function to check if pipeline is actually complete
+  const checkPipelineCompletion = async (moduleStatesData = null) => {
+    try {
+      console.log('🔍 Checking pipeline completion status...');
+      
+      // Fetch current status from backend using existing endpoint
+      const response = await fetch('/api/pipelines');
+      if (!response.ok) {
+        console.warn('Failed to fetch pipeline status from backend');
+        return;
+      }
+      
+      const pipelines = await response.json();
+      const masterPipeline = pipelines.find(p => p.name === MASTER_PIPELINE);
+      
+      if (!masterPipeline) {
+        console.warn('Master pipeline not found in backend response');
+        return;
+      }
+      
+      console.log('📊 Backend pipeline status:', masterPipeline.status);
+      
+      // Check if all modules are marked as success in backend
+      if (masterPipeline.status) {
+        const moduleIds = MASTER_MODULES.map(m => m.id);
+        const allComplete = moduleIds.every(id => 
+          masterPipeline.status[id] && masterPipeline.status[id].status === 'success'
+        );
+        
+        if (allComplete) {
+          console.log('🎉 Pipeline is actually complete! Updating frontend...');
+          
+          // Find the latest completion timestamp from all modules
+          let latestTimestamp = null;
+          let earliestTimestamp = null;
+          
+          moduleIds.forEach(id => {
+            const moduleStatus = masterPipeline.status[id];
+            if (moduleStatus && moduleStatus.timestamp) {
+              const timestamp = new Date(moduleStatus.timestamp);
+              if (!latestTimestamp || timestamp > latestTimestamp) {
+                latestTimestamp = timestamp;
+              }
+              if (!earliestTimestamp || timestamp < earliestTimestamp) {
+                earliestTimestamp = timestamp;
+              }
+            }
+          });
+          
+          // Calculate actual duration if we have both start and end times
+          let actualDuration = null;
+          if (latestTimestamp && currentRunStart) {
+            actualDuration = latestTimestamp - currentRunStart;
+          } else if (latestTimestamp && earliestTimestamp) {
+            // Fallback: use time between first and last module completion
+            actualDuration = latestTimestamp - earliestTimestamp;
+          }
+          
+          console.log('📅 Actual completion time:', latestTimestamp?.toISOString());
+          console.log('⏱️ Actual duration:', actualDuration ? `${Math.round(actualDuration / (1000 * 60))} minutes` : 'unknown');
+          
+          // Update module states to reflect completion
+          const completedModuleStates = {};
+          MASTER_MODULES.forEach(module => {
+            completedModuleStates[module.id] = 'complete';
+          });
+          
+          setModuleStates(completedModuleStates);
+          
+          // Update pipeline status with actual completion time
+          setPipelineStatus('success');
+          if (latestTimestamp) {
+            setLastSuccessfulRun(latestTimestamp);
+          }
+          if (actualDuration) {
+            setLastRunDuration(actualDuration);
+          }
+          setRetryCount(0);
+          setRetryAttempts(0);
+          setCurrentModule(null);
+          setEstimatedCompletion(null);
+          
+          // Clear any retry timeouts
+          if (retryTimeoutRef.current) {
+            clearTimeout(retryTimeoutRef.current);
+            retryTimeoutRef.current = null;
+          }
+          
+          // Clear trigger data to reset for other tabs
+          localStorage.removeItem('pipelineLastTrigger');
+          
+          // Save the actual completion data
+          saveData({
+            lastSuccessfulRun: latestTimestamp?.toISOString(),
+            lastRunDuration: actualDuration,
+            status: 'success',
+            retryCount: 0,
+            retryAttempts: 0,
+            moduleStates: completedModuleStates,
+            currentModule: null,
+            currentRunStart: null,
+            estimatedCompletion: null
+          });
+          
+          showMessage('Pipeline completed successfully! Database updated.', 'success');
+          
+          // Calculate next scheduled run
+          setTimeout(() => {
+            calculateNextScheduledRun();
+          }, 100);
+          
+        } else {
+          console.log('❌ Not all modules complete yet. Status check:');
+          moduleIds.forEach(id => {
+            const moduleStatus = masterPipeline.status[id];
+            console.log(`  ${id}: ${moduleStatus ? moduleStatus.status : 'not found'}`);
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Error checking pipeline completion:', error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">

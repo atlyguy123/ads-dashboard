@@ -38,6 +38,7 @@ def fetch_meta_data_endpoint():
         if not fields:
             return jsonify({'error': 'fields parameter is required'}), 400
         
+
         # Call the meta service (now handles async automatically)
         result, error = fetch_meta_data(
             start_date=start_date,
