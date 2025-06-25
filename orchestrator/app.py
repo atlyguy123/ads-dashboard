@@ -149,14 +149,17 @@ class PipelineRunner:
         with open(status_file, 'w') as f:
             json.dump(current_status, f, indent=2)
         
-        # Emit websocket event
-        socketio.emit('status_update', {
-            'pipeline': pipeline_name,
-            'step': step_id,
-            'status': status,
-            'timestamp': datetime.now().isoformat(),
-            'error_message': error_message
-        })
+        # Emit websocket event (don't let websocket failures prevent file updates)
+        try:
+            socketio.emit('status_update', {
+                'pipeline': pipeline_name,
+                'step': step_id,
+                'status': status,
+                'timestamp': datetime.now().isoformat(),
+                'error_message': error_message
+            })
+        except Exception:
+            pass  # Don't let websocket failures prevent status file updates
     
     def run_step(self, pipeline_name, step_id):
         """Run a single step in a pipeline"""
@@ -1615,9 +1618,8 @@ def catch_all(path):
     if path.startswith('api/'):
         return "API endpoint not found", 404
     
-    # Don't serve React app for static files that don't exist
-    if path.startswith(('static/', 'assets/', 'dashboard-static/')):
-        return "Static file not found", 404
+    # Don't intercept static file routes - let them be handled by their specific routes
+    # The static file routes are defined above and should handle these paths
     
     # Serve the React app for all other routes
     return send_from_directory('dashboard/static', 'index.html')
