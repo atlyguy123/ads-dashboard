@@ -1,0 +1,39 @@
+# Virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data files (will be created on Railway)
+data/
+database/
+*.db
+*.sqlite
+*.sqlite3
+
+# Development files
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Node modules (if any)
+node_modules/
+orchestrator/dashboard/client/node_modules/
+
+# Build artifacts
+orchestrator/dashboard/static/
+*.egg-info/
+build/
+dist/
+
+# Large analysis files
+*.json
+!requirements.txt
+!package.json
+!railway.json
+
+# Git
+.git/ 
