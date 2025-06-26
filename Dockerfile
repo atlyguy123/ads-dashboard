@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Create database directory for persistent volume mounting
+RUN mkdir -p /app/database
+
 # Set environment variables
 ENV FLASK_ENV=production
 ENV HOST=0.0.0.0

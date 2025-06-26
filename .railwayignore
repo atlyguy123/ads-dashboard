@@ -8,10 +8,15 @@ __pycache__/
 
 # Data files (will be created on Railway)
 data/
-database/
-*.db
-*.sqlite
-*.sqlite3
+# Keep database directory structure but exclude large DB files from uploads
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+database/*copy.db
+database/*.backup
+# Keep schema files
+!database/schema.sql
+!database/*.sql
 
 # Development files
 .DS_Store
