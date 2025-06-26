@@ -701,9 +701,8 @@ print(f"Debug system initialized with {debug_registry.get_module_count()} module
 @app.route('/')
 @requires_auth
 def index():
-    """Redirect to ads dashboard"""
-    from flask import redirect, url_for
-    return redirect('/ads-dashboard')
+    """Serve the ads dashboard application at root"""
+    return send_from_directory('dashboard/static', 'index.html')
 
 @app.route('/pipelines')
 @requires_auth
@@ -828,11 +827,7 @@ def handle_disconnect():
     print('Client disconnected')
 
 # Dashboard routes for serving static files
-@app.route('/ads-dashboard')
-@requires_auth
-def dashboard_home():
-    """Serve the ads dashboard application"""
-    return send_from_directory('dashboard/static', 'index.html')
+# Root route now serves the dashboard directly
 
 @app.route('/dashboard-static/<path:filename>')
 def dashboard_static(filename):
@@ -1615,16 +1610,11 @@ def catch_all(path):
     if path.startswith('api/'):
         return "API endpoint not found", 404
     
-    # For any ads-dashboard sub-routes, serve the React app
-    if path.startswith('ads-dashboard'):
-        return send_from_directory('dashboard/static', 'index.html')
-    
     # Don't intercept static file routes - let them be handled by their specific routes
     # The static file routes are defined above and should handle these paths
     
-    # For all other routes, redirect to ads-dashboard to maintain consistency
-    from flask import redirect
-    return redirect('/ads-dashboard')
+    # For all other routes, serve the React app (client-side routing)
+    return send_from_directory('dashboard/static', 'index.html')
 
 if __name__ == '__main__':
     # Initialize database structure if needed (especially for Heroku)
