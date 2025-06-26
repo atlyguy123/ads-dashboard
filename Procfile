@@ -1,2 +1,2 @@
-web: cd orchestrator && python app.py
-worker: cd orchestrator && python background_worker.py 
+web: python orchestrator/app.py
+worker: python orchestrator/background_worker.py 
