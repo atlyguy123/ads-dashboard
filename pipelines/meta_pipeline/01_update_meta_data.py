@@ -254,16 +254,14 @@ class MetaDataUpdater:
             breakdowns = 'impression_device'
         
         try:
-            # Use the actual Meta API service with smart sync/async auto-detection
+            # Use the actual Meta API service - FORCE SYNC for Fill Gaps reliability
             api_response, error = fetch_meta_data(
                 start_date=from_date,
                 end_date=to_date,
                 time_increment=1,
                 fields=fields,
-                breakdowns=breakdowns
-                # Removed use_async=True to allow smart auto-detection
-                # This will use sync for single-day requests (more reliable)
-                # and async for multi-day requests (better performance)
+                breakdowns=breakdowns,
+                use_async=False  # FORCE SYNC MODE for Fill Gaps (more reliable for single days)
             )
             
             if error:
@@ -589,8 +587,11 @@ class MetaDataUpdater:
         try:
             # Step 1: Determine which dates to process
             if skip_existing:
+                # CRITICAL FIX: Check the actual target table, not the main table
                 existing_dates = self.check_existing_dates_in_table(table_name, start_date, end_date)
                 dates_to_update = self.calculate_missing_dates(start_date, end_date, existing_dates)
+                
+                logger.info(f"📊 Table {table_name}: Found {len(existing_dates)} existing dates, {len(dates_to_update)} missing dates")
                 
                 if not dates_to_update:
                     logger.info("✅ No missing dates found - table is already complete for this range")
