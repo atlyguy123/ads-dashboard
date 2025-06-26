@@ -322,6 +322,9 @@ def main():
         
         conn.close()
         
+        # Setup Meta Analytics database with Meta tables
+        setup_meta_analytics_database()
+        
         logger.info("Database setup completed successfully")
         logger.info("Database is ready for data ingestion")
         return 0
@@ -330,6 +333,129 @@ def main():
         logger.error(f"Module 2 failed: {e}")
         print(f"Module 2 failed: {e}", file=sys.stderr)
         return 1
+
+def setup_meta_analytics_database():
+    """Setup Meta Analytics database with only Meta advertising tables"""
+    try:
+        # Get Meta Analytics database path
+        meta_db_path = Path(get_database_path('meta_analytics'))
+        
+        logger.info(f"Setting up Meta Analytics database: {meta_db_path}")
+        
+        # Ensure database directory exists
+        os.makedirs(meta_db_path.parent, exist_ok=True)
+        
+        # Create connection
+        conn = sqlite3.connect(str(meta_db_path), timeout=30.0)
+        cursor = conn.cursor()
+        
+        # Enable optimizations
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute("PRAGMA cache_size = -64000")
+        cursor.execute("PRAGMA temp_store = MEMORY")
+        cursor.execute("PRAGMA mmap_size = 268435456")
+        
+        # Create Meta advertising tables
+        meta_tables_sql = """
+        CREATE TABLE IF NOT EXISTS ad_performance_daily (
+            ad_id TEXT NOT NULL,
+            date DATE NOT NULL,
+            adset_id TEXT,
+            campaign_id TEXT,
+            ad_name TEXT,
+            adset_name TEXT,
+            campaign_name TEXT,
+            spend DECIMAL(10,2),
+            impressions INTEGER,
+            clicks INTEGER,
+            meta_trials INTEGER,
+            meta_purchases INTEGER,
+            PRIMARY KEY (ad_id, date)
+        );
+
+        CREATE TABLE IF NOT EXISTS ad_performance_daily_country (
+            ad_id TEXT NOT NULL,
+            date DATE NOT NULL,
+            country TEXT NOT NULL,
+            adset_id TEXT,
+            campaign_id TEXT,
+            ad_name TEXT,
+            adset_name TEXT,
+            campaign_name TEXT,
+            spend DECIMAL(10,2),
+            impressions INTEGER,
+            clicks INTEGER,
+            meta_trials INTEGER,
+            meta_purchases INTEGER,
+            PRIMARY KEY (ad_id, date, country)
+        );
+
+        CREATE TABLE IF NOT EXISTS ad_performance_daily_region (
+            ad_id TEXT NOT NULL,
+            date DATE NOT NULL,
+            region TEXT NOT NULL,
+            adset_id TEXT,
+            campaign_id TEXT,
+            ad_name TEXT,
+            adset_name TEXT,
+            campaign_name TEXT,
+            spend DECIMAL(10,2),
+            impressions INTEGER,
+            clicks INTEGER,
+            meta_trials INTEGER,
+            meta_purchases INTEGER,
+            PRIMARY KEY (ad_id, date, region)
+        );
+
+        CREATE TABLE IF NOT EXISTS ad_performance_daily_device (
+            ad_id TEXT NOT NULL,
+            date DATE NOT NULL,
+            device TEXT NOT NULL,
+            adset_id TEXT,
+            campaign_id TEXT,
+            ad_name TEXT,
+            adset_name TEXT,
+            campaign_name TEXT,
+            spend DECIMAL(10,2),
+            impressions INTEGER,
+            clicks INTEGER,
+            meta_trials INTEGER,
+            meta_purchases INTEGER,
+            PRIMARY KEY (ad_id, date, device)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_date ON ad_performance_daily (date);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_campaign ON ad_performance_daily (campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_adset ON ad_performance_daily (adset_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_ad_id ON ad_performance_daily (ad_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_country_date ON ad_performance_daily_country (date);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_country_campaign ON ad_performance_daily_country (campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_country_ad_id ON ad_performance_daily_country (ad_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_region_date ON ad_performance_daily_region (date);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_region_campaign ON ad_performance_daily_region (campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_region_ad_id ON ad_performance_daily_region (ad_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_device_date ON ad_performance_daily_device (date);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_device_campaign ON ad_performance_daily_device (campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_ad_perf_device_ad_id ON ad_performance_daily_device (ad_id);
+        """
+        
+        # Execute all statements
+        cursor.executescript(meta_tables_sql)
+        conn.commit()
+        
+        # Optimize
+        cursor.execute("ANALYZE")
+        cursor.execute("REINDEX")
+        
+        conn.close()
+        
+        logger.info("Meta Analytics database setup completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to setup Meta Analytics database: {e}")
+        raise
 
 def create_database_connection() -> sqlite3.Connection:
     """Create optimized database connection with proper settings"""

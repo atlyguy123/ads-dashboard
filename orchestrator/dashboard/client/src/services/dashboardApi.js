@@ -271,6 +271,26 @@ class DashboardApiService {
       throw error;
     }
   }
+
+  /**
+   * Get available date range from meta analytics database
+   */
+  async getAvailableDateRange() {
+    try {
+      const response = await this.makeRequest('/api/dashboard/analytics/date-range');
+      return response;
+    } catch (error) {
+      console.error('Error fetching available date range:', error);
+      // Return fallback data if API fails
+      return {
+        success: true,
+        data: {
+          earliest_date: '2025-01-01',
+          latest_date: new Date().toISOString().split('T')[0]
+        }
+      };
+    }
+  }
 }
 
 // Create and export a singleton instance

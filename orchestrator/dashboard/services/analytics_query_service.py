@@ -2384,3 +2384,44 @@ class AnalyticsQueryService:
                 },
                 'generated_at': datetime.now().isoformat()
             }
+
+    def get_earliest_meta_date(self) -> str:
+        """Get the earliest date available in meta analytics database"""
+        try:
+            # Connect to meta analytics database
+            conn = sqlite3.connect(self.meta_db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Query all performance tables to find the absolute earliest date
+            tables = ['ad_performance_daily', 'ad_performance_daily_country', 
+                     'ad_performance_daily_region', 'ad_performance_daily_device']
+            
+            earliest_dates = []
+            
+            for table in tables:
+                try:
+                    query = f"SELECT MIN(date) as earliest_date FROM {table} WHERE date IS NOT NULL AND date != ''"
+                    cursor.execute(query)
+                    result = cursor.fetchone()
+                    
+                    if result and result['earliest_date']:
+                        earliest_dates.append(result['earliest_date'])
+                        
+                except sqlite3.Error as e:
+                    logger.warning(f"Could not query {table}: {e}")
+                    continue
+            
+            conn.close()
+            
+            # Return the earliest date found across all tables
+            if earliest_dates:
+                return min(earliest_dates)
+            else:
+                # Fallback if no data found
+                return '2025-01-01'
+                
+        except Exception as e:
+            logger.error(f"Error getting earliest meta date: {e}", exc_info=True)
+            # Return fallback date
+            return '2025-01-01'

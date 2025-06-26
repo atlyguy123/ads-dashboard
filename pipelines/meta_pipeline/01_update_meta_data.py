@@ -179,8 +179,8 @@ class MetaDataUpdater:
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
         if not most_recent_date:
-            # If no data exists, start from 30 days ago
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # If no data exists, start from May 1st, 2025
+            start_date = '2025-05-01'
             logger.info(f"📅 No existing data - will fill from {start_date} to {today}")
             
             # Generate all dates from start_date to today

@@ -545,3 +545,34 @@ def get_user_details_for_tooltip():
             'success': False,
             'error': error_msg
         }), 500
+
+@dashboard_bp.route('/analytics/date-range', methods=['GET'])
+def get_available_date_range():
+    """Get the available date range from meta analytics database"""
+    try:
+        # Get earliest date from meta analytics database
+        with analytics_lock:
+            earliest_date = analytics_service.get_earliest_meta_date()
+        
+        # Get today's date as the latest available date
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'earliest_date': earliest_date,
+                'latest_date': today
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting available date range: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'data': {
+                'earliest_date': '2025-01-01',  # Fallback
+                'latest_date': datetime.now().strftime('%Y-%m-%d')
+            }
+        }), 500

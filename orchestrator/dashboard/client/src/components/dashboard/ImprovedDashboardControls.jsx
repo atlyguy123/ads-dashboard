@@ -18,6 +18,7 @@ import {
   X
 } from 'lucide-react';
 import StatusIndicator from './StatusIndicator';
+import { dashboardApi } from '../../services/dashboardApi';
 
 // Date range presets based on yesterday
 const getDatePresets = () => {
@@ -76,7 +77,28 @@ const ImprovedDashboardControls = ({
     hierarchy,
     breakdownFilters
   });
+  const [availableDateRange, setAvailableDateRange] = useState({
+    earliest_date: '2025-01-01', // Fallback
+    latest_date: new Date().toISOString().split('T')[0]
+  });
   const datePresets = getDatePresets();
+
+  // Fetch available date range from API when component mounts
+  useEffect(() => {
+    const fetchAvailableDateRange = async () => {
+      try {
+        const response = await dashboardApi.getAvailableDateRange();
+        if (response.success && response.data) {
+          setAvailableDateRange(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch available date range:', error);
+        // Keep the fallback values set in initial state
+      }
+    };
+
+    fetchAvailableDateRange();
+  }, []);
 
   // Update selected preset when date range changes externally
   useEffect(() => {
@@ -243,6 +265,8 @@ const ImprovedDashboardControls = ({
                      <input
                        type="date"
                        value={dateRange.start_date}
+                       min={availableDateRange.earliest_date}
+                       max={availableDateRange.latest_date}
                        onChange={(e) => handleCustomDateChange('start_date', e.target.value)}
                        className="w-full pl-10 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:border-blue-400 transition-all duration-200 cursor-pointer hover:border-gray-400 dark:hover:border-gray-500"
                        style={{ colorScheme: 'light' }}
@@ -256,6 +280,8 @@ const ImprovedDashboardControls = ({
                      <input
                        type="date"
                        value={dateRange.end_date}
+                       min={availableDateRange.earliest_date}
+                       max={availableDateRange.latest_date}
                        onChange={(e) => handleCustomDateChange('end_date', e.target.value)}
                        className="w-full pl-10 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:border-blue-400 transition-all duration-200 cursor-pointer hover:border-gray-400 dark:hover:border-gray-500"
                        style={{ colorScheme: 'light' }}
