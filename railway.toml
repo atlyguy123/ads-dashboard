@@ -11,8 +11,8 @@
 
 # Environment optimizations
 [build]
-  # Build React frontend with relative API URL, then install Python dependencies
-  buildCommand = "cd orchestrator/dashboard/client && REACT_APP_API_URL='' npm run build && cd ../../../ && pip install -r requirements.txt"
+  # Build React frontend with relative API URL, copy to Flask static directory, then install Python dependencies
+  buildCommand = "cd orchestrator/dashboard/client && REACT_APP_API_URL='' npm run build && cp -r build/* ../static/ && cd ../../../ && pip install -r requirements.txt"
 
 # Service configuration
 [service]
