@@ -2,7 +2,7 @@
 // 
 // Handles all API calls related to the complete refresh pipeline functionality
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
 class RefreshPipelineApiService {
   constructor() {

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Base URL for API requests - updated to use localhost:5001 consistently
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+// Base URL for API requests - uses relative URLs for production deployment
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
 // Create an axios instance
 const apiClient = axios.create({

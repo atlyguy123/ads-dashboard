@@ -28,10 +28,8 @@ RUN cp /app/database/schema.sql /app/schema.sql
 # Set environment variables
 ENV FLASK_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=5001
 
-# Expose port
-EXPOSE 5001
+# Note: PORT is set dynamically by Railway via environment variable
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\ncd orchestrator\npython3 app.py' > /app/start.sh
