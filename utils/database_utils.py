@@ -40,6 +40,10 @@ class DatabaseManager:
         'meta_analytics': {
             'filename': 'meta_analytics.db', 
             'description': 'Meta (Facebook) advertising analytics data'
+        },
+        'raw_data': {
+            'filename': 'raw_data.db',
+            'description': 'Raw downloaded data from S3'
         }
     }
     
@@ -234,7 +238,6 @@ class DatabaseManager:
             with db_manager.get_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM users")
-                result = cursor.fetchone()
         """
         db_path = self.get_database_path(database_key)
         
