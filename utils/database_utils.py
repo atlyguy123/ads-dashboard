@@ -154,8 +154,19 @@ class DatabaseManager:
         
         Populates the internal database paths cache.
         In production, creates database directory if it doesn't exist.
+        On Railway, uses RAILWAY_VOLUME_MOUNT_PATH for persistent storage.
         """
-        database_dir = self._project_root / "database"
+        # Check if we're running on Railway with a volume
+        railway_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+        
+        if railway_volume_path:
+            # Use Railway's persistent volume path
+            database_dir = Path(railway_volume_path)
+            logger.info(f"Using Railway volume for database storage: {database_dir}")
+        else:
+            # Use local project structure
+            database_dir = self._project_root / "database"
+            logger.info(f"Using local database directory: {database_dir}")
         
         # Create database directory if it doesn't exist (for production deployments)
         if not database_dir.exists():
@@ -163,20 +174,25 @@ class DatabaseManager:
                 database_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created database directory at {database_dir}")
             except Exception as e:
-                logger.warning(f"Could not create database directory: {e}")
-                # Don't raise error here, databases will be created on-demand
-                return
+                if railway_volume_path:
+                    # On Railway, the volume will be mounted at runtime, so directory creation failure is expected
+                    logger.info(f"Railway volume directory will be mounted at runtime: {database_dir}")
+                else:
+                    logger.warning(f"Could not create database directory: {e}")
+                    # For local environments, this is more serious
+                    return
         
+        # Register database paths regardless of directory existence (Railway will mount at runtime)
         for db_key, config in self.DATABASE_CONFIGS.items():
             db_path = database_dir / config['filename']
+            self._database_paths[db_key] = db_path
             if db_path.exists():
-                self._database_paths[db_key] = db_path
-                logger.debug(f"Found database: {db_key} at {db_path}")
+                logger.debug(f"Found existing database: {db_key} at {db_path}")
             else:
-                # In production, we'll create databases on-demand
-                # Store the expected path even if file doesn't exist yet
-                self._database_paths[db_key] = db_path
                 logger.info(f"Database path registered for on-demand creation: {db_key} at {db_path}")
+        
+        # Store the database directory for future reference
+        self._database_dir = database_dir
     
     def get_database_path(self, database_key: str) -> Path:
         """
@@ -315,7 +331,10 @@ def get_database_manager() -> DatabaseManager:
 
 def get_database_path(database_key: str) -> str:
     """
-    Convenience function to get a database path as string.
+    Get the path to a database as a string.
+    
+    This is the main entry point for getting database paths.
+    Automatically detects Railway volume environment.
     
     Args:
         database_key: Key for the database (e.g., 'mixpanel_data')
@@ -323,11 +342,26 @@ def get_database_path(database_key: str) -> str:
     Returns:
         String path to the database file
         
-    Example:
-        db_path = get_database_path('mixpanel_data')
-        conn = sqlite3.connect(db_path)
+    Raises:
+        DatabasePathError: If database key is invalid
     """
-    return get_database_manager().get_database_path_str(database_key)
+    global _db_manager
+    
+    # Check if we're in Railway environment
+    railway_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+    
+    # Force reinitialization if Railway environment detected and manager not using volume
+    if railway_volume_path:
+        if (_db_manager is None or 
+            not hasattr(_db_manager, '_database_dir') or 
+            str(_db_manager._database_dir) != railway_volume_path):
+            logger.info(f"Initializing database manager for Railway volume: {railway_volume_path}")
+            _db_manager = DatabaseManager()
+    elif _db_manager is None:
+        # First time initialization for local environment
+        _db_manager = DatabaseManager()
+    
+    return str(_db_manager.get_database_path(database_key))
 
 
 def get_database_connection(database_key: str, **kwargs):
