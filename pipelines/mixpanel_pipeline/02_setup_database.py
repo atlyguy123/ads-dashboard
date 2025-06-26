@@ -36,15 +36,22 @@ logger = logging.getLogger(__name__)
 
 # Configuration - Use centralized database path discovery
 DATABASE_PATH = Path(get_database_path('mixpanel_data'))
-# Find project root for schema path
-project_root = DATABASE_PATH.parent.parent  # database is in project root, so go up one more level
-SCHEMA_PATH = project_root / "database" / "schema.sql"
+
+# Schema path resolution - handle both local and Railway environments
+if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+    # Railway: schema file is in the deployed app directory, not the volume
+    SCHEMA_PATH = Path("/app/database/schema.sql")
+else:
+    # Local: schema file is relative to project root
+    project_root = Path(__file__).resolve().parent.parent.parent
+    SCHEMA_PATH = project_root / "database" / "schema.sql"
 
 # Debug logging for path resolution
 logger.info(f"Script location: {Path(__file__)}")
 logger.info(f"Current working directory: {Path.cwd()}")
-logger.info(f"Resolved project root: {project_root}")
+logger.info(f"Railway volume path: {os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'Not set (local mode)')}")
 logger.info(f"Schema path: {SCHEMA_PATH}")
+logger.info(f"Schema file exists: {SCHEMA_PATH.exists()}")
 logger.info(f"Database path: {DATABASE_PATH}")
 
 # Expected schema structure for validation
@@ -519,6 +526,12 @@ def drop_mixpanel_tables(conn: sqlite3.Connection):
 def initialize_database_from_schema(conn: sqlite3.Connection):
     """Initialize database by executing the authoritative schema (CREATE IF NOT EXISTS for existing tables)"""
     logger.info("Initializing database from authoritative schema...")
+    
+    # Check if schema file exists before attempting to read it
+    if not SCHEMA_PATH.exists():
+        raise FileNotFoundError(f"Schema file not found at {SCHEMA_PATH}")
+    
+    logger.info(f"Found schema file at: {SCHEMA_PATH}")
     
     cursor = conn.cursor()
     
