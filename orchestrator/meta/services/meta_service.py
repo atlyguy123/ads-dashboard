@@ -402,7 +402,7 @@ def fetch_meta_data_sync(start_date, end_date, time_increment, fields=None, brea
         # Make initial request
         query_string = urllib.parse.urlencode(params, doseq=True)
         logger.debug(f'Meta API URL: {api_url}?{query_string}')
-        response = requests.get(api_url, params=params)
+        response = requests.get(api_url, params=params, timeout=30)
         response.raise_for_status()  # Check for HTTP errors
         
         data = response.json()
@@ -414,7 +414,7 @@ def fetch_meta_data_sync(start_date, end_date, time_increment, fields=None, brea
             
             # Follow pagination to get all results
             while 'paging' in data and 'next' in data['paging']:
-                response = requests.get(data['paging']['next'])
+                response = requests.get(data['paging']['next'], timeout=30)
                 response.raise_for_status()
                 data = response.json()
                 

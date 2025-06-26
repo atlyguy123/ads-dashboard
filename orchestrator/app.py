@@ -1615,11 +1615,16 @@ def catch_all(path):
     if path.startswith('api/'):
         return "API endpoint not found", 404
     
+    # For any ads-dashboard sub-routes, serve the React app
+    if path.startswith('ads-dashboard'):
+        return send_from_directory('dashboard/static', 'index.html')
+    
     # Don't intercept static file routes - let them be handled by their specific routes
     # The static file routes are defined above and should handle these paths
     
-    # Serve the React app for all other routes
-    return send_from_directory('dashboard/static', 'index.html')
+    # For all other routes, redirect to ads-dashboard to maintain consistency
+    from flask import redirect
+    return redirect('/ads-dashboard')
 
 if __name__ == '__main__':
     # Initialize database structure if needed (especially for Heroku)
