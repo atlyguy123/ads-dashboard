@@ -193,6 +193,14 @@ class DatabaseManager:
         
         # Store the database directory for future reference
         self._database_dir = database_dir
+        
+        # Health logging: Confirm the resolved database directory for debugging
+        logger.info(f"✅ Database manager initialized with directory: {database_dir}")
+        if railway_volume_path:
+            logger.info(f"🚀 Using Railway persistent volume - data will survive restarts!")
+        else:
+            logger.info(f"💻 Using local development directory")
+        logger.info(f"📊 Registered {len(self._database_paths)} database(s): {list(self._database_paths.keys())}")
     
     def get_database_path(self, database_key: str) -> Path:
         """
@@ -242,6 +250,7 @@ class DatabaseManager:
         """
         Get a database connection with automatic cleanup.
         Creates database file if it doesn't exist.
+        Optimized for Railway volume storage with WAL mode and thread safety.
         
         Args:
             database_key: Key for the database
@@ -257,7 +266,7 @@ class DatabaseManager:
         """
         db_path = self.get_database_path(database_key)
         
-        # Ensure database directory exists
+        # Ensure database directory exists (safe: volume present at runtime)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
         conn = None
@@ -269,9 +278,22 @@ class DatabaseManager:
                 # Touch the file to create it
                 db_path.touch()
             
-            conn = sqlite3.connect(str(db_path), **kwargs)
-            # Enable foreign key constraints
-            conn.execute("PRAGMA foreign_keys = ON")
+            # Optimized connection settings for Railway volumes
+            conn = sqlite3.connect(
+                str(db_path),
+                timeout=30,                    # 30 second timeout for network filesystems
+                isolation_level=None,          # Enable autocommit mode
+                check_same_thread=False,       # Safe for async/threaded environments
+                **kwargs
+            )
+            
+            # Enable critical SQLite optimizations for Railway volumes
+            conn.execute("PRAGMA foreign_keys = ON")        # Enforce referential integrity
+            conn.execute("PRAGMA journal_mode = WAL")       # Write-Ahead Logging for crash safety
+            conn.execute("PRAGMA synchronous = NORMAL")     # Good balance of safety vs performance
+            conn.execute("PRAGMA cache_size = -64000")      # 64MB cache for better performance
+            conn.execute("PRAGMA temp_store = MEMORY")      # Store temp tables in memory
+            
             yield conn
         except Exception as e:
             if conn:
