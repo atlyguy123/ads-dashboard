@@ -525,25 +525,6 @@ const DataPipelinePage = () => {
         return newStates;
       });
       
-      // Capture and store timestamps for completed modules
-      if (frontendStatus === 'complete' && data.timestamp) {
-        console.log(`⏰ Storing completion timestamp for ${stepId}: ${data.timestamp}`);
-        setModuleTimestamps(prev => {
-          const newTimestamps = { 
-            ...prev, 
-            [stepId]: new Date(data.timestamp) 
-          };
-          console.log('📅 Updated module timestamps:', newTimestamps);
-          
-          // Trigger a save to persist the timestamp immediately
-          setTimeout(() => {
-            savePipelineData();
-          }, 100);
-          
-          return newTimestamps;
-        });
-      }
-      
       // Update current module
       if (frontendStatus === 'running') {
         console.log(`▶️  Setting current module to: ${stepId}`);

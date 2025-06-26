@@ -31,34 +31,20 @@ def run_daily_pipeline():
         # Initialize pipeline runner
         runner = PipelineRunner()
         
-        # IMPORTANT: Reset pipeline state before running to ensure clean start
-        logger.info("🧹 HEROKU SCHEDULER: Resetting pipeline state for clean start...")
-        reset_success, reset_message = runner.reset_all_steps('master_pipeline')
-        
-        if reset_success:
-            logger.info(f"✅ HEROKU SCHEDULER: Pipeline reset successful - {reset_message}")
-        else:
-            logger.warning(f"⚠️ HEROKU SCHEDULER: Pipeline reset failed - {reset_message}")
-            # Continue anyway - reset failure shouldn't stop the pipeline
-        
         # Run the master pipeline
-        logger.info("🚀 HEROKU SCHEDULER: Starting master pipeline execution...")
         success, message = runner.run_pipeline('master_pipeline')
         
         if success:
-            logger.info("✅ HEROKU SCHEDULER: Daily master pipeline started successfully")
-            logger.info("   Pipeline is now running in background - check dashboard for progress")
-            print("SUCCESS: Daily pipeline started")
+            logger.info("✅ HEROKU SCHEDULER: Daily master pipeline completed successfully")
+            print("SUCCESS: Daily pipeline completed")
             sys.exit(0)
         else:
-            logger.error(f"❌ HEROKU SCHEDULER: Daily master pipeline failed to start: {message}")
+            logger.error(f"❌ HEROKU SCHEDULER: Daily master pipeline failed: {message}")
             print(f"FAILED: {message}")
             sys.exit(1)
             
     except Exception as e:
         logger.error(f"❌ HEROKU SCHEDULER: Error running daily pipeline: {e}")
-        import traceback
-        logger.error(f"   Traceback: {traceback.format_exc()}")
         print(f"ERROR: {e}")
         sys.exit(1)
 
