@@ -26,6 +26,11 @@ except ImportError:
     HAS_POSTGRES = False
     psycopg2 = None
 
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
+
 # FIXED: Load environment variables from project root (same fix as meta_service.py)
 project_root = Path(__file__).resolve().parent.parent.parent
 env_file = project_root / '.env'
@@ -75,9 +80,9 @@ def get_database_connection():
         return conn, 'postgres'
     else:
         logger.info("Using SQLite database (local mode)")
-        # Use local SQLite database for testing
-        db_path = project_root / "database" / "raw_data.db"
-        db_path.parent.mkdir(exist_ok=True)
+        # Use centralized database path discovery for raw_data.db
+        db_path = Path(get_database_path('raw_data'))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         
         conn = sqlite3.connect(str(db_path))
         return conn, 'sqlite'

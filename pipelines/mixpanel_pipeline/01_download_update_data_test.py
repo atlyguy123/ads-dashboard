@@ -75,8 +75,8 @@ def get_database_connection():
         return conn, 'postgres'
     else:
         logger.info("Using SQLite database (local mode)")
-        # Use local SQLite database for testing
-        db_path = project_root / "database" / "raw_data.db"
+        # Use centralized database path discovery for raw_data.db
+        db_path = Path(get_database_path('raw_data'))
         db_path.parent.mkdir(exist_ok=True)
         
         conn = sqlite3.connect(str(db_path))

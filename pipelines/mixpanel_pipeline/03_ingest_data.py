@@ -85,9 +85,8 @@ def get_raw_data_connection():
         return conn, 'postgres'
     else:
         logger.info("Using SQLite for raw data (local mode)")
-        # Use local SQLite database for testing
-        project_root = DATABASE_PATH.parent.parent  # Go up from database directory
-        db_path = project_root / "database" / "raw_data.db"
+        # Use centralized database path discovery for raw_data.db
+        db_path = Path(get_database_path('raw_data'))
         
         if not db_path.exists():
             raise FileNotFoundError(f"Raw data database not found at {db_path}. Run Module 1 first.")
@@ -178,8 +177,7 @@ def validate_prerequisites():
         if not DATABASE_URL:
             raise ValueError("DATABASE_URL environment variable not set but PostgreSQL mode detected")
     else:
-        project_root = DATABASE_PATH.parent.parent
-        raw_db_path = project_root / "database" / "raw_data.db"
+        raw_db_path = Path(get_database_path('raw_data'))
         if not raw_db_path.exists():
             raise FileNotFoundError(f"Raw data database not found at {raw_db_path}. Run Module 1 first.")
     
