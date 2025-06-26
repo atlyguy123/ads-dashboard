@@ -11,8 +11,8 @@
 
 # Environment optimizations
 [build]
-  # Ensure proper Python environment
-  buildCommand = "pip install -r requirements.txt"
+  # Build React frontend with relative API URL, then install Python dependencies
+  buildCommand = "cd orchestrator/dashboard/client && REACT_APP_API_URL='' npm run build && cd ../../../ && pip install -r requirements.txt"
 
 # Service configuration
 [service]

@@ -59,13 +59,12 @@ app.register_blueprint(debug_bp)
 app.register_blueprint(meta_bp)
 
 # Enable CORS for all routes to handle cross-origin requests
-# Allow Heroku domains in production
 allowed_origins = config.ALLOWED_ORIGINS.copy()
-if config.is_production and config.HEROKU_APP_NAME:
-    allowed_origins.extend([
-        f'https://{config.HEROKU_APP_NAME}.herokuapp.com',
-        f'http://{config.HEROKU_APP_NAME}.herokuapp.com'
-    ])
+
+# Add Railway domain if running on Railway
+railway_public_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+if railway_public_domain:
+    allowed_origins.append(f'https://{railway_public_domain}')
 
 CORS(app, origins=allowed_origins, 
      allow_headers=['Content-Type', 'Authorization'], 
