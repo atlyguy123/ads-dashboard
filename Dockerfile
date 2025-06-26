@@ -21,6 +21,10 @@ COPY . .
 # Create database directory for persistent volume mounting
 RUN mkdir -p /app/database
 
+# Copy schema file to a safe location (not overwritten by volume mount)
+# The volume will mount at /app/database/ and overwrite the copied schema.sql
+RUN cp /app/database/schema.sql /app/schema.sql
+
 # Set environment variables
 ENV FLASK_ENV=production
 ENV HOST=0.0.0.0

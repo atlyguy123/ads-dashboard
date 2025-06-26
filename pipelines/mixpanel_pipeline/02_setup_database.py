@@ -39,8 +39,9 @@ DATABASE_PATH = Path(get_database_path('mixpanel_data'))
 
 # Schema path resolution - handle both local and Railway environments
 if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
-    # Railway: schema file is in the deployed app directory, not the volume
-    SCHEMA_PATH = Path("/app/database/schema.sql")
+    # Railway: Schema file is copied to /app/schema.sql by Dockerfile to avoid volume overwrite
+    # The volume mount at /app/database/ would overwrite the original schema.sql
+    SCHEMA_PATH = Path("/app/schema.sql")
 else:
     # Local: schema file is relative to project root
     project_root = Path(__file__).resolve().parent.parent.parent
