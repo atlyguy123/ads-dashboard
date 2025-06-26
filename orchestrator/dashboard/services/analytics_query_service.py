@@ -2425,3 +2425,249 @@ class AnalyticsQueryService:
             logger.error(f"Error getting earliest meta date: {e}", exc_info=True)
             # Return fallback date
             return '2025-01-01'
+
+    def get_available_date_range(self) -> Dict[str, Any]:
+        """Get available date range from analytics data"""
+        try:
+            logger.info("Getting available date range for analytics data")
+            earliest_date = self.get_earliest_meta_date()
+            latest_date = datetime.now().strftime('%Y-%m-%d')
+            
+            return {
+                'success': True,
+                'data': {
+                    'earliest_date': earliest_date,
+                    'latest_date': latest_date
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting available date range: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'data': {
+                    'earliest_date': '2025-01-01',
+                    'latest_date': datetime.now().strftime('%Y-%m-%d')
+                }
+            }
+
+    def get_segment_performance(self, filters: Dict[str, Any], sort_column: str = 'trial_conversion_rate', 
+                              sort_direction: str = 'desc') -> Dict[str, Any]:
+        """
+        Get segment performance data for conversion rate analysis
+        
+        Returns unique segments based on conversion rate cohort properties:
+        - product_id, price_bucket, store, economic_tier, country, region
+        - Shows user count, conversion rates, and accuracy level for each segment
+        """
+        try:
+            logger.info(f"Getting segment performance data with filters: {filters}")
+            
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Build the base query to get unique segments
+                # Group by the key segment properties used in conversion rate calculation
+                base_query = """
+                SELECT 
+                    upm.product_id,
+                    upm.store,
+                    u.country,
+                    u.region,
+                    upm.price_bucket,
+                    upm.accuracy_score,
+                    COUNT(DISTINCT upm.distinct_id) as user_count,
+                    AVG(upm.trial_conversion_rate) as trial_conversion_rate,
+                    AVG(upm.trial_converted_to_refund_rate) as trial_converted_to_refund_rate,
+                    AVG(upm.initial_purchase_to_refund_rate) as initial_purchase_to_refund_rate,
+                    MIN(upm.credited_date) as earliest_credited_date,
+                    MAX(upm.credited_date) as latest_credited_date
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE
+                  AND upm.trial_conversion_rate IS NOT NULL
+                  AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                  AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                """
+                
+                # Add filters
+                filter_conditions = []
+                params = []
+                
+                if filters.get('product_id'):
+                    filter_conditions.append("upm.product_id = ?")
+                    params.append(filters['product_id'])
+                    
+                if filters.get('store'):
+                    filter_conditions.append("upm.store = ?")
+                    params.append(filters['store'])
+                    
+                if filters.get('country'):
+                    filter_conditions.append("u.country = ?")
+                    params.append(filters['country'])
+                    
+                if filters.get('region'):
+                    filter_conditions.append("u.region = ?")
+                    params.append(filters['region'])
+                    
+                if filters.get('accuracy_score'):
+                    # Handle comma-separated accuracy scores for multi-select
+                    accuracy_scores = [score.strip() for score in filters['accuracy_score'].split(',') if score.strip()]
+                    if accuracy_scores:
+                        placeholders = ','.join(['?'] * len(accuracy_scores))
+                        filter_conditions.append(f"upm.accuracy_score IN ({placeholders})")
+                        params.extend(accuracy_scores)
+                
+                # Add the filter conditions to the query
+                if filter_conditions:
+                    base_query += " AND " + " AND ".join(filter_conditions)
+                
+                # Group by segment properties
+                base_query += """
+                GROUP BY 
+                    upm.product_id,
+                    upm.store,
+                    u.country,
+                    u.region,
+                    upm.price_bucket,
+                    upm.accuracy_score
+                """
+                
+                # Add having clause for min user count filter
+                if filters.get('min_user_count', 0) > 0:
+                    base_query += " HAVING COUNT(DISTINCT upm.distinct_id) >= ?"
+                    params.append(filters['min_user_count'])
+                
+                # Add ordering
+                valid_sort_columns = [
+                    'product_id', 'store', 'country', 'region',
+                    'user_count', 'trial_conversion_rate', 'trial_converted_to_refund_rate',
+                    'initial_purchase_to_refund_rate', 'accuracy_score', 'price_bucket'
+                ]
+                
+                if sort_column in valid_sort_columns:
+                    order_direction = 'DESC' if sort_direction.lower() == 'desc' else 'ASC'
+                    base_query += f" ORDER BY {sort_column} {order_direction}"
+                else:
+                    base_query += " ORDER BY trial_conversion_rate DESC"
+                
+                # Limit results to prevent overwhelming response
+                base_query += " LIMIT 1000"
+                
+                logger.info(f"Executing segment query with {len(params)} parameters")
+                cursor.execute(base_query, params)
+                segment_records = [dict(row) for row in cursor.fetchall()]
+                
+                # Get filter options for the UI dropdowns
+                filter_options = self._get_segment_filter_options(cursor)
+                
+                logger.info(f"✅ Retrieved {len(segment_records)} segments")
+                
+                return {
+                    'success': True,
+                    'data': {
+                        'segments': segment_records,
+                        'filter_options': filter_options
+                    },
+                    'metadata': {
+                        'total_segments': len(segment_records),
+                        'filters_applied': filters,
+                        'sort_column': sort_column,
+                        'sort_direction': sort_direction,
+                        'generated_at': datetime.now().isoformat()
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting segment performance data: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'data': {
+                    'segments': [],
+                    'filter_options': {}
+                }
+            }
+    
+    def _get_segment_filter_options(self, cursor) -> Dict[str, List[Any]]:
+        """Get available filter options for segment analysis dropdowns"""
+        try:
+            filter_options = {
+                'product_ids': [],
+                'stores': [],
+                'countries': [],
+                'regions': [],
+                'accuracy_scores': []
+            }
+            
+            # Get unique product IDs
+            cursor.execute("""
+                SELECT DISTINCT upm.product_id 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE AND upm.product_id IS NOT NULL
+                ORDER BY upm.product_id
+            """)
+            filter_options['product_ids'] = [row[0] for row in cursor.fetchall()]
+            
+            # Get unique stores
+            cursor.execute("""
+                SELECT DISTINCT upm.store 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE AND upm.store IS NOT NULL
+                ORDER BY upm.store
+            """)
+            filter_options['stores'] = [row[0] for row in cursor.fetchall()]
+            
+            # Get unique countries
+            cursor.execute("""
+                SELECT DISTINCT u.country 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE AND u.country IS NOT NULL
+                ORDER BY u.country
+            """)
+            filter_options['countries'] = [row[0] for row in cursor.fetchall()]
+            
+            # Get unique regions
+            cursor.execute("""
+                SELECT DISTINCT u.region 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE AND u.region IS NOT NULL
+                ORDER BY u.region
+            """)
+            filter_options['regions'] = [row[0] for row in cursor.fetchall()]
+            
+            # Get unique accuracy scores
+            cursor.execute("""
+                SELECT DISTINCT upm.accuracy_score 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE AND upm.accuracy_score IS NOT NULL
+                ORDER BY 
+                    CASE upm.accuracy_score
+                        WHEN 'very_high' THEN 1
+                        WHEN 'high' THEN 2
+                        WHEN 'medium' THEN 3
+                        WHEN 'low' THEN 4
+                        WHEN 'default' THEN 5
+                        ELSE 6
+                    END
+            """)
+            filter_options['accuracy_scores'] = [row[0] for row in cursor.fetchall()]
+            
+            return filter_options
+            
+        except Exception as e:
+            logger.error(f"Error getting segment filter options: {e}", exc_info=True)
+            return {
+                'product_ids': [],
+                'stores': [],
+                'countries': [],
+                'regions': [],
+                'accuracy_scores': []
+            }

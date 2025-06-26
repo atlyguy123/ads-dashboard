@@ -291,6 +291,24 @@ class DashboardApiService {
       };
     }
   }
+
+  /**
+   * Get available date range for analytics data
+   */
+  async getAvailableDateRangeAnalytics() {
+    return this.makeRequest('/analytics/date-range');
+  }
+
+  /**
+   * Get segment performance data for conversion rate analysis
+   */
+  async getSegmentPerformance(params) {
+    console.log('🔍 SEGMENT API - getSegmentPerformance called with params:', params);
+    return this.makeRequest('/analytics/segments', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
 }
 
 // Create and export a singleton instance

@@ -548,31 +548,90 @@ def get_user_details_for_tooltip():
 
 @dashboard_bp.route('/analytics/date-range', methods=['GET'])
 def get_available_date_range():
-    """Get the available date range from meta analytics database"""
+    """Get the available date range from the analytics data"""
     try:
-        # Get earliest date from meta analytics database
         with analytics_lock:
-            earliest_date = analytics_service.get_earliest_meta_date()
-        
-        # Get today's date as the latest available date
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        return jsonify({
-            'success': True,
-            'data': {
-                'earliest_date': earliest_date,
-                'latest_date': today
-            },
-            'timestamp': datetime.now().isoformat()
-        })
-        
+            logger.info("Getting available date range for analytics data")
+            result = analytics_service.get_available_date_range()
+            
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
     except Exception as e:
-        logger.error(f"Error getting available date range: {str(e)}", exc_info=True)
+        logger.error(f"Error getting date range: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e),
-            'data': {
-                'earliest_date': '2025-01-01',  # Fallback
-                'latest_date': datetime.now().strftime('%Y-%m-%d')
-            }
+            'error': str(e)
+        }), 500
+
+@dashboard_bp.route('/analytics/segments', methods=['POST'])
+def get_segment_performance():
+    """
+    Get segment performance data for conversion rate analysis
+    
+    Expected JSON payload:
+    {
+        "product_id": "optional_product_filter",
+        "store": "optional_store_filter", 
+        "economic_tier": "optional_tier_filter",
+        "country": "optional_country_filter",
+        "region": "optional_region_filter",
+        "accuracy_score": "optional_accuracy_filter",
+        "min_user_count": 0,
+        "sort_column": "trial_conversion_rate",
+        "sort_direction": "desc"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        
+        logger.info(f"Getting segment performance data with filters: {data}")
+        
+        # Extract filters
+        filters = {
+            'product_id': data.get('product_id', ''),
+            'store': data.get('store', ''),
+            'economic_tier': data.get('economic_tier', ''),
+            'country': data.get('country', ''),
+            'region': data.get('region', ''),
+            'accuracy_score': data.get('accuracy_score', ''),
+            'min_user_count': data.get('min_user_count', 0)
+        }
+        
+        # Extract sorting
+        sort_column = data.get('sort_column', 'trial_conversion_rate')
+        sort_direction = data.get('sort_direction', 'desc')
+        
+        # Validate sort column
+        valid_sort_columns = [
+            'product_id', 'store', 'economic_tier', 'country', 'region',
+            'user_count', 'trial_conversion_rate', 'trial_converted_to_refund_rate',
+            'initial_purchase_to_refund_rate', 'accuracy_score'
+        ]
+        
+        if sort_column not in valid_sort_columns:
+            sort_column = 'trial_conversion_rate'
+            
+        if sort_direction not in ['asc', 'desc']:
+            sort_direction = 'desc'
+        
+        with analytics_lock:
+            result = analytics_service.get_segment_performance(
+                filters=filters,
+                sort_column=sort_column,
+                sort_direction=sort_direction
+            )
+            
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting segment performance: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500

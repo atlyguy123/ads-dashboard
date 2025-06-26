@@ -11,8 +11,10 @@ import {
   Eye,
   ChevronDown,
   ChevronUp,
-  AlertTriangle
+  AlertTriangle,
+  UserCheck
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { DashboardGrid } from '../components/DashboardGrid';
 
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
@@ -25,6 +27,8 @@ import { AVAILABLE_COLUMNS, migrateColumnOrder, migrateColumnVisibility } from '
 import { useColumnValidation } from '../hooks/useColumnValidation';
 
 export const Dashboard = () => {
+  const navigate = useNavigate();
+  
   // Main dashboard state
   const [loading, setLoading] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
@@ -693,17 +697,15 @@ export const Dashboard = () => {
             </div>
             
             <div className="flex items-center space-x-6">
-              {/* Sort Status Indicator */}
-              <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
-                <TrendingUp size={14} />
-                <span>Sorted by:</span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {getSortColumnLabel()}
-                </span>
-                <span className="text-gray-500">
-                  ({sortConfig.direction === 'asc' ? 'Low to High' : 'High to Low'})
-                </span>
-              </div>
+              {/* Segment Analysis Button */}
+              <button
+                onClick={() => navigate('/segment-analysis')}
+                className="flex items-center space-x-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-blue-500 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Segment Performance Analysis"
+              >
+                <UserCheck className="h-4 w-4" />
+                <span className="text-sm">Segments</span>
+              </button>
 
               {/* Column Visibility Control */}
               <div className="relative column-selector-container">

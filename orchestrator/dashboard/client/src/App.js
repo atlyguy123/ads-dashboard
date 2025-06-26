@@ -3,6 +3,7 @@ import { Routes, Route, Link } from 'react-router-dom';
 import { Settings, ChevronDown } from 'lucide-react';
 import './App.css';
 import { Dashboard } from './pages/Dashboard';
+import { SegmentPerformancePage } from './pages/SegmentPerformancePage';
 import { MixpanelDebugPage } from './pages/MixpanelDebugPage';
 import { MetaDebugger } from './pages/MetaDebugger';
 import CohortAnalyzerPage from './pages/CohortAnalyzerPage';
@@ -86,6 +87,7 @@ function App() {
       <div className="w-full">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/segment-analysis" element={<SegmentPerformancePage />} />
           <Route path="/cohort-analyzer" element={<CohortAnalyzerPage />} />
           <Route path="/cohort-analyzer-v3" element={<CohortAnalyzerV3RefactoredPage />} />
           <Route path="/conversion-probability" element={<ConversionProbabilityPage />} />
