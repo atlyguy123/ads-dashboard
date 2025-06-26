@@ -19,18 +19,21 @@ database/
 .idea/
 *.log
 
-# Node modules (if any)
-node_modules/
+# Node modules (source files, not build)
 orchestrator/dashboard/client/node_modules/
+orchestrator/dashboard/client/src/
+orchestrator/dashboard/client/public/
+orchestrator/dashboard/client/package*.json
+orchestrator/dashboard/client/tailwind.config.js
+orchestrator/dashboard/client/postcss.config.js
 
-# Build artifacts
-orchestrator/dashboard/static/
+# Build artifacts (exclude build tools, keep final builds)
 *.egg-info/
 build/
 dist/
 
-# Large analysis files
-*.json
+# Large analysis files (but keep React build files)
+data/*.json
 !requirements.txt
 !package.json
 !railway.json
