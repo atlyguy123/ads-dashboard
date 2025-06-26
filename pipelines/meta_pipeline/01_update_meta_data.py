@@ -165,6 +165,88 @@ class MetaDataUpdater:
             logger.error(f"❌ Error checking most recent date: {e}")
             return None
     
+    def get_table_latest_date(self, table_name: str) -> Optional[str]:
+        """
+        Find the most recent date in a specific table
+        
+        Args:
+            table_name: Name of the table to check
+            
+        Returns:
+            Most recent date as string (YYYY-MM-DD) or None if no data exists
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute(f'SELECT MAX(date) FROM {table_name}')
+            result = cursor.fetchone()
+            table_max_date = result[0] if result and result[0] else None
+            
+            conn.close()
+            
+            if table_max_date:
+                logger.info(f"📅 {table_name}: Most recent date = {table_max_date}")
+            else:
+                logger.info(f"📅 {table_name}: No data found")
+                
+            return table_max_date
+            
+        except sqlite3.OperationalError as e:
+            logger.warning(f"⚠️  Table {table_name} not found or accessible: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error checking latest date in {table_name}: {e}")
+            return None
+    
+    def calculate_dates_to_update_for_table(self, table_latest_date: Optional[str], today: str) -> List[str]:
+        """
+        Calculate which dates need to be updated for a specific table
+        
+        Args:
+            table_latest_date: Most recent date in the specific table, or None if table is empty
+            today: Today's date (YYYY-MM-DD)
+            
+        Returns:
+            List of dates to update for this table
+        """
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        if not table_latest_date:
+            # If no data exists, start from May 1st, 2025
+            start_date = '2025-05-01'
+            logger.info(f"📅 No existing data - will fill from {start_date} to {today}")
+            
+            # Generate all dates from start_date to today
+            dates_to_update = []
+            current_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(today, '%Y-%m-%d')
+            
+            while current_date <= end_date:
+                dates_to_update.append(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+        else:
+            logger.info(f"📅 Finding missing dates from {table_latest_date} to {today}")
+            
+            # Generate all missing dates + always include yesterday for refresh
+            all_dates = []
+            current_date = datetime.strptime(table_latest_date, '%Y-%m-%d')
+            end_date = datetime.strptime(today, '%Y-%m-%d')
+            
+            while current_date <= end_date:
+                all_dates.append(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+            
+            # Ensure yesterday is always included for data refresh
+            dates_to_update = list(set(all_dates + [yesterday]))
+            dates_to_update.sort()  # Keep chronological order
+        
+        logger.info(f"📊 Table needs {len(dates_to_update)} dates updated")
+        if dates_to_update:
+            logger.debug(f"📋 Date range: {dates_to_update[0]} to {dates_to_update[-1]}")
+        
+        return dates_to_update
+
     def calculate_dates_to_update(self, most_recent_date: Optional[str] = None) -> List[str]:
         """
         Calculate which dates need to be updated
@@ -688,7 +770,7 @@ class MetaDataUpdater:
     
     def update_meta_data(self) -> bool:
         """
-        Main function to update Meta data from most recent date to today
+        Main function to update Meta data - each table checked individually for its latest date
         
         Returns:
             True if update was successful, False otherwise
@@ -699,18 +781,7 @@ class MetaDataUpdater:
         start_time = time.time()
         
         try:
-            # Step 1: Find most recent data in database
-            most_recent_date = self.get_most_recent_date_in_db()
-            
-            # Step 2: Calculate dates to update
-            dates_to_update = self.calculate_dates_to_update(most_recent_date)
-            
-            if not dates_to_update:
-                logger.info("✅ No dates to update - database is already current")
-                return True
-            
-            # Step 3: Define table configurations
-            # Process tables sequentially: no breakdown -> country -> device
+            # Define table configurations
             table_configs = [
                 {
                     'table': 'ad_performance_daily',
@@ -735,9 +806,10 @@ class MetaDataUpdater:
                 # }
             ]
             
-            # Step 4: Process each table
+            # Process each table individually
             total_success = 0
             total_requests = 0
+            today = datetime.now().strftime('%Y-%m-%d')
             
             for table_config in table_configs:
                 table_name = table_config['table']
@@ -748,7 +820,19 @@ class MetaDataUpdater:
                 logger.info(f"🔍 Breakdown: {description}")
                 logger.info("-" * 50)
                 
-                # Process dates in chunks of 1 day to manage API rate limits
+                # Step 1: Find most recent data in THIS specific table
+                table_latest_date = self.get_table_latest_date(table_name)
+                
+                # Step 2: Calculate dates to update for THIS specific table
+                dates_to_update = self.calculate_dates_to_update_for_table(table_latest_date, today)
+                
+                if not dates_to_update:
+                    logger.info(f"✅ No dates to update for {table_name} - already current")
+                    continue
+                
+                logger.info(f"📅 {table_name}: Will update {len(dates_to_update)} dates from {dates_to_update[0]} to {dates_to_update[-1]}")
+                
+                # Step 3: Process dates in chunks
                 chunk_size = 1
                 
                 for i in range(0, len(dates_to_update), chunk_size):
@@ -760,7 +844,7 @@ class MetaDataUpdater:
                     
                     logger.info(f"📡 REQUEST {total_requests}: {from_date} to {to_date}")
                     
-                    # Step 1: Fetch raw data
+                    # Fetch raw data
                     raw_records = self.fetch_meta_data(
                         from_date=from_date,
                         to_date=to_date,
@@ -771,14 +855,14 @@ class MetaDataUpdater:
                         logger.warning(f"   ⚠️  No data fetched")
                         continue
                     
-                    # Step 2: Process records
+                    # Process records
                     processed_records = self.process_meta_records(raw_records, breakdown_type)
                     
                     if not processed_records:
                         logger.warning(f"   ⚠️  No records processed")
                         continue
                     
-                    # Step 3: Log summary
+                    # Log summary
                     total_trials = sum(r.get('meta_trials', 0) for r in processed_records)
                     total_purchases = sum(r.get('meta_purchases', 0) for r in processed_records)
                     total_spend = sum(r.get('spend', 0) for r in processed_records)
@@ -789,7 +873,7 @@ class MetaDataUpdater:
                     logger.info(f"      Total trials: {total_trials}")
                     logger.info(f"      Total purchases: {total_purchases}")
                     
-                    # Step 4: Load to database
+                    # Load to database
                     loaded_count = self.load_data_to_table(processed_records, table_name)
                     
                     if loaded_count > 0:
@@ -798,7 +882,7 @@ class MetaDataUpdater:
                     else:
                         logger.warning(f"   ⚠️  FAILED: Could not load data")
                     
-                    # Rate limiting: 5-second delay between requests
+                    # Rate limiting
                     if i + chunk_size < len(dates_to_update):
                         logger.info("   ⏳ Waiting 5 seconds (rate limiting)...")
                         time.sleep(5)
@@ -806,7 +890,7 @@ class MetaDataUpdater:
                 logger.info(f"✅ Completed {table_name}")
                 logger.info("")
             
-            # Step 5: Final summary
+            # Final summary
             elapsed_time = time.time() - start_time
             success_rate = (total_success / total_requests * 100) if total_requests > 0 else 0
             
@@ -817,7 +901,6 @@ class MetaDataUpdater:
             logger.info(f"   Successful requests: {total_success}")
             logger.info(f"   Success rate: {success_rate:.1f}%")
             logger.info(f"   Elapsed time: {elapsed_time:.1f} seconds")
-            logger.info(f"   Date range updated: {dates_to_update[0]} to {dates_to_update[-1]}")
             
             return total_success > 0
             
