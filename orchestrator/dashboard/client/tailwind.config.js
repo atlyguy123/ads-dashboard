@@ -3,7 +3,7 @@ module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
   ],
-  darkMode: 'media', // or 'class' for manual dark mode toggling
+  darkMode: 'class', // Force dark mode by adding 'dark' class to HTML
   theme: {
     extend: {},
   },

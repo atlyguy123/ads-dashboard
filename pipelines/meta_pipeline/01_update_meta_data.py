@@ -127,10 +127,10 @@ class MetaDataUpdater:
             # Check all meta analytics tables
             tables = [
                 'ad_performance_daily',
-                # BREAKDOWN TABLES (commented out for now)
-                # 'ad_performance_daily_country',
+                # BREAKDOWN TABLES (now active to ensure they get updated)
+                'ad_performance_daily_country',
                 # 'ad_performance_daily_region', 
-                # 'ad_performance_daily_device'
+                'ad_performance_daily_device'
             ]
             
             most_recent_date = None
