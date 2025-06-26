@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
 class DashboardApiService {
   constructor() {
-    this.baseUrl = `${API_BASE_URL}/api/dashboard`;
+    this.baseUrl = API_BASE_URL;
   }
 
   async makeRequest(endpoint, options = {}) {
