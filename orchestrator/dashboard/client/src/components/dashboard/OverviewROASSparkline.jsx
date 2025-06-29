@@ -30,7 +30,7 @@ const OverviewROASSparkline = React.memo(({
   // Load overview ROAS chart data
   useEffect(() => {
     const loadChartData = async () => {
-      if (!dateRange?.start_date || !dateRange?.end_date) {
+      if (!dateRange?.end_date) {
         return;
       }
       
@@ -38,8 +38,13 @@ const OverviewROASSparkline = React.memo(({
       setError(null);
       
       try {
+        // Calculate 14 days ending at the end_date
+        const endDate = new Date(dateRange.end_date);
+        const startDate = new Date(endDate);
+        startDate.setDate(endDate.getDate() - 13); // 13 days back = 14 days total
+        
         const response = await dashboardApi.getOverviewROASChartData({
-          start_date: dateRange.start_date,
+          start_date: startDate.toISOString().split('T')[0],
           end_date: dateRange.end_date,
           breakdown: breakdown
         });
@@ -89,7 +94,11 @@ const OverviewROASSparkline = React.memo(({
   // Format date for tooltip
   const formatDate = (dateStr) => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric' 
+    });
   };
 
   // Format ROAS value
@@ -253,7 +262,7 @@ const OverviewROASSparkline = React.memo(({
                   Daily Spend: ${(parseFloat(dayData.rolling_1d_spend) || 0).toFixed(2)}
                 </div>
                 <div className="text-gray-300 text-xs">
-                  Daily Revenue: ${(parseFloat(dayData.rolling_1d_revenue) || 0).toFixed(2)}
+                  Daily Estimated Revenue: ${(parseFloat(dayData.rolling_1d_revenue) || 0).toFixed(2)}
                 </div>
               </>
             );

@@ -842,19 +842,20 @@ def dashboard_manifest():
     """Serve dashboard manifest.json"""
     return send_from_directory('dashboard/static', 'manifest.json')
 
+@app.route('/images/site.webmanifest')
+def dashboard_site_manifest():
+    """Serve dashboard site.webmanifest"""
+    return send_from_directory('dashboard/static/images', 'site.webmanifest')
+
 @app.route('/favicon.ico')
 def dashboard_favicon():
     """Serve dashboard favicon"""
-    # Return a simple 1x1 transparent PNG to avoid 404 errors
-    from flask import Response
-    import base64
-    
-    # 1x1 transparent PNG in base64
-    transparent_png = base64.b64decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77zgAAAABJRU5ErkJggg=='
-    )
-    
-    return Response(transparent_png, mimetype='image/png')
+    return send_from_directory('dashboard/static/images', 'favicon.ico')
+
+@app.route('/images/<path:filename>')
+def dashboard_images(filename):
+    """Serve dashboard image files (including favicons)"""
+    return send_from_directory('dashboard/static/images', filename)
 
 @app.route('/debug/static-files')
 def debug_static_files():

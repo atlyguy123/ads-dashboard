@@ -856,7 +856,14 @@ export const Dashboard = () => {
                     <Users className="h-8 w-8 text-purple-500" />
                     <div className="ml-4">
                       <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ROAS</p>
-                      <p className={`text-2xl font-bold ${roas >= 2 ? 'text-green-600' : roas >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      <p className={`text-2xl font-bold ${
+                        roas < 0.5 ? 'text-red-400' :
+                        roas >= 0.5 && roas < 0.75 ? 'text-orange-400' :
+                        roas >= 0.75 && roas < 1.0 ? 'text-yellow-400' :
+                        roas >= 1.0 && roas < 1.25 ? 'text-green-400' :
+                        roas >= 1.25 && roas < 1.5 ? 'text-blue-400' :
+                        'text-purple-400'
+                      }`}>
                         {roas.toFixed(2)}x
                       </p>
                     </div>
@@ -865,8 +872,8 @@ export const Dashboard = () => {
                     <OverviewROASSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
-                      width={120}
-                      height={40}
+                      width={180}
+                      height={60}
                     />
                   </div>
                 </div>
