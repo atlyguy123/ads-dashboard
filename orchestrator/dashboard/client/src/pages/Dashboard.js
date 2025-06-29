@@ -865,8 +865,8 @@ export const Dashboard = () => {
                     <OverviewROASSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
-                      width={120}
-                      height={40}
+                      width={160}
+                      height={50}
                     />
                   </div>
                 </div>

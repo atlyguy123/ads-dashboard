@@ -1632,7 +1632,40 @@ class AnalyticsQueryService:
             logger.error(f"Error calculating entity rates for {entity_type} {entity_id}: {e}")
             return 0.0, 0.0, 0.0
 
-    def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
+    def _calculate_rolling_metrics(self, data_by_date: Dict, current_date: datetime, rolling_window_days: int) -> Dict[str, float]:
+        """Calculate rolling metrics for a given date and window size"""
+        rolling_spend = 0
+        rolling_revenue = 0
+        rolling_conversions = 0
+        rolling_trials = 0
+        rolling_meta_trials = 0
+        
+        # Sum data over the rolling window
+        for j in range(rolling_window_days):
+            window_date = current_date - timedelta(days=j)
+            window_date_str = window_date.strftime('%Y-%m-%d')
+            if window_date_str in data_by_date:
+                window_data = data_by_date[window_date_str]
+                rolling_spend += window_data.get('spend', 0)
+                rolling_revenue += window_data.get('revenue', 0)
+                rolling_conversions += window_data.get('conversions', 0)
+                rolling_trials += window_data.get('trials', 0)
+                rolling_meta_trials += window_data.get('meta_trials', 0)
+        
+        # Calculate rolling ROAS
+        rolling_roas = rolling_revenue / rolling_spend if rolling_spend > 0 else 0.0
+        
+        return {
+            f'rolling_{rolling_window_days}d_roas': round(rolling_roas, 2),
+            f'rolling_{rolling_window_days}d_spend': rolling_spend,
+            f'rolling_{rolling_window_days}d_revenue': rolling_revenue,
+            f'rolling_{rolling_window_days}d_conversions': rolling_conversions,
+            f'rolling_{rolling_window_days}d_trials': rolling_trials,
+            f'rolling_{rolling_window_days}d_meta_trials': rolling_meta_trials,
+            'rolling_window_days': rolling_window_days
+        }
+
+    def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str, rolling_window_days: int = 1) -> Dict[str, Any]:
         """Get detailed daily metrics for sparkline charts - ALWAYS returns exactly 14 days ending on config.end_date"""
         try:
             # Check if this is a breakdown entity (format: "US_120217904661980178")
@@ -1642,7 +1675,7 @@ class AnalyticsQueryService:
                 # Parse breakdown entity ID
                 breakdown_value, parent_entity_id = entity_id.split('_', 1)
                 logger.info(f"📊 BREAKDOWN CHART: {breakdown_value} breakdown for {entity_type} {parent_entity_id}")
-                return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value)
+                return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value, rolling_window_days)
             
             # Regular entity chart data
             table_name = self.get_table_name(config.breakdown)
@@ -1651,8 +1684,8 @@ class AnalyticsQueryService:
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
             display_start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
             
-            # Calculate data fetch period: no additional days needed for 1-day rolling calculations
-            data_start_date = display_start_date  # Start from display period start
+            # Calculate data fetch period: additional days needed for rolling window calculations
+            data_start_date = display_start_date - timedelta(days=rolling_window_days-1)  # Extra days for rolling window
             
             # Calculate expanded date range for activity analysis (1 week before and after)
             expanded_start_date = display_start_date - timedelta(days=7)  # 1 week before display period
@@ -1757,12 +1790,13 @@ class AnalyticsQueryService:
             mixpanel_data = [dict(row) for row in cursor.fetchall()]
             mixpanel_conn.close()
             
-            # Generate ALL data fetch days (14 total display days), filling missing days with zeros
+            # Generate ALL data fetch days (14 display days + extra for rolling), filling missing days with zeros
             daily_data = {}
             current_date = data_start_date
+            total_data_days = 14 + (rolling_window_days - 1)  # Display days + extra for rolling window
             
-            # Initialize all 14 days with zero values and activity status
-            for i in range(14):
+            # Initialize all data days with zero values and activity status
+            for i in range(total_data_days):
                 date_str = current_date.strftime('%Y-%m-%d')
                 
                 # Determine if this day should be grey (inactive)
@@ -1876,47 +1910,36 @@ class AnalyticsQueryService:
                 
                 all_data.append(day_data)
             
-            # Calculate rolling 1-day ROAS for each day in the full dataset
+            # Calculate rolling metrics for each day in the full dataset
             for i, day_data in enumerate(all_data):
-                # Calculate rolling window (current day only)
-                rolling_days = [day_data]  # Only current day
+                current_date = datetime.strptime(day_data['date'], '%Y-%m-%d')
                 
-                # Sum spend and accuracy-adjusted revenue for the rolling window (just current day)
-                rolling_spend = day_data['daily_spend']
-                # Use accuracy-adjusted revenue from daily calculation for consistency
-                rolling_revenue = RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
-                    CalculationInput(raw_record={
-                        'estimated_revenue_usd': day_data['daily_estimated_revenue'],
-                        'mixpanel_trials_started': day_data['daily_mixpanel_trials'],
-                        'mixpanel_purchases': day_data['daily_mixpanel_purchases'],
-                        'meta_trials_started': day_data['daily_meta_trials'],
-                        'meta_purchases': day_data['daily_meta_purchases']
-                    })
-                )
-                rolling_conversions = day_data['daily_mixpanel_purchases']
-                rolling_trials = day_data['daily_mixpanel_trials']
-                rolling_meta_trials = day_data['daily_meta_trials']
+                # Create data lookup dictionary for rolling calculation
+                data_by_date = {d['date']: {
+                    'spend': d['daily_spend'],
+                    'revenue': RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
+                        CalculationInput(raw_record={
+                            'estimated_revenue_usd': d['daily_estimated_revenue'],
+                            'mixpanel_trials_started': d['daily_mixpanel_trials'],
+                            'mixpanel_purchases': d['daily_mixpanel_purchases'],
+                            'meta_trials_started': d['daily_meta_trials'],
+                            'meta_purchases': d['daily_meta_purchases']
+                        })
+                    ),
+                    'conversions': d['daily_mixpanel_purchases'],
+                    'trials': d['daily_mixpanel_trials'],
+                    'meta_trials': d['daily_meta_trials']
+                } for d in all_data}
                 
-                # Calculate rolling ROAS
-                if rolling_spend > 0:
-                    rolling_roas = rolling_revenue / rolling_spend
-                else:
-                    rolling_roas = 0.0
-                
-                # Add rolling metrics to day data
-                day_data['rolling_1d_roas'] = round(rolling_roas, 2)
-                day_data['rolling_1d_spend'] = rolling_spend
-                day_data['rolling_1d_revenue'] = rolling_revenue
-                day_data['rolling_1d_conversions'] = rolling_conversions
-                day_data['rolling_1d_trials'] = rolling_trials
-                day_data['rolling_1d_meta_trials'] = rolling_meta_trials
-                day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
+                # Use parametric rolling calculation
+                rolling_metrics = self._calculate_rolling_metrics(data_by_date, current_date, rolling_window_days)
+                day_data.update(rolling_metrics)
             
-            # Extract only the 14-day display period (no need to skip days for 1-day rolling)
+            # Extract only the 14-day display period
             chart_data = all_data[-14:]  # Return only the last 14 days for display
             
             logger.info(f"📊 CHART RESULT: {len(chart_data)} display days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
-            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for 1-day rolling averages")
+            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for {rolling_window_days}-day rolling averages")
             
             return {
                 'success': True,
@@ -1926,7 +1949,7 @@ class AnalyticsQueryService:
                 'date_range': f"{display_start_str} to {chart_end_date}",
                 'total_days': len(chart_data),
                 'period_info': f"14-day period ending {chart_end_date}",
-                'rolling_calculation_info': f"Used {len(all_data)}-day dataset for 1-day rolling averages",
+                'rolling_calculation_info': f"Used {len(all_data)}-day dataset for {rolling_window_days}-day rolling averages",
                 'activity_analysis': {
                     'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
                     'first_spend_date': first_spend_date,
@@ -1942,7 +1965,7 @@ class AnalyticsQueryService:
                 'error': str(e)
             }
     
-    def _get_breakdown_chart_data(self, config: QueryConfig, entity_type: str, parent_entity_id: str, breakdown_value: str) -> Dict[str, Any]:
+    def _get_breakdown_chart_data(self, config: QueryConfig, entity_type: str, parent_entity_id: str, breakdown_value: str, rolling_window_days: int = 1) -> Dict[str, Any]:
         """Get chart data for a specific breakdown value (e.g., US breakdown for a campaign)"""
         try:
             # Import BreakdownMappingService here to avoid circular imports
@@ -1967,10 +1990,10 @@ class AnalyticsQueryService:
             else:
                 raise ValueError(f"Breakdown chart data not supported for breakdown type: {config.breakdown}")
             
-            # Calculate date ranges (no extra days needed for 1-day rolling)
+            # Calculate date ranges (extra days needed for rolling window)
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
-            display_start_date = end_date - timedelta(days=13)
-            data_start_date = display_start_date  # No extra days for 1-day rolling
+            display_start_date = end_date - timedelta(days=13)  # Always show 14 days
+            data_start_date = display_start_date - timedelta(days=rolling_window_days-1)  # Extra days for rolling window
             expanded_start_date = display_start_date - timedelta(days=7)
             expanded_end_date = end_date + timedelta(days=7)
             
@@ -2702,7 +2725,7 @@ class AnalyticsQueryService:
                 'accuracy_scores': []
             }
 
-    def get_overview_roas_chart_data(self, start_date: str, end_date: str, breakdown: str = 'all') -> Dict[str, Any]:
+    def get_overview_roas_chart_data(self, start_date: str, end_date: str, breakdown: str = 'all', rolling_window_days: int = 1) -> Dict[str, Any]:
         """
         Get overview ROAS sparkline data for dashboard summary
         

@@ -131,7 +131,14 @@ const OverviewROASSparkline = React.memo(({
 
   // Render sparkline
   const padding = 4;
-  const values = chartData.map(d => parseFloat(d.rolling_1d_roas) || 0);
+        // Get dynamic field names based on rolling window
+      const rollingWindowDays = chartData[0]?.rolling_window_days || 1;
+      const roasField = `rolling_${rollingWindowDays}d_roas`;
+      const spendField = `rolling_${rollingWindowDays}d_spend`;
+      const revenueField = `rolling_${rollingWindowDays}d_revenue`;
+      const conversionsField = `rolling_${rollingWindowDays}d_conversions`;
+      
+      const values = chartData.map(d => parseFloat(d[roasField]) || 0);
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const range = maxValue - minValue || 0.1;
@@ -238,7 +245,7 @@ const OverviewROASSparkline = React.memo(({
         >
           {(() => {
             const dayData = chartData[hoveredPoint];
-            const backendROAS = parseFloat(dayData.rolling_1d_roas) || 0;
+            const backendROAS = parseFloat(dayData[roasField]) || 0;
             
             return (
               <>
