@@ -187,16 +187,7 @@ const ROASSparkline = React.memo(({
             const height = 20;
             const padding = 2;
             
-            // Get dynamic field names based on rolling window
-            const rollingWindowDays = chartData[0]?.rolling_window_days || 1;
-            const roasField = `rolling_${rollingWindowDays}d_roas`;
-            const spendField = `rolling_${rollingWindowDays}d_spend`;
-            const revenueField = `rolling_${rollingWindowDays}d_revenue`;
-            const conversionsField = `rolling_${rollingWindowDays}d_conversions`;
-            const trialsField = `rolling_${rollingWindowDays}d_trials`;
-            const metaTrialsField = `rolling_${rollingWindowDays}d_meta_trials`;
-            
-            const values = chartData.map(d => parseFloat(d[roasField]) || 0);
+            const values = chartData.map(d => parseFloat(d.rolling_1d_roas) || 0);
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const range = maxValue - minValue || 0.1; // Prevent division by zero
@@ -221,8 +212,8 @@ const ROASSparkline = React.memo(({
               // Get colors for start and end points
               const startROAS = values[i];
               const endROAS = values[i + 1];
-              const startConversions = parseInt(chartData[i][conversionsField]) || 0;
-              const endConversions = parseInt(chartData[i + 1][conversionsField]) || 0;
+              const startConversions = parseInt(chartData[i].rolling_1d_conversions) || 0;
+              const endConversions = parseInt(chartData[i + 1].rolling_1d_conversions) || 0;
               
               // Use grey styling for inactive periods (before first spend / after last spend)
               const startIsInactive = chartData[i].is_inactive || false;
@@ -290,7 +281,7 @@ const ROASSparkline = React.memo(({
                                     const x = padding + (index / (values.length - 1)) * (width - 2 * padding);
                 const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
                 const isHovered = hoveredPoint === index;
-                const dayConversions = parseInt(chartData[index][conversionsField]) || 0;
+                const dayConversions = parseInt(chartData[index].rolling_1d_conversions) || 0;
                 const isInactive = chartData[index].is_inactive || false;
                 const dayColor = isInactive ? 
                   'text-gray-300 dark:text-gray-600' : 
@@ -328,7 +319,7 @@ const ROASSparkline = React.memo(({
                       const dayData = chartData[hoveredPoint];
                       const spend = parseFloat(dayData.daily_spend) || 0;
                       const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
-                      const backendROAS = parseFloat(dayData[roasField]) || 0;
+                      const backendROAS = parseFloat(dayData.rolling_1d_roas) || 0;
                       
                       // Display backend-calculated rolling ROAS value directly
                       return (
@@ -336,20 +327,20 @@ const ROASSparkline = React.memo(({
                           <div className="font-medium text-white">
                             {formatDate(dayData.date)}
                           </div>
-                          <div className={getROASPerformanceColor(backendROAS, dayData[conversionsField] || 0).replace('text-', 'text-').replace('600', '400')}>
-                            {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} ROAS: {formatROAS(backendROAS)}
+                          <div className={getROASPerformanceColor(backendROAS, dayData.rolling_1d_conversions || 0).replace('text-', 'text-').replace('600', '400')}>
+                            Daily ROAS: {formatROAS(backendROAS)}
                           </div>
                           <div className="text-gray-400 text-xs">
-                            {rollingWindowDays === 1 ? 'Single day' : `${rollingWindowDays}-day rolling`} ({dayData.rolling_window_days} day{dayData.rolling_window_days !== 1 ? 's' : ''})
+                            Single day ({dayData.rolling_window_days} day)
                           </div>
                         </>
                       );
                     })()}
                           <div className="text-gray-300 text-xs">
-                            {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} Spend: ${(parseFloat(chartData[hoveredPoint][spendField]) || 0).toFixed(2)}
+                            Daily Spend: ${(parseFloat(chartData[hoveredPoint].rolling_1d_spend) || 0).toFixed(2)}
                           </div>
                           <div className="text-gray-300 text-xs">
-                            {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} Revenue: ${(parseFloat(chartData[hoveredPoint][revenueField]) || 0).toFixed(2)}
+                            Daily Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_1d_revenue) || 0).toFixed(2)}
                           </div>
                           {/* Display accuracy ratio using same logic as main dashboard */}
                           {chartData[hoveredPoint].period_accuracy_ratio && chartData[hoveredPoint].period_accuracy_ratio !== 1.0 && (
@@ -363,17 +354,17 @@ const ROASSparkline = React.memo(({
                               })()}
                             </div>
                           )}
-          {/* Show conversion counts for confidence assessment */}
+          {/* Show daily conversion counts for confidence assessment */}
           <div className="text-green-300 text-xs">
-            {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} Conversions: {chartData[hoveredPoint][conversionsField] || 0}
+            Daily Conversions: {chartData[hoveredPoint].rolling_1d_conversions || 0}
           </div>
           <div className="text-blue-300 text-xs">
-            {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} Trials: {chartData[hoveredPoint][trialsField] || 0}
+            Daily Trials: {chartData[hoveredPoint].rolling_1d_trials || 0}
           </div>
           {/* Show Meta comparison if available */}
-          {chartData[hoveredPoint][metaTrialsField] && (
+          {chartData[hoveredPoint].rolling_1d_meta_trials && (
             <div className="text-gray-400 text-xs">
-              {rollingWindowDays === 1 ? 'Daily' : `${rollingWindowDays}-Day`} Meta Trials: {chartData[hoveredPoint][metaTrialsField]}
+              Daily Meta Trials: {chartData[hoveredPoint].rolling_1d_meta_trials}
             </div>
           )}
                   </div>
