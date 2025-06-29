@@ -48,6 +48,7 @@ export const SegmentPerformancePage = () => {
       store: '',
       country: '',
       region: '',
+      price_bucket: '',
       accuracy_scores: [], // Changed to array for multi-select
       min_user_count: 0
     };
@@ -89,6 +90,7 @@ export const SegmentPerformancePage = () => {
       stores: [],
       countries: [],
       regions: [],
+      price_buckets: [],
       accuracy_scores: []
     };
   });
@@ -207,6 +209,7 @@ export const SegmentPerformancePage = () => {
       segment.store?.toLowerCase().includes(searchLower) ||
       segment.country?.toLowerCase().includes(searchLower) ||
       segment.region?.toLowerCase().includes(searchLower) ||
+      segment.price_bucket?.toString().includes(searchLower) ||
       segment.accuracy_score?.toLowerCase().includes(searchLower)
     );
   }, [segments, searchText]);
@@ -459,6 +462,23 @@ export const SegmentPerformancePage = () => {
               </select>
             </div>
 
+            {/* Price Bucket Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Price Bucket
+              </label>
+              <select
+                value={filters.price_bucket}
+                onChange={(e) => handleFilterChange('price_bucket', e.target.value)}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">All Price Buckets</option>
+                {filterOptions.price_buckets?.map(bucket => (
+                  <option key={bucket} value={bucket}>${parseFloat(bucket).toFixed(2)}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Accuracy Levels Multi-Select */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -572,6 +592,15 @@ export const SegmentPerformancePage = () => {
                     </th>
                     <th className="px-6 py-3 text-left">
                       <button
+                        onClick={() => handleSort('price_bucket')}
+                        className="flex items-center space-x-1 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hover:text-gray-700 dark:hover:text-gray-100"
+                      >
+                        <span>Price Bucket</span>
+                        {getSortIcon('price_bucket')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-3 text-left">
+                      <button
                         onClick={() => handleSort('user_count')}
                         className="flex items-center space-x-1 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hover:text-gray-700 dark:hover:text-gray-100"
                       >
@@ -625,6 +654,9 @@ export const SegmentPerformancePage = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                         {segment.region || 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {segment.price_bucket ? `$${parseFloat(segment.price_bucket).toFixed(2)}` : 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                         <div className="flex items-center">

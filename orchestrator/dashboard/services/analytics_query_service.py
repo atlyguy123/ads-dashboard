@@ -2478,6 +2478,7 @@ class AnalyticsQueryService:
                     u.region,
                     upm.price_bucket,
                     upm.accuracy_score,
+                    upm.assignment_type,
                     COUNT(DISTINCT upm.distinct_id) as user_count,
                     AVG(upm.trial_conversion_rate) as trial_conversion_rate,
                     AVG(upm.trial_converted_to_refund_rate) as trial_converted_to_refund_rate,
@@ -2490,6 +2491,7 @@ class AnalyticsQueryService:
                   AND upm.trial_conversion_rate IS NOT NULL
                   AND upm.trial_converted_to_refund_rate IS NOT NULL  
                   AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 """
                 
                 # Add filters
@@ -2512,6 +2514,10 @@ class AnalyticsQueryService:
                     filter_conditions.append("u.region = ?")
                     params.append(filters['region'])
                     
+                if filters.get('price_bucket'):
+                    filter_conditions.append("upm.price_bucket = ?")
+                    params.append(float(filters['price_bucket']))
+                    
                 if filters.get('accuracy_score'):
                     # Handle comma-separated accuracy scores for multi-select
                     accuracy_scores = [score.strip() for score in filters['accuracy_score'].split(',') if score.strip()]
@@ -2532,7 +2538,8 @@ class AnalyticsQueryService:
                     u.country,
                     u.region,
                     upm.price_bucket,
-                    upm.accuracy_score
+                    upm.accuracy_score,
+                    upm.assignment_type
                 """
                 
                 # Add having clause for min user count filter
@@ -2599,6 +2606,7 @@ class AnalyticsQueryService:
                 'stores': [],
                 'countries': [],
                 'regions': [],
+                'price_buckets': [],
                 'accuracy_scores': []
             }
             
@@ -2607,7 +2615,9 @@ class AnalyticsQueryService:
                 SELECT DISTINCT upm.product_id 
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.valid_user = TRUE AND upm.product_id IS NOT NULL
+                WHERE u.valid_user = TRUE 
+                  AND upm.product_id IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 ORDER BY upm.product_id
             """)
             filter_options['product_ids'] = [row[0] for row in cursor.fetchall()]
@@ -2617,7 +2627,9 @@ class AnalyticsQueryService:
                 SELECT DISTINCT upm.store 
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.valid_user = TRUE AND upm.store IS NOT NULL
+                WHERE u.valid_user = TRUE 
+                  AND upm.store IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 ORDER BY upm.store
             """)
             filter_options['stores'] = [row[0] for row in cursor.fetchall()]
@@ -2627,7 +2639,9 @@ class AnalyticsQueryService:
                 SELECT DISTINCT u.country 
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.valid_user = TRUE AND u.country IS NOT NULL
+                WHERE u.valid_user = TRUE 
+                  AND u.country IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 ORDER BY u.country
             """)
             filter_options['countries'] = [row[0] for row in cursor.fetchall()]
@@ -2637,17 +2651,33 @@ class AnalyticsQueryService:
                 SELECT DISTINCT u.region 
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.valid_user = TRUE AND u.region IS NOT NULL
+                WHERE u.valid_user = TRUE 
+                  AND u.region IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 ORDER BY u.region
             """)
             filter_options['regions'] = [row[0] for row in cursor.fetchall()]
+            
+            # Get unique price buckets
+            cursor.execute("""
+                SELECT DISTINCT upm.price_bucket 
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.valid_user = TRUE 
+                  AND upm.price_bucket IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
+                ORDER BY upm.price_bucket
+            """)
+            filter_options['price_buckets'] = [row[0] for row in cursor.fetchall()]
             
             # Get unique accuracy scores
             cursor.execute("""
                 SELECT DISTINCT upm.accuracy_score 
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.valid_user = TRUE AND upm.accuracy_score IS NOT NULL
+                WHERE u.valid_user = TRUE 
+                  AND upm.accuracy_score IS NOT NULL
+                  AND upm.assignment_type NOT LIKE '%inherited%'
                 ORDER BY 
                     CASE upm.accuracy_score
                         WHEN 'very_high' THEN 1
@@ -2669,5 +2699,6 @@ class AnalyticsQueryService:
                 'stores': [],
                 'countries': [],
                 'regions': [],
+                'price_buckets': [],
                 'accuracy_scores': []
             }
