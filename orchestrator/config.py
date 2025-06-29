@@ -32,8 +32,8 @@ class Config:
     FLASK_ENV = os.getenv('FLASK_ENV', 'development')
     FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
     
-    # Server Configuration
-    HOST = os.getenv('HOST', '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1')
+    # Server Configuration - Fixed localhost/127.0.0.1 mismatch
+    HOST = os.getenv('HOST', '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else 'localhost')
     PORT = int(os.getenv('PORT', '5001'))
     
     # Meta API Configuration
@@ -49,16 +49,17 @@ class Config:
     # Dashboard Configuration
     DASHBOARD_ENABLED = os.getenv('DASHBOARD_ENABLED', 'true').lower() == 'true'
     
-    # Heroku Configuration
-    HEROKU_APP_NAME = os.getenv('HEROKU_APP_NAME', '')
+    # Orchestrator Configuration
+    ORCHESTRATOR_HOST = os.getenv('ORCHESTRATOR_HOST', HOST)
+    ORCHESTRATOR_PORT = int(os.getenv('ORCHESTRATOR_PORT', PORT))
     
-    # CORS Configuration
+    # Allowed Origins for CORS - Fixed localhost/127.0.0.1 mismatch
     ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5001').split(',')
     
-    # Production specific settings
     @property
     def is_production(self):
-        return self.FLASK_ENV == 'production'
+        """Check if running in production environment"""
+        return self.FLASK_ENV == 'production' or os.getenv('RAILWAY_ENVIRONMENT') is not None
     
     @property
     def is_development(self):
@@ -71,5 +72,5 @@ class Config:
         else:
             return os.path.join(os.path.dirname(__file__), '..', 'database', db_name)
 
-# Create global config instance
+# Create singleton instance
 config = Config() 

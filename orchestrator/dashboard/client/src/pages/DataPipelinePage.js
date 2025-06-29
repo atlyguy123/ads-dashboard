@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Settings, Clock, Database, CheckCircle, AlertTriangle, Play, Circle, Loader, X, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { pipelineApi } from '../services/pipelineApi';
 
 const DataPipelinePage = () => {
   const [pipelineStatus, setPipelineStatus] = useState('idle'); // 'idle', 'running', 'success', 'failed'
@@ -55,7 +56,8 @@ const DataPipelinePage = () => {
   // Initialize socket connection with reconnection logic
   useEffect(() => {
     const connectSocket = () => {
-      socketRef.current = io({
+      const socketUrl = process.env.REACT_APP_API_URL || '';
+      socketRef.current = io(socketUrl, {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionAttempts: 10,
@@ -266,8 +268,7 @@ const DataPipelinePage = () => {
     }
     
     try {
-      const response = await fetch(`/api/run/${MASTER_PIPELINE}`, { method: 'POST' });
-      const result = await response.json();
+      const result = await pipelineApi.runPipeline(MASTER_PIPELINE);
       
       if (result.success) {
         console.log('✅ Pipeline started successfully');
@@ -290,8 +291,7 @@ const DataPipelinePage = () => {
     console.log('🛑 Cancelling master pipeline...');
     
     try {
-      const response = await fetch(`/api/cancel/${MASTER_PIPELINE}`, { method: 'POST' });
-      const result = await response.json();
+      const result = await pipelineApi.cancelPipeline(MASTER_PIPELINE);
       
       if (result.success) {
         console.log('✅ Pipeline cancelled successfully');
@@ -387,11 +387,7 @@ const DataPipelinePage = () => {
       localStorage.removeItem('pipelineLastTrigger');
       
       // Call the backend reset API
-      const response = await fetch(`/api/reset-all/${MASTER_PIPELINE}`, {
-        method: 'POST'
-      });
-      
-      const result = await response.json();
+      const result = await pipelineApi.resetAllSteps(MASTER_PIPELINE);
       console.log(`🔄 RESET ALL: Reset response:`, result);
       
       if (result.success) {
@@ -807,13 +803,7 @@ const DataPipelinePage = () => {
       console.log('🔍 Checking pipeline completion status...');
       
       // Fetch current status from backend using existing endpoint
-      const response = await fetch('/api/pipelines');
-      if (!response.ok) {
-        console.warn('Failed to fetch pipeline status from backend');
-        return;
-      }
-      
-      const pipelines = await response.json();
+      const pipelines = await pipelineApi.getPipelines();
       const masterPipeline = pipelines.find(p => p.name === MASTER_PIPELINE);
       
       if (!masterPipeline) {
