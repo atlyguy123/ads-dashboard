@@ -49,7 +49,7 @@ export const SegmentPerformancePage = () => {
       store: '',
       country: '',
       region: '',
-      price_bucket: '',
+      price_buckets: [], // Changed to array for multi-select
       accuracy_scores: [], // Changed to array for multi-select
       min_user_count: 0
     };
@@ -123,7 +123,7 @@ export const SegmentPerformancePage = () => {
     localStorage.setItem('segment_analysis_filter_options', JSON.stringify(filterOptions));
   }, [filterOptions]);
 
-  // Auto-select all accuracy scores when filter options are loaded
+  // Auto-select all accuracy scores and price buckets when filter options are loaded
   useEffect(() => {
     if (filterOptions.accuracy_scores && filterOptions.accuracy_scores.length > 0 && (!filters.accuracy_scores || filters.accuracy_scores.length === 0)) {
       setFilters(prev => ({
@@ -133,6 +133,15 @@ export const SegmentPerformancePage = () => {
     }
   }, [filterOptions.accuracy_scores, filters.accuracy_scores]);
 
+  useEffect(() => {
+    if (filterOptions.price_buckets && filterOptions.price_buckets.length > 0 && (!filters.price_buckets || filters.price_buckets.length === 0)) {
+      setFilters(prev => ({
+        ...prev,
+        price_buckets: [...filterOptions.price_buckets]
+      }));
+    }
+  }, [filterOptions.price_buckets, filters.price_buckets]);
+
   // Fetch segments data
   const fetchSegments = useCallback(async () => {
     setLoading(true);
@@ -141,12 +150,14 @@ export const SegmentPerformancePage = () => {
     try {
       console.log('🔍 Fetching segment performance data...');
       
-      // Convert accuracy_scores array to comma-separated string for API
+      // Convert arrays to comma-separated strings for API
       const apiFilters = {
         ...filters,
-        accuracy_score: (filters.accuracy_scores || []).join(',')
+        accuracy_score: (filters.accuracy_scores || []).join(','),
+        price_bucket: (filters.price_buckets || []).join(',')
       };
       delete apiFilters.accuracy_scores;
+      delete apiFilters.price_buckets;
       
       const response = await dashboardApi.getSegmentPerformance({
         ...apiFilters,
@@ -463,22 +474,17 @@ export const SegmentPerformancePage = () => {
               </select>
             </div>
 
-            {/* Price Bucket Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Price Bucket
-              </label>
-              <select
-                value={filters.price_bucket}
-                onChange={(e) => handleFilterChange('price_bucket', e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">All Price Buckets</option>
-                {filterOptions.price_buckets?.map(bucket => (
-                  <option key={bucket} value={bucket}>${parseFloat(bucket).toFixed(2)}</option>
-                ))}
-              </select>
-            </div>
+            {/* Price Bucket Multi-Select */}
+            <MultiSelectDropdown
+              label="Price Buckets"
+              options={filterOptions.price_buckets?.map(bucket => ({
+                value: bucket,
+                label: `$${parseFloat(bucket).toFixed(2)}`
+              })) || []}
+              selectedValues={filters.price_buckets || []}
+              onChange={(newValues) => handleFilterChange('price_buckets', newValues)}
+              placeholder="Select price buckets..."
+            />
 
             {/* Accuracy Levels Multi-Select */}
             <MultiSelectDropdown

@@ -14,10 +14,11 @@ const OverviewROASSparkline = React.memo(({
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const svgRef = useRef(null);
 
-  // Get ROAS performance color based on thresholds
-  const getROASPerformanceColor = (roas) => {
+  // Get ROAS performance color based on thresholds (matching ROASSparkline.jsx)
+  const getROASPerformanceColor = (roas, conversions = 0) => {
     const roasValue = parseFloat(roas) || 0;
     
+    // Use same color scheme as ROASSparkline.jsx
     if (roasValue < 0.5) return 'text-red-400';
     if (roasValue >= 0.5 && roasValue < 0.75) return 'text-orange-400';
     if (roasValue >= 0.75 && roasValue < 1.0) return 'text-yellow-400';
@@ -155,8 +156,8 @@ const OverviewROASSparkline = React.memo(({
     const startROAS = values[i];
     const endROAS = values[i + 1];
     
-    const startColor = getROASPerformanceColor(startROAS);
-    const endColor = getROASPerformanceColor(endROAS);
+    const startColor = getROASPerformanceColor(startROAS, 0);
+    const endColor = getROASPerformanceColor(endROAS, 0);
     
     segments.push({
       path: `M ${points[i]} L ${midPoint}`,
@@ -188,7 +189,7 @@ const OverviewROASSparkline = React.memo(({
           stroke="#FFFFFF"
           strokeWidth="1"
           strokeDasharray="2,2"
-          style={{ opacity: 0.3 }}
+          style={{ opacity: 0.5 }}
         />
         
         {/* Render colored segments */}
@@ -208,7 +209,7 @@ const OverviewROASSparkline = React.memo(({
           const x = padding + (index / (values.length - 1)) * (width - 2 * padding);
           const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
           const isHovered = hoveredPoint === index;
-          const dayColor = getROASPerformanceColor(value);
+          const dayColor = getROASPerformanceColor(value, 0);
           
           return (
             <circle
@@ -245,7 +246,7 @@ const OverviewROASSparkline = React.memo(({
                 <div className="font-medium text-white">
                   {formatDate(dayData.date)}
                 </div>
-                <div className={getROASPerformanceColor(backendROAS).replace('text-', 'text-').replace('400', '300')}>
+                <div className={getROASPerformanceColor(backendROAS, 0).replace('text-', 'text-').replace('400', '300')}>
                   Daily ROAS: {formatROAS(backendROAS)}
                 </div>
                 <div className="text-gray-300 text-xs">

@@ -28,14 +28,24 @@ const MultiSelectDropdown = ({
     }
   }, [isOpen]);
 
+  // Helper functions to handle both string and object options
+  const getOptionValue = (option) => {
+    return typeof option === 'string' ? option : option.value;
+  };
+
+  const getOptionLabel = (option) => {
+    return typeof option === 'string' ? option : option.label;
+  };
+
   const handleToggle = () => {
     setIsOpen(!isOpen);
   };
 
-  const handleOptionToggle = (value) => {
-    const newSelectedValues = selectedValues.includes(value)
-      ? selectedValues.filter(v => v !== value)
-      : [...selectedValues, value];
+  const handleOptionToggle = (option) => {
+    const optionValue = getOptionValue(option);
+    const newSelectedValues = selectedValues.includes(optionValue)
+      ? selectedValues.filter(v => v !== optionValue)
+      : [...selectedValues, optionValue];
     onChange(newSelectedValues);
   };
 
@@ -43,7 +53,7 @@ const MultiSelectDropdown = ({
     if (selectedValues.length === options.length) {
       onChange([]);
     } else {
-      onChange([...options]);
+      onChange(options.map(getOptionValue));
     }
   };
 
@@ -52,7 +62,9 @@ const MultiSelectDropdown = ({
       return placeholder;
     }
     if (selectedValues.length === 1) {
-      return selectedValues[0];
+      // Find the selected option and display its label
+      const selectedOption = options.find(opt => getOptionValue(opt) === selectedValues[0]);
+      return selectedOption ? getOptionLabel(selectedOption) : selectedValues[0];
     }
     if (selectedValues.length === options.length) {
       return "All selected";
@@ -102,33 +114,37 @@ const MultiSelectDropdown = ({
           
           {/* Options */}
           <div className="p-2 space-y-1">
-            {options.map((option) => (
-              <label
-                key={option}
-                className="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded cursor-pointer"
-              >
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={selectedValues.includes(option)}
-                    onChange={() => handleOptionToggle(option)}
-                    className="sr-only"
-                  />
-                  <div className={`w-4 h-4 border-2 rounded flex items-center justify-center ${
-                    selectedValues.includes(option)
-                      ? 'bg-blue-600 border-blue-600'
-                      : 'border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700'
-                  }`}>
-                    {selectedValues.includes(option) && (
-                      <Check className="h-3 w-3 text-white" />
-                    )}
+            {options.map((option, index) => {
+              const optionValue = getOptionValue(option);
+              const optionLabel = getOptionLabel(option);
+              return (
+                <label
+                  key={`${optionValue}-${index}`}
+                  className="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded cursor-pointer"
+                >
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={selectedValues.includes(optionValue)}
+                      onChange={() => handleOptionToggle(option)}
+                      className="sr-only"
+                    />
+                    <div className={`w-4 h-4 border-2 rounded flex items-center justify-center ${
+                      selectedValues.includes(optionValue)
+                        ? 'bg-blue-600 border-blue-600'
+                        : 'border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700'
+                    }`}>
+                      {selectedValues.includes(optionValue) && (
+                        <Check className="h-3 w-3 text-white" />
+                      )}
+                    </div>
                   </div>
-                </div>
-                <span className="text-sm text-gray-900 dark:text-gray-100">
-                  {option}
-                </span>
-              </label>
-            ))}
+                  <span className="text-sm text-gray-900 dark:text-gray-100">
+                    {optionLabel}
+                  </span>
+                </label>
+              );
+            })}
           </div>
           
           {/* No options message */}
