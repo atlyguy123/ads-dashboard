@@ -1,0 +1,71 @@
+name: Daily Pipeline Scheduler
+
+on:
+  schedule:
+    # Run at 5:30 AM UTC every day
+    - cron: '30 5 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  run-daily-pipeline:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Trigger Railway Pipeline
+      run: |
+        echo "🚀 Triggering daily master pipeline at $(date)"
+        
+        # Call your Railway app's API to start the pipeline
+        response=$(curl -s -w "\n%{http_code}" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -u "${{ secrets.ADMIN_USERNAME }}:${{ secrets.ADMIN_PASSWORD }}" \
+          "${{ secrets.RAILWAY_APP_URL }}/api/run/master_pipeline")
+        
+        # Extract response body and status code
+        http_code=$(echo "$response" | tail -n1)
+        response_body=$(echo "$response" | head -n -1)
+        
+        echo "Response: $response_body"
+        echo "HTTP Status: $http_code"
+        
+        # Check if successful
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ Pipeline started successfully"
+        else
+          echo "❌ Pipeline failed to start"
+          exit 1
+        fi
+    
+    - name: Wait and Check Pipeline Status
+      run: |
+        echo "⏳ Waiting for pipeline to complete..."
+        
+        # Wait 30 minutes for pipeline to complete
+        max_wait=1800  # 30 minutes in seconds
+        wait_time=0
+        check_interval=60  # Check every minute
+        
+        while [ $wait_time -lt $max_wait ]; do
+          echo "Checking pipeline status... (${wait_time}s elapsed)"
+          
+          # Get pipeline status
+          status_response=$(curl -s \
+            -H "Content-Type: application/json" \
+            -u "${{ secrets.ADMIN_USERNAME }}:${{ secrets.ADMIN_PASSWORD }}" \
+            "${{ secrets.RAILWAY_APP_URL }}/api/pipelines")
+          
+          echo "Status check response: $status_response"
+          
+          # Simple check - if we get a response, pipeline is healthy
+          if echo "$status_response" | grep -q "master_pipeline"; then
+            echo "✅ Pipeline is running"
+          else
+            echo "⚠️ Pipeline status unclear"
+          fi
+          
+          sleep $check_interval
+          wait_time=$((wait_time + check_interval))
+        done
+        
+        echo "🏁 Pipeline monitoring completed after ${wait_time} seconds" 
