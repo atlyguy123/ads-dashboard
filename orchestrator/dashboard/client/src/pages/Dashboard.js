@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardGrid } from '../components/DashboardGrid';
+import OverviewROASSparkline from '../components/dashboard/OverviewROASSparkline';
 
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
@@ -850,13 +851,23 @@ export const Dashboard = () => {
               </div>
               
               <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <Users className="h-8 w-8 text-purple-500" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Users className="h-8 w-8 text-purple-500" />
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ROAS</p>
+                      <p className={`text-2xl font-bold ${roas >= 2 ? 'text-green-600' : roas >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {roas.toFixed(2)}x
+                      </p>
+                    </div>
+                  </div>
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ROAS</p>
-                    <p className={`text-2xl font-bold ${roas >= 2 ? 'text-green-600' : roas >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
-                      {roas.toFixed(2)}x
-                    </p>
+                    <OverviewROASSparkline 
+                      dateRange={dateRange}
+                      breakdown={breakdown}
+                      width={120}
+                      height={40}
+                    />
                   </div>
                 </div>
               </div>

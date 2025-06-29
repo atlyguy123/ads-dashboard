@@ -13,6 +13,7 @@ import {
   Info
 } from 'lucide-react';
 import { dashboardApi } from '../services/dashboardApi';
+import MultiSelectDropdown from '../components/MultiSelectDropdown';
 
 export const SegmentPerformancePage = () => {
   // State management with localStorage
@@ -480,31 +481,16 @@ export const SegmentPerformancePage = () => {
             </div>
 
             {/* Accuracy Levels Multi-Select */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Accuracy Levels
-              </label>
-              <div className="border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 p-2 max-h-32 overflow-y-auto">
-                {filterOptions.accuracy_scores?.map(score => (
-                  <label key={score} className="flex items-center space-x-2 mb-1">
-                    <input
-                      type="checkbox"
-                      checked={(filters.accuracy_scores || []).includes(score)}
-                      onChange={(e) => {
-                        const currentScores = filters.accuracy_scores || [];
-                        if (e.target.checked) {
-                          handleFilterChange('accuracy_scores', [...currentScores, score]);
-                        } else {
-                          handleFilterChange('accuracy_scores', currentScores.filter(s => s !== score));
-                        }
-                      }}
-                      className="text-blue-600 rounded focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-900 dark:text-gray-100">{score}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+            <MultiSelectDropdown
+              label="Accuracy Levels"
+              options={filterOptions.accuracy_scores?.map(score => ({
+                value: score,
+                label: score.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
+              })) || []}
+              selectedValues={filters.accuracy_scores || []}
+              onChange={(newValues) => handleFilterChange('accuracy_scores', newValues)}
+              placeholder="Select accuracy levels..."
+            />
 
             {/* Min User Count Filter */}
             <div>

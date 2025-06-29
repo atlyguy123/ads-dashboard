@@ -635,3 +635,63 @@ def get_segment_performance():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@dashboard_bp.route('/analytics/overview-roas-chart', methods=['GET'])
+def get_overview_roas_chart():
+    """
+    Get overview ROAS sparkline data for dashboard summary
+    
+    Query parameters:
+    - start_date: Start date (YYYY-MM-DD)
+    - end_date: End date (YYYY-MM-DD) 
+    - breakdown: Breakdown type ('all', 'country', 'device', etc.)
+    """
+    try:
+        # Get query parameters
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        breakdown = request.args.get('breakdown', 'all')
+        
+        logger.info(f"Getting overview ROAS chart data: start_date={start_date}, end_date={end_date}, breakdown={breakdown}")
+        
+        # Validate required parameters
+        if not start_date or not end_date:
+            error_msg = 'Missing required parameters: start_date and end_date'
+            logger.error(f"Overview ROAS chart validation error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+        
+        # Get overview ROAS chart data with thread safety
+        try:
+            with analytics_lock:
+                result = analytics_service.get_overview_roas_chart_data(
+                    start_date=start_date,
+                    end_date=end_date,
+                    breakdown=breakdown
+                )
+            
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                error_msg = result.get('error', 'Unknown analytics service error')
+                logger.error(f"Overview ROAS chart analytics error: {error_msg}")
+                return jsonify(result), 500
+            
+        except Exception as analytics_error:
+            error_msg = f"Analytics service exception: {str(analytics_error)}"
+            logger.error(f"Overview ROAS chart analytics error: {error_msg}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"Overview ROAS chart endpoint exception: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500

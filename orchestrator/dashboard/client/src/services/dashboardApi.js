@@ -309,6 +309,15 @@ class DashboardApiService {
       body: JSON.stringify(params),
     });
   }
+
+  /**
+   * Get overview ROAS chart data for dashboard sparkline
+   */
+  async getOverviewROASChartData(params) {
+    console.log('📊 OVERVIEW ROAS API - getOverviewROASChartData called with:', params);
+    const queryParams = new URLSearchParams(params).toString();
+    return this.makeRequest(`/analytics/overview-roas-chart?${queryParams}`);
+  }
 }
 
 // Create and export a singleton instance
