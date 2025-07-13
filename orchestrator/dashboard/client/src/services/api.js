@@ -127,6 +127,20 @@ export const api = {
       throw error;
     }
   },
+
+  /**
+   * Test S3 connection and data availability
+   * @returns {Promise<Object>} - Response with S3 test results
+   */
+  testS3Connection: async () => {
+    try {
+      const response = await apiClient.get('/api/mixpanel/debug/test-s3');
+      return response.data;
+    } catch (error) {
+      console.error('Error testing S3 connection:', error);
+      throw error;
+    }
+  },
   
   /**
    * Trigger Mixpanel data ingestion

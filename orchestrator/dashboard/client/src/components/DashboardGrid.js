@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Layers, Table2, Search, AlignJustify, Chevro
 // 📋 ADDING NEW COLUMNS? Read: src/config/Column README.md for complete instructions
 import { AVAILABLE_COLUMNS } from '../config/columns';
 import ROASSparkline from './dashboard/ROASSparkline';
+import { apiRequest } from '../config/api';
 
 
 
@@ -298,7 +299,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
         params.append('breakdown_value', breakdownValue);
       }
       
-      const response = await fetch(`/api/dashboard/analytics/user-details?${params.toString()}`);
+              const response = await apiRequest(`/api/dashboard/analytics/user-details?${params.toString()}`);
       const result = await response.json();
       
       if (result.success) {

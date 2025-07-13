@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import yaml
 import subprocess
@@ -1552,12 +1553,57 @@ def mixpanel_debug_latest_processed_date():
 
 @app.route('/api/mixpanel/debug/database/reset', methods=['POST'])
 def mixpanel_debug_database_reset():
-    """Reset Mixpanel database"""
-    return jsonify({
-        "success": True,
-        "message": "Database reset completed",
-        "timestamp": datetime.now().isoformat()
-    })
+    """Reset Mixpanel raw data tables"""
+    try:
+        # Import database utilities
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+        from database_utils import get_database_path
+        
+        # Connect to raw data database
+        raw_db_path = get_database_path('raw_data')
+        
+        import sqlite3
+        conn = sqlite3.connect(raw_db_path)
+        cursor = conn.cursor()
+        
+        # Delete all records from raw data tables
+        raw_tables = ['raw_event_data', 'raw_user_data', 'downloaded_dates']
+        total_deleted = 0
+        
+        for table in raw_tables:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                count_before = cursor.fetchone()[0]
+                
+                cursor.execute(f"DELETE FROM {table}")
+                deleted = cursor.rowcount
+                total_deleted += deleted
+                
+                logger.info(f"Deleted {deleted} records from {table} (was {count_before})")
+                
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Could not delete from table {table}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Successfully deleted {total_deleted} total raw data records")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Database reset completed - deleted {total_deleted} raw data records",
+            "timestamp": datetime.now().isoformat(),
+            "tables_reset": raw_tables,
+            "total_deleted": total_deleted
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resetting database: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Database reset failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/mixpanel/debug/data/refresh', methods=['POST'])
 def mixpanel_debug_data_refresh():
@@ -1567,6 +1613,109 @@ def mixpanel_debug_data_refresh():
         "message": "Data refresh completed",
         "timestamp": datetime.now().isoformat()
     })
+
+@app.route('/api/mixpanel/debug/test-s3', methods=['GET'])
+def mixpanel_debug_test_s3():
+    """Test S3 connection and data availability"""
+    try:
+        import boto3
+        from datetime import timedelta
+        
+        # Load environment variables
+        AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+        AWS_REGION_NAME = os.environ.get('AWS_REGION_NAME', 'us-east-1')
+        S3_BUCKET_EVENTS = os.environ.get('S3_BUCKET_EVENTS')
+        S3_BUCKET_USERS = os.environ.get('S3_BUCKET_USERS')
+        PROJECT_ID = os.environ.get('PROJECT_ID')
+        
+        if not all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_EVENTS, S3_BUCKET_USERS, PROJECT_ID]):
+            return jsonify({
+                "success": False,
+                "message": "Missing required environment variables for S3 access",
+                "timestamp": datetime.now().isoformat()
+            }), 500
+        
+        # Initialize S3 client
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION_NAME
+        )
+        
+        # Test user data availability
+        user_prefix = f'{PROJECT_ID}/mp_people_data/'
+        try:
+            user_response = s3_client.list_objects_v2(Bucket=S3_BUCKET_USERS, Prefix=user_prefix)
+            user_data = {
+                "status": "✅ Available" if 'Contents' in user_response else "❌ Not found",
+                "files_count": len(user_response.get('Contents', [])),
+                "sample_file": user_response['Contents'][0]['Key'] if 'Contents' in user_response else None
+            }
+        except Exception as e:
+            user_data = {
+                "status": f"❌ Error: {str(e)}",
+                "files_count": 0,
+                "sample_file": None
+            }
+        
+        # Test event data availability
+        start_date = datetime(2025, 4, 14)
+        end_date = datetime.now()
+        total_days = (end_date - start_date).days + 1
+        available_dates = []
+        
+        current_date = start_date
+        while current_date <= end_date:
+            year = current_date.strftime('%Y')
+            month = current_date.strftime('%m')
+            day = current_date.strftime('%d')
+            
+            event_prefix = f'{PROJECT_ID}/mp_master_event/{year}/{month}/{day}/'
+            
+            try:
+                event_response = s3_client.list_objects_v2(
+                    Bucket=S3_BUCKET_EVENTS, 
+                    Prefix=event_prefix, 
+                    MaxKeys=1
+                )
+                
+                if 'Contents' in event_response and len(event_response['Contents']) > 0:
+                    available_dates.append(current_date.strftime('%Y-%m-%d'))
+            except Exception:
+                pass  # Ignore errors, treat as missing
+            
+            current_date += timedelta(days=1)
+        
+        available_count = len(available_dates)
+        missing_count = total_days - available_count
+        coverage_percentage = round((available_count / total_days) * 100, 1)
+        
+        event_data = {
+            "status": "✅ Available" if available_count > 0 else "❌ Not found",
+            "date_range": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+            "available_days": available_count,
+            "missing_days": missing_count,
+            "coverage_percentage": coverage_percentage,
+            "sample_dates": available_dates[:5] if available_dates else []
+        }
+        
+        return jsonify({
+            "success": True,
+            "message": "S3 connection test completed",
+            "timestamp": datetime.now().isoformat(),
+            "user_data": user_data,
+            "event_data": event_data
+        })
+        
+    except Exception as e:
+        logger.error(f"S3 connection test failed: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"S3 connection test failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/mixpanel/debug/test-db-events', methods=['GET'])
 def mixpanel_debug_test_db_events():
@@ -1580,24 +1729,171 @@ def mixpanel_debug_test_db_events():
 @app.route('/api/mixpanel/debug/database-stats', methods=['GET'])
 def mixpanel_debug_database_stats():
     """Get database statistics"""
-    return jsonify({
-        "success": True,
-        "data": {
-            "total_events": 0,
-            "total_users": 0,
-            "date_range": {}
-        },
-        "timestamp": datetime.now().isoformat()
-    })
+    try:
+        from utils.database_utils import get_database_connection
+        
+        with get_database_connection('mixpanel_data') as conn:
+            cursor = conn.cursor()
+            
+            # Get total events
+            cursor.execute("SELECT COUNT(*) FROM mixpanel_event")
+            total_events = cursor.fetchone()[0] or 0
+            
+            # Get total users
+            cursor.execute("SELECT COUNT(*) FROM mixpanel_user")
+            total_users = cursor.fetchone()[0] or 0
+            
+            # Get date range
+            cursor.execute("""
+                SELECT 
+                    MIN(event_time) as earliest,
+                    MAX(event_time) as latest
+                FROM mixpanel_event
+            """)
+            date_result = cursor.fetchone()
+            earliest = date_result[0] if date_result and date_result[0] else None
+            latest = date_result[1] if date_result and date_result[1] else None
+            
+            # Get event breakdown
+            cursor.execute("""
+                SELECT event_name, COUNT(*) as count
+                FROM mixpanel_event
+                GROUP BY event_name
+                ORDER BY count DESC
+                LIMIT 20
+            """)
+            event_breakdown = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            
+            # Get monthly breakdown
+            cursor.execute("""
+                SELECT 
+                    strftime('%Y-%m', event_time) as month,
+                    COUNT(*) as events,
+                    COUNT(DISTINCT distinct_id) as users,
+                    COUNT(DISTINCT event_name) as uniqueEvents
+                FROM mixpanel_event
+                WHERE event_time IS NOT NULL
+                GROUP BY strftime('%Y-%m', event_time)
+                ORDER BY month DESC
+                LIMIT 12
+            """)
+            monthly_breakdown = [
+                {
+                    "month": row[0],
+                    "events": row[1],
+                    "users": row[2],
+                    "uniqueEvents": row[3]
+                } for row in cursor.fetchall()
+            ]
+            
+            # Get daily breakdown (last 30 days)
+            cursor.execute("""
+                SELECT 
+                    DATE(event_time) as date,
+                    COUNT(*) as events,
+                    COUNT(DISTINCT distinct_id) as users,
+                    COUNT(DISTINCT event_name) as uniqueEvents
+                FROM mixpanel_event
+                WHERE event_time >= DATE('now', '-30 days')
+                GROUP BY DATE(event_time)
+                ORDER BY date DESC
+                LIMIT 30
+            """)
+            daily_breakdown = [
+                {
+                    "date": row[0],
+                    "events": row[1],
+                    "users": row[2],
+                    "uniqueEvents": row[3]
+                } for row in cursor.fetchall()
+            ]
+            
+            return jsonify({
+                "totalEvents": total_events,
+                "totalUsers": total_users,
+                "eventBreakdown": event_breakdown,
+                "monthlyBreakdown": monthly_breakdown,
+                "dailyBreakdown": daily_breakdown,
+                "dateRange": {
+                    "earliest": earliest,
+                    "latest": latest
+                }
+            })
+            
+    except Exception as e:
+        logger.error(f"Error fetching database statistics: {e}", exc_info=True)
+        return jsonify({
+            "totalEvents": 0,
+            "totalUsers": 0,
+            "eventBreakdown": [],
+            "monthlyBreakdown": [],
+            "dailyBreakdown": [],
+            "dateRange": {
+                "earliest": None,
+                "latest": None
+            }
+        }), 500
 
 @app.route('/api/mixpanel/debug/user-events', methods=['GET'])
 def mixpanel_debug_user_events():
     """Get user events"""
-    return jsonify({
-        "success": True,
-        "data": [],
-        "timestamp": datetime.now().isoformat()
-    })
+    try:
+        from utils.database_utils import get_database_connection
+        from flask import request
+        
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({
+                "error": "user_id parameter is required"
+            }), 400
+        
+        with get_database_connection('mixpanel_data') as conn:
+            cursor = conn.cursor()
+            
+            # Get all events for the user, ordered by time
+            cursor.execute("""
+                SELECT 
+                    event_name,
+                    event_time,
+                    revenue_usd,
+                    raw_amount,
+                    currency,
+                    refund_flag,
+                    event_json
+                FROM mixpanel_event
+                WHERE distinct_id = ?
+                ORDER BY event_time ASC
+            """, (user_id,))
+            
+            events = []
+            for row in cursor.fetchall():
+                # Parse event properties from JSON if available
+                properties = {}
+                if row[6]:  # event_json
+                    try:
+                        import json
+                        properties = json.loads(row[6])
+                    except:
+                        properties = {}
+                
+                events.append({
+                    "name": row[0],
+                    "time": row[1],
+                    "revenue_usd": row[2],
+                    "raw_amount": row[3],
+                    "currency": row[4],
+                    "refund_flag": bool(row[5]) if row[5] is not None else False,
+                    "properties": properties
+                })
+            
+            return jsonify(events)
+            
+    except Exception as e:
+        logger.error(f"Error fetching user events: {e}", exc_info=True)
+        return jsonify({
+            "error": "Failed to fetch user events",
+            "message": str(e)
+        }), 500
 
 # Removed conflicting proxy routes - these were overriding the proper dashboard routes
 # The dashboard blueprint handles /api/dashboard/analytics/chart-data properly

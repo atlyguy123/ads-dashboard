@@ -367,11 +367,20 @@ class AnalyticsQueryService:
             logger.error(f"Error discovering breakdown mappings: {e}")
             return {'unmapped_countries': [], 'unmapped_devices': []}
     
-    def _get_meta_data_count(self, table_name: str) -> int:
-        """Check if Meta ad performance table has any data"""
+    def _get_meta_data_count(self, table_name: str, start_date: str = None, end_date: str = None) -> int:
+        """Check if Meta ad performance table has data for the specified date range"""
         try:
-            query = f"SELECT COUNT(*) as count FROM {table_name}"
-            result = self._execute_meta_query(query, [])
+            if start_date and end_date:
+                # Check for data within the specific date range
+                query = f"SELECT COUNT(*) as count FROM {table_name} WHERE date BETWEEN ? AND ?"
+                result = self._execute_meta_query(query, [start_date, end_date])
+                logger.info(f"📊 Meta data count in {table_name} for {start_date} to {end_date}: {result[0]['count'] if result else 0}")
+            else:
+                # Fallback to checking all data in table
+                query = f"SELECT COUNT(*) as count FROM {table_name}"
+                result = self._execute_meta_query(query, [])
+                logger.info(f"📊 Meta data count in {table_name} (all dates): {result[0]['count'] if result else 0}")
+            
             return result[0]['count'] if result else 0
         except Exception as e:
             logger.error(f"Error checking Meta data count: {e}")

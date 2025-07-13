@@ -23,6 +23,11 @@ except ImportError:
     HAS_POSTRES = False
     psycopg2 = None
 
+# Add utils directory to path for database utilities
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+from database_utils import get_database_path
+
 # FIXED: Load environment variables from project root (same fix as meta_service.py)
 project_root = Path(__file__).resolve().parent.parent.parent
 env_file = project_root / '.env'
@@ -54,7 +59,8 @@ EVENTS_TO_KEEP = [
     "RC Cancellation", 
     "RC Initial purchase", 
     "RC Trial cancelled", 
-    "RC Renewal"
+    "RC Renewal",
+    "RC Expiration"
 ]
 
 def get_database_connection():
@@ -158,12 +164,13 @@ def ensure_raw_data_tables(conn, db_type):
     logger.info(f"Raw data tables ensured in {db_type} database")
 
 def identify_missing_data(conn, latest_date):
-    """Identify which dates need data downloads - TEST VERSION: only check last 2 days"""
-    yesterday = datetime.now().date() - timedelta(days=1)
+    """Identify which dates need data downloads - TEST VERSION: check last few days INCLUDING TODAY"""
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
     
-    # TEST: Only check the last 2 days instead of 90
-    start_date = yesterday - timedelta(days=TEST_DAYS_TO_CHECK-1)  # 2 days total including yesterday
-    logger.info(f"🧪 TEST MODE: Checking last {TEST_DAYS_TO_CHECK} days for missing data: {start_date} to {yesterday}")
+    # TEST: Only check the last TEST_DAYS_TO_CHECK days including today for hourly data
+    start_date = today - timedelta(days=TEST_DAYS_TO_CHECK-1)  # includes today
+    logger.info(f"🧪 TEST MODE: Checking last {TEST_DAYS_TO_CHECK} days for missing data: {start_date} to {today} (including today's hourly data)")
     
     missing_dates = []
     current_date = start_date
@@ -172,7 +179,7 @@ def identify_missing_data(conn, latest_date):
     
     cursor = conn.cursor()
     
-    while current_date <= yesterday:
+    while current_date <= today:
         dates_checked += 1
         # Check if this date has data in database
         cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (current_date,))
@@ -359,7 +366,8 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                 total_count += 1
                 try:
                     event_data = json.loads(line.decode('utf-8').strip())
-                    event_name = event_data.get("event")
+                    # Handle both old and new event data formats  
+                    event_name = event_data.get("event") or event_data.get("event_name")
                     
                     # Only store events that match our filter list
                     if event_name in EVENTS_TO_KEEP:
@@ -410,7 +418,8 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
                 total_count += 1
                 try:
                     user_data = json.loads(line.decode('utf-8').strip())
-                    distinct_id = user_data.get('mp_distinct_id') or user_data.get('abi_distinct_id')
+                    # FIX: Use correct field name - distinct_id is at top level
+                    distinct_id = user_data.get('distinct_id')
                     
                     if distinct_id:
                         # Store in database (replace existing)
@@ -500,13 +509,15 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
         month = target_date.strftime('%m')
         day = target_date.strftime('%d')
         
-        event_s3_prefix = f"{PROJECT_ID}/{year}/{month}/{day}/full_day/"
+        # NEW BUCKET STRUCTURE: Use hourly pipeline structure
+        event_s3_prefix = f"{PROJECT_ID}/mp_master_event/{year}/{month}/{day}/"
+        
         logger.info(f"Downloading event files for {target_date.strftime('%Y-%m-%d')} from s3://{S3_BUCKET_EVENTS}/{event_s3_prefix}")
         
+        # Get event files from new bucket structure
         event_object_keys = list_s3_objects(s3_client, S3_BUCKET_EVENTS, prefix=event_s3_prefix)
-        # Filter for actual event export files
-        event_export_keys = [k for k in event_object_keys if k.endswith('export.json.gz')]
-
+        event_export_keys = [k for k in event_object_keys if k.endswith('.json.gz')]
+        
         if not event_export_keys:
             logger.warning(f"No event export files found for {target_date.strftime('%Y-%m-%d')}")
             return False

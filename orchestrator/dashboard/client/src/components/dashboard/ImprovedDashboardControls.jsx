@@ -20,14 +20,21 @@ import {
 import StatusIndicator from './StatusIndicator';
 import { dashboardApi } from '../../services/dashboardApi';
 
-// Date range presets based on yesterday
+// Date range presets based on today (real-time data available)
 const getDatePresets = () => {
+  const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   
   const formatDate = (date) => date.toISOString().split('T')[0];
   
   return [
+    {
+      id: 'today',
+      label: 'Today',
+      start_date: formatDate(today),
+      end_date: formatDate(today)
+    },
     {
       id: 'yesterday',
       label: 'Yesterday',
@@ -36,21 +43,21 @@ const getDatePresets = () => {
     },
     {
       id: '7days',
-      label: '7 Days',
-      start_date: formatDate(new Date(yesterday.getTime() - 6 * 24 * 60 * 60 * 1000)),
-      end_date: formatDate(yesterday)
+      label: 'Last 7 Days',
+      start_date: formatDate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(today)
     },
     {
       id: '14days',
-      label: '14 Days',
-      start_date: formatDate(new Date(yesterday.getTime() - 13 * 24 * 60 * 60 * 1000)),
-      end_date: formatDate(yesterday)
+      label: 'Last 14 Days',
+      start_date: formatDate(new Date(today.getTime() - 13 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(today)
     },
     {
       id: '30days',
-      label: '30 Days',
-      start_date: formatDate(new Date(yesterday.getTime() - 29 * 24 * 60 * 60 * 1000)),
-      end_date: formatDate(yesterday)
+      label: 'Last 30 Days',
+      start_date: formatDate(new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000)),
+      end_date: formatDate(today)
     }
   ];
 };
@@ -66,7 +73,9 @@ const ImprovedDashboardControls = ({
   onBreakdownFiltersChange,
   onRefresh,
   loading = false,
-  backgroundLoading = false
+  backgroundLoading = false,
+  pipelineRunning = false,
+  pipelineStatus = null
 }) => {
   const [selectedPreset, setSelectedPreset] = useState('7days');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -199,21 +208,28 @@ const ImprovedDashboardControls = ({
                       {/* Quick Refresh */}
             <div className="flex items-center space-x-3">
               <StatusIndicator 
-                status={backgroundLoading ? 'loading' : (hasUnsavedChanges ? 'info' : 'success')} 
-                message={backgroundLoading ? 'Updating...' : (hasUnsavedChanges ? 'Settings changed - refresh needed' : 'Data up to date')}
+                status={pipelineRunning ? 'warning' : (backgroundLoading ? 'loading' : (hasUnsavedChanges ? 'info' : 'success'))} 
+                message={pipelineRunning ? 'Master pipeline running - refresh disabled' : (backgroundLoading ? 'Updating...' : (hasUnsavedChanges ? 'Settings changed - refresh needed' : 'Data up to date'))}
                 size="md"
               />
             
             <button
               onClick={handleRefresh}
-              disabled={loading || backgroundLoading}
+              disabled={loading || backgroundLoading || pipelineRunning}
               className={`inline-flex items-center px-4 py-2 ${
-                hasUnsavedChanges 
+                pipelineRunning 
+                  ? 'bg-gray-500 cursor-not-allowed' 
+                  : hasUnsavedChanges 
                   ? 'bg-orange-600 hover:bg-orange-700 ring-2 ring-orange-300 dark:ring-orange-700' 
                   : 'bg-blue-600 hover:bg-blue-700'
               } disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
             >
-              {loading ? (
+              {pipelineRunning ? (
+                <>
+                  <Database className="mr-2 h-4 w-4 animate-pulse" />
+                  Pipeline Processing...
+                </>
+              ) : loading ? (
                 <>
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                   Loading...

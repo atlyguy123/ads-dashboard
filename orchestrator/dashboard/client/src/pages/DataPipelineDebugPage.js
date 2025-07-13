@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { apiRequest } from '../config/api';
 
 const DataPipelinePage = () => {
   const [pipelines, setPipelines] = useState([]);
@@ -11,7 +12,8 @@ const DataPipelinePage = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    socketRef.current = io();
+    const socketUrl = process.env.REACT_APP_API_URL || '';
+    socketRef.current = io(socketUrl);
     
     socketRef.current.on('connect', () => {
       console.log('Connected to server');
@@ -35,7 +37,7 @@ const DataPipelinePage = () => {
 
   const loadPipelines = async () => {
     try {
-      const response = await fetch('/api/pipelines');
+      const response = await apiRequest('/api/pipelines');
       const pipelineData = await response.json();
       setPipelines(pipelineData);
       
@@ -48,7 +50,7 @@ const DataPipelinePage = () => {
 
   const refreshPipelines = async () => {
     try {
-      await fetch('/api/refresh', { method: 'POST' });
+      await apiRequest('/api/refresh', { method: 'POST' });
       await loadPipelines();
       showMessage('Pipelines refreshed successfully', 'success');
     } catch (error) {
@@ -84,7 +86,7 @@ const DataPipelinePage = () => {
 
   const runPipeline = async (pipelineName) => {
     try {
-      const response = await fetch(`/api/run/${pipelineName}`, { method: 'POST' });
+      const response = await apiRequest(`/api/run/${pipelineName}`, { method: 'POST' });
       const result = await response.json();
       
       if (result.success) {
@@ -99,7 +101,7 @@ const DataPipelinePage = () => {
 
   const runStep = async (pipelineName, stepId) => {
     try {
-      const response = await fetch(`/api/run/${pipelineName}/${stepId}`, { method: 'POST' });
+      const response = await apiRequest(`/api/run/${pipelineName}/${stepId}`, { method: 'POST' });
       const result = await response.json();
       
       if (result.success) {
@@ -114,7 +116,7 @@ const DataPipelinePage = () => {
 
   const markTested = async (pipelineName, stepId, tested) => {
     try {
-      const response = await fetch(`/api/mark_tested/${pipelineName}/${stepId}`, {
+      const response = await apiRequest(`/api/mark_tested/${pipelineName}/${stepId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tested })
@@ -145,7 +147,7 @@ const DataPipelinePage = () => {
     console.log(`🛑 CLIENT: Attempting to cancel step '${stepId}' in pipeline '${pipelineName}'`);
     
     try {
-      const response = await fetch(`/api/cancel/${pipelineName}/${stepId}`, {
+      const response = await apiRequest(`/api/cancel/${pipelineName}/${stepId}`, {
         method: 'POST'
       });
       
@@ -177,7 +179,7 @@ const DataPipelinePage = () => {
     }
     
     try {
-      const response = await fetch(`/api/reset-all/${pipelineName}`, {
+      const response = await apiRequest(`/api/reset-all/${pipelineName}`, {
         method: 'POST'
       });
       
@@ -202,7 +204,7 @@ const DataPipelinePage = () => {
     console.log(`🔄 RESET STEP: Resetting step '${stepId}' in pipeline '${pipelineName}'`);
     
     try {
-      const response = await fetch(`/api/reset/${pipelineName}/${stepId}`, {
+      const response = await apiRequest(`/api/reset/${pipelineName}/${stepId}`, {
         method: 'POST'
       });
       

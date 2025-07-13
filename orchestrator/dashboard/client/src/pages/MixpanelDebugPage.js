@@ -51,8 +51,8 @@ export const MixpanelDebugPage = () => {
   // Request history state
   const [requestHistory, setRequestHistory] = useState([]);
 
-  // Add new state for database stats
-  const [dbtStats, setDbStats] = useState({
+  // Database stats state
+  const [dbStats, setDbStats] = useState({
     totalEvents: 0, 
     totalUsers: 0,
     eventBreakdown: [],
@@ -62,26 +62,21 @@ export const MixpanelDebugPage = () => {
   });
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
-  // Add new state for user events lookup
+  // User events lookup state
   const [userIdInput, setUserIdInput] = useState('');
   const [userEvents, setUserEvents] = useState([]);
   const [isLoadingUserEvents, setIsLoadingUserEvents] = useState(false);
   const [userEventsError, setUserEventsError] = useState(null);
 
-  // Add new state for database reset
-  const [isResettingDatabase, setIsResettingDatabase] = useState(false);
-  const [resetDatabaseStatus, setResetDatabaseStatus] = useState(null);
-  const [resetDatabaseError, setResetDatabaseError] = useState(null);
+  // Reset raw data state
+  const [isResettingRawData, setIsResettingRawData] = useState(false);
+  const [resetRawDataStatus, setResetRawDataStatus] = useState(null);
+  const [resetRawDataError, setResetRawDataError] = useState(null);
 
-  // Add new state for refresh data functionality
-  const [isRefreshingData, setIsRefreshingData] = useState(false);
-  const [refreshDataStatus, setRefreshDataStatus] = useState(null);
-  const [refreshDataError, setRefreshDataError] = useState(null);
-
-  // Add new state for continue from last date functionality
-  const [latestProcessedDate, setLatestProcessedDate] = useState(null);
-  const [isLoadingLatestDate, setIsLoadingLatestDate] = useState(false);
-  const [continueFromLastDateError, setContinueFromLastDateError] = useState(null);
+  // S3 connection test state
+  const [isTestingS3, setIsTestingS3] = useState(false);
+  const [s3TestResults, setS3TestResults] = useState(null);
+  const [s3TestError, setS3TestError] = useState(null);
 
   // Fetch the last load timestamp from the API
   const fetchLastLoadTimestamp = useCallback(async () => {
@@ -108,6 +103,7 @@ export const MixpanelDebugPage = () => {
         setIsProcessing(false);
         setProcessingStatus('Processing complete!');
         fetchLastLoadTimestamp(); // Update the last timestamp
+        fetchDatabaseStats(); // Refresh stats after completion
       } else if (status.error) {
         setIsProcessing(false);
         setProcessingError(status.error);
@@ -132,6 +128,9 @@ export const MixpanelDebugPage = () => {
 
     // Fetch the last load timestamp
     fetchLastLoadTimestamp();
+    
+    // Fetch database stats
+    fetchDatabaseStats();
 
     // Set up polling for process status
     const interval = setInterval(() => {
@@ -163,11 +162,22 @@ export const MixpanelDebugPage = () => {
       // Start the processing pipeline
       const result = await api.startMixpanelProcessing({
         start_date: startDateInput,
-        wipe_folder: true // Always wipe the folder as requested
+        wipe_folder: true
       });
       
       if (result.success) {
         setProcessingStatus('Processing started successfully');
+        
+        // Add to request history
+        const newRequest = {
+          id: Date.now(),
+          startDate: startDateInput,
+          endDate: 'today',
+          timestamp: Date.now()
+        };
+        const updatedHistory = [newRequest, ...requestHistory.slice(0, 9)]; // Keep last 10
+        setRequestHistory(updatedHistory);
+        safeLocalStorage.setItem('mixpanelRequestHistory', JSON.stringify(updatedHistory));
       } else {
         throw new Error(result.error || 'Failed to start processing');
       }
@@ -188,74 +198,45 @@ export const MixpanelDebugPage = () => {
     }
   };
 
-  // Handle resetting the last sync counter
-  const handleResetSyncCounter = async () => {
-    setProcessingStatus(null);
-    setProcessingError(null);
-
-    try {
-      const result = await api.resetMixpanelDebugSyncTS();
-      setProcessingStatus(result.message);
-      setLastLoadTimestamp(null);
-    } catch (err) {
-      setProcessingError(err.message || 'An unknown error occurred');
-    }
-  };
-
-  // Handle resetting all database data
-  const handleResetDatabase = async () => {
+  // Handle reset raw data only
+  const handleResetRawData = async () => {
     // Show confirmation dialog
     const confirmed = window.confirm(
-      'Are you sure you want to reset ALL Mixpanel data in the database? This action cannot be undone and will delete all events, users, and processing history.'
+      'This will delete ALL raw Mixpanel data from the database.\n\n' +
+      'You can then manually run the pipeline to re-download data.\n\n' +
+      'This action cannot be undone. Are you sure you want to continue?'
     );
     
     if (!confirmed) {
       return;
     }
 
-    setIsResettingDatabase(true);
-    setResetDatabaseStatus(null);
-    setResetDatabaseError(null);
+    setIsResettingRawData(true);
+    setResetRawDataStatus(null);
+    setResetRawDataError(null);
     setProcessingStatus(null);
     setProcessingError(null);
 
     try {
-      const result = await api.resetMixpanelDatabase();
-      setResetDatabaseStatus(result.message);
+      setResetRawDataStatus('Deleting all raw data...');
+      await api.resetMixpanelDatabase();
+      
+      setResetRawDataStatus('✅ Raw data deleted successfully! You can now run the pipeline to re-download data.');
       setLastLoadTimestamp(null);
-      // Refresh database stats after reset
-      fetchDatabaseStats();
+      
+      // Clear the database stats since we reset everything
+      setDbStats({
+        totalEvents: 0, 
+        totalUsers: 0,
+        eventBreakdown: [],
+        monthlyBreakdown: [],
+        dailyBreakdown: [],
+        dateRange: { earliest: null, latest: null }
+      });
     } catch (err) {
-      setResetDatabaseError(err.message || 'An unknown error occurred');
+      setResetRawDataError(err.message || 'An unknown error occurred');
     } finally {
-      setIsResettingDatabase(false);
-    }
-  };
-
-  // Handle refreshing data by clearing data directories
-  const handleRefreshData = async () => {
-    // Show confirmation dialog
-    const confirmed = window.confirm(
-      'Are you sure you want to refresh all data? This will delete all downloaded files in the data/events and data/users directories. You will need to re-download data after this action.'
-    );
-    
-    if (!confirmed) {
-      return;
-    }
-
-    setIsRefreshingData(true);
-    setRefreshDataStatus(null);
-    setRefreshDataError(null);
-    setProcessingStatus(null);
-    setProcessingError(null);
-
-    try {
-      const result = await api.refreshMixpanelData();
-      setRefreshDataStatus(result.message);
-    } catch (err) {
-      setRefreshDataError(err.message || 'An unknown error occurred');
-    } finally {
-      setIsRefreshingData(false);
+      setIsResettingRawData(false);
     }
   };
 
@@ -273,6 +254,68 @@ export const MixpanelDebugPage = () => {
       setDbTestError(err.message || 'An unknown error occurred');
     } finally {
       setIsTestingDb(false);
+    }
+  };
+
+  // Handle S3 connection test
+  const handleTestS3 = async () => {
+    setIsTestingS3(true);
+    setS3TestResults(null);
+    setS3TestError(null);
+
+    try {
+      const results = await api.testS3Connection();
+      setS3TestResults(results);
+    } catch (err) {
+      setS3TestError(err.message || 'An unknown error occurred');
+    } finally {
+      setIsTestingS3(false);
+    }
+  };
+
+  // Handle searching for user events
+  const handleSearchUserEvents = async () => {
+    if (!userIdInput.trim()) {
+      setUserEventsError('User ID is required');
+      return;
+    }
+
+    setIsLoadingUserEvents(true);
+    setUserEvents([]);
+    setUserEventsError(null);
+
+    try {
+      const events = await api.getUserEvents(userIdInput.trim());
+      // Sort events by timestamp (oldest first)
+      const sortedEvents = events.sort((a, b) => a.time - b.time);
+      setUserEvents(sortedEvents);
+    } catch (err) {
+      setUserEventsError(err.message || 'Failed to fetch user events');
+    } finally {
+      setIsLoadingUserEvents(false);
+    }
+  };
+
+  const fetchDatabaseStats = async () => {
+    setIsLoadingStats(true);
+    try {
+      const stats = await api.getMixpanelDatabaseStats();
+      // Ensure the stats object has the expected structure
+      if (stats && typeof stats === 'object') {
+        setDbStats({
+          totalEvents: stats.totalEvents || 0,
+          totalUsers: stats.totalUsers || 0,
+          eventBreakdown: stats.eventBreakdown || [],
+          monthlyBreakdown: stats.monthlyBreakdown || [],
+          dailyBreakdown: stats.dailyBreakdown || [],
+          dateRange: stats.dateRange || { earliest: null, latest: null }
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching database stats:", error);
+      // Don't update state on error - keep the default values
+    } finally {
+      setIsLoadingStats(false);
     }
   };
   
@@ -311,100 +354,6 @@ export const MixpanelDebugPage = () => {
     }
   };
 
-  // Handle searching for user events
-  const handleSearchUserEvents = async () => {
-    if (!userIdInput.trim()) {
-      setUserEventsError('User ID is required');
-      return;
-    }
-
-    setIsLoadingUserEvents(true);
-    setUserEvents([]);
-    setUserEventsError(null);
-
-    try {
-      const events = await api.getUserEvents(userIdInput.trim());
-      // Sort events by timestamp (oldest first)
-      const sortedEvents = events.sort((a, b) => a.time - b.time);
-      setUserEvents(sortedEvents);
-    } catch (err) {
-      setUserEventsError(err.message || 'Failed to fetch user events');
-    } finally {
-      setIsLoadingUserEvents(false);
-    }
-  };
-
-  useEffect(() => {
-    // Fetch database stats when component mounts
-    fetchDatabaseStats();
-  }, []);
-
-  const fetchDatabaseStats = async () => {
-    setIsLoadingStats(true);
-    try {
-      const stats = await api.getMixpanelDatabaseStats();
-      setDbStats(stats);
-    } catch (error) {
-      console.error("Error fetching database stats:", error);
-    } finally {
-      setIsLoadingStats(false);
-    }
-  };
-
-  // Handle continuing from the last processed date
-  const handleContinueFromLastDate = async () => {
-    setIsLoadingLatestDate(true);
-    setContinueFromLastDateError(null);
-    setProcessingError(null);
-    setProcessingStatus(null);
-
-    try {
-      // Get the latest processed date
-      const dateResult = await api.getLatestProcessedDate();
-      
-      if (!dateResult.has_processed_dates) {
-        setContinueFromLastDateError('No processed dates found. Please use the regular "Start Processing" with a start date.');
-        setIsLoadingLatestDate(false);
-        return;
-      }
-
-      if (!dateResult.next_date_to_process) {
-        setContinueFromLastDateError('Unable to determine next date to process.');
-        setIsLoadingLatestDate(false);
-        return;
-      }
-
-      setLatestProcessedDate(dateResult.latest_processed_date);
-      
-      // Start processing from the next date
-      setIsProcessing(true);
-      setProcessingStatus(null);
-      setProcessingError(null);
-      setContinueFromLastDateError(null);
-      setProcessingProgress({
-        stage: 'initializing',
-        percent: 0,
-        currentDate: null
-      });
-
-      const result = await api.startMixpanelProcessing({
-        start_date: dateResult.next_date_to_process,
-        wipe_folder: true
-      });
-      
-      if (result.success) {
-        setProcessingStatus(`Processing started from ${dateResult.next_date_to_process} (continuing after ${dateResult.latest_processed_date})`);
-      } else {
-        throw new Error(result.error || 'Failed to start processing');
-      }
-    } catch (err) {
-      setContinueFromLastDateError(err.message || 'An unknown error occurred');
-      setIsProcessing(false);
-    } finally {
-      setIsLoadingLatestDate(false);
-    }
-  };
-
   return (
     <div className="flex">
       {/* Request History Sidebar */}
@@ -429,113 +378,101 @@ export const MixpanelDebugPage = () => {
       
       {/* Main Content */}
       <div className="flex-1 p-6 max-w-5xl">
-        <h1 className="text-2xl font-bold mb-6">Mixpanel Data Processor</h1>
+        <h1 className="text-2xl font-bold mb-6">Mixpanel Data Manager</h1>
 
-        {/* Data Processing Section */}
+        {/* Quick Actions Section */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Process Mixpanel Data</h2>
+          <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
           
           <div className="mb-4">
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
               Last full load: {lastLoadTimestamp ? formatTimestamp(lastLoadTimestamp) : 'Never'}
             </p>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-1" htmlFor="start_date_input">
-                Start Date (YYYY-MM-DD)<span className="text-red-500"> *</span>
-              </label>
-              <input
-                type="text"
-                id="start_date_input"
-                value={startDateInput}
-                onChange={(e) => setStartDateInput(e.target.value)}
-                className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-                placeholder="e.g., 2023-05-01"
-                required
-                disabled={isProcessing}
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Data will be processed from this date until today
-              </p>
-            </div>
-
-            <div className="flex space-x-4">
+            <div className="flex flex-wrap gap-4">
               <button
                 type="button"
-                onClick={handleStartProcessing}
-                disabled={isProcessing || !startDateInput}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                onClick={handleResetRawData}
+                disabled={isProcessing || isResettingRawData}
+                className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 font-medium"
               >
-                {isProcessing ? 'Processing...' : 'Start Processing'}
+                {isResettingRawData ? 'Deleting Raw Data...' : 'Delete All Raw Data'}
               </button>
 
-              <div className="relative group">
-                <button
-                  type="button"
-                  onClick={handleContinueFromLastDate}
-                  disabled={isProcessing || isLoadingLatestDate}
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
-                >
-                  {isLoadingLatestDate ? 'Loading...' : 'Continue from Last Date'}
-                </button>
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                  Automatically continues processing from the day after the last successfully processed date
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={handleTestDb}
+                disabled={isTestingDb || isProcessing}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+              >
+                {isTestingDb ? 'Testing...' : 'Test Database'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestS3}
+                disabled={isTestingS3 || isProcessing}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-medium"
+              >
+                {isTestingS3 ? 'Testing S3...' : 'Test S3 Connection'}
+              </button>
 
               {isProcessing && (
                 <button
                   type="button"
                   onClick={handleCancelProcessing}
-                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                  className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
                 >
                   Cancel Processing
                 </button>
               )}
-
-              <div className="relative group">
-                <button
-                  type="button"
-                  onClick={handleResetSyncCounter}
-                  disabled={isProcessing || !lastLoadTimestamp}
-                  className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:bg-gray-400"
-                >
-                  Reset Last Sync Counter
-                </button>
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                  Resets the timestamp tracking when data was last processed, allowing re-processing of all dates
-                </div>
-              </div>
-
-              <div className="relative group">
-                <button
-                  type="button"
-                  onClick={handleRefreshData}
-                  disabled={isProcessing || isRefreshingData}
-                  className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:bg-gray-400"
-                >
-                  {isRefreshingData ? 'Refreshing...' : 'Refresh Data'}
-                </button>
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                  Deletes all downloaded files in data/events and data/users directories
-                </div>
-              </div>
-
-              <div className="relative group">
-                <button
-                  type="button"
-                  onClick={handleResetDatabase}
-                  disabled={isProcessing || isResettingDatabase}
-                  className="px-4 py-2 bg-red-800 text-white rounded hover:bg-red-900 disabled:bg-gray-400"
-                >
-                  {isResettingDatabase ? 'Resetting...' : 'Reset All Data'}
-                </button>
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                  Completely wipes all data from the database including events, users, and processing history
-                </div>
-              </div>
             </div>
           </div>
+
+          {/* Custom Date Processing */}
+          <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <h3 className="text-lg font-medium mb-3">Custom Date Processing</h3>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium mb-1" htmlFor="start_date_input">
+                  Start Date (YYYY-MM-DD)
+                </label>
+                <input
+                  type="text"
+                  id="start_date_input"
+                  value={startDateInput}
+                  onChange={(e) => setStartDateInput(e.target.value)}
+                  className="w-full p-2 border rounded dark:bg-gray-600 dark:border-gray-500"
+                  placeholder="e.g., 2025-01-01"
+                  disabled={isProcessing}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleStartProcessing}
+                disabled={isProcessing || !startDateInput}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
+              >
+                {isProcessing ? 'Processing...' : 'Start Processing'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Data will be processed from this date until today
+            </p>
+          </div>
+
+          {/* Status Messages */}
+          {resetRawDataStatus && (
+            <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-100 rounded">
+              {resetRawDataStatus}
+            </div>
+          )}
+
+          {resetRawDataError && (
+            <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
+              Error: {resetRawDataError}
+            </div>
+          )}
 
           {isProcessing && (
             <div className="mt-6">
@@ -566,117 +503,208 @@ export const MixpanelDebugPage = () => {
               Error: {processingError}
             </div>
           )}
-
-          {resetDatabaseStatus && (
-            <div className="mt-4 p-3 bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-100 rounded">
-              {resetDatabaseStatus}
-            </div>
-          )}
-
-          {resetDatabaseError && (
-            <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
-              Error: {resetDatabaseError}
-            </div>
-          )}
-
-          {refreshDataStatus && (
-            <div className="mt-4 p-3 bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-100 rounded">
-              {refreshDataStatus}
-            </div>
-          )}
-
-          {refreshDataError && (
-            <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
-              Error: {refreshDataError}
-            </div>
-          )}
-
-          {continueFromLastDateError && (
-            <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
-              Error: {continueFromLastDateError}
-            </div>
-          )}
         </div>
 
-        {/* Test DB Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Test Database</h2>
+        {/* Database Statistics Section */}
+        <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Database Statistics</h2>
+            <button 
+              onClick={fetchDatabaseStats} 
+              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+              disabled={isLoadingStats}
+            >
+              {isLoadingStats ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
           
-          <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">
-            This will find 3 random users who did the "RC Trial started" event and have their abi_ad_id set.
-          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border border-gray-200 dark:border-gray-600">
+              <h3 className="text-md font-medium mb-2">Total Events</h3>
+              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{(dbStats?.totalEvents || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border border-gray-200 dark:border-gray-600">
+              <h3 className="text-md font-medium mb-2">Total Users</h3>
+              <p className="text-2xl font-bold text-green-600 dark:text-green-400">{(dbStats?.totalUsers || 0).toLocaleString()}</p>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={handleTestDb}
-            disabled={isTestingDb}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
-          >
-            {isTestingDb ? 'Testing...' : 'Test DB'}
-          </button>
-
-          {dbTestError && (
-            <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
-              Error: {dbTestError}
+          {/* Date Range Info */}
+          {dbStats.dateRange && (dbStats.dateRange.earliest || dbStats.dateRange.latest) && (
+            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900 rounded border border-blue-200 dark:border-blue-700">
+              <h3 className="text-md font-medium mb-2 text-blue-800 dark:text-blue-200">Data Range</h3>
+              <div className="text-sm text-blue-700 dark:text-blue-300">
+                <p>Earliest Event: {dbStats.dateRange.earliest ? new Date(dbStats.dateRange.earliest).toLocaleString() : 'N/A'}</p>
+                <p>Latest Event: {dbStats.dateRange.latest ? new Date(dbStats.dateRange.latest).toLocaleString() : 'N/A'}</p>
+              </div>
             </div>
           )}
 
-          {dbTestResults && (
-            <div className="mt-4">
-              <h3 className="text-lg font-medium mb-2">Test Results</h3>
-              
-              {dbTestResults.map((user, index) => (
-                <div key={index} className="bg-gray-100 dark:bg-gray-900 p-4 rounded mb-4">
-                  <h4 className="font-bold text-lg mb-2">User {index + 1}</h4>
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    <div className="font-semibold">Name:</div>
-                    <div>{user.name}</div>
-                    
-                    <div className="font-semibold">Distinct ID:</div>
-                    <div>{user.distinct_id}</div>
-                    
-                    <div className="font-semibold">Ad ID:</div>
-                    <div>{user.abi_ad_id}</div>
-                    
-                    <div className="font-semibold">Event:</div>
-                    <div>{user.event_name}</div>
-                  </div>
-                  
-                  <div className="mt-2">
-                    <div className="font-semibold mb-1">Event Properties:</div>
-                    <pre className="bg-gray-200 dark:bg-gray-800 p-2 rounded text-xs overflow-auto max-h-60">
-                      {JSON.stringify(user.event_properties, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              ))}
+          {/* Event Breakdown */}
+          {dbStats.eventBreakdown && dbStats.eventBreakdown.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-md font-medium mb-2">Event Breakdown</h3>
+              <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Event Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Count</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Percentage</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                    {dbStats.eventBreakdown.map((event, index) => (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-800'}>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{event.name}</td>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{event.count.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">
+                          {((event.count / (dbStats?.totalEvents || 1)) * 100).toFixed(2)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Daily Breakdown (Last 30 Days) */}
+          {dbStats.dailyBreakdown && dbStats.dailyBreakdown.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-md font-medium mb-2">Daily Breakdown (Last 30 Days)</h3>
+              <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded overflow-hidden max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+                  <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Events</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Users</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                    {dbStats.dailyBreakdown.map((day, index) => (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-800'}>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 font-medium">{day.date}</td>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{day.events.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{day.users.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
+
+        {/* Database Testing Section */}
+        {dbTestResults && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">Database Test Results</h2>
+            
+            {dbTestResults.map((user, index) => (
+              <div key={index} className="bg-gray-100 dark:bg-gray-900 p-4 rounded mb-4">
+                <h4 className="font-bold text-lg mb-2">User {index + 1}</h4>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <div className="font-semibold">Name:</div>
+                  <div>{user.name}</div>
+                  
+                  <div className="font-semibold">Distinct ID:</div>
+                  <div>{user.distinct_id}</div>
+                  
+                  <div className="font-semibold">Ad ID:</div>
+                  <div>{user.abi_ad_id}</div>
+                  
+                  <div className="font-semibold">Event:</div>
+                  <div>{user.event_name}</div>
+                </div>
+                
+                <div className="mt-2">
+                  <div className="font-semibold mb-1">Event Properties:</div>
+                  <pre className="bg-gray-200 dark:bg-gray-800 p-2 rounded text-xs overflow-auto max-h-60">
+                    {JSON.stringify(user.event_properties, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {dbTestError && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+            <div className="p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
+              Test Error: {dbTestError}
+            </div>
+          </div>
+        )}
+
+        {/* S3 Connection Test Results */}
+        {s3TestResults && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">S3 Connection Test Results</h2>
+            
+            <div className="space-y-4">
+              <div className="p-3 bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-100 rounded">
+                ✅ S3 connection test completed successfully!
+              </div>
+              
+              <div>
+                <h3 className="font-semibold mb-2">User Data:</h3>
+                <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded">
+                  <div>Status: {s3TestResults.user_data?.status || 'Unknown'}</div>
+                  <div>Files found: {s3TestResults.user_data?.files_count || 0}</div>
+                  {s3TestResults.user_data?.sample_file && (
+                    <div>Sample file: {s3TestResults.user_data.sample_file}</div>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <h3 className="font-semibold mb-2">Event Data:</h3>
+                <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded">
+                  <div>Status: {s3TestResults.event_data?.status || 'Unknown'}</div>
+                  <div>Date range: {s3TestResults.event_data?.date_range || 'None'}</div>
+                  <div>Available days: {s3TestResults.event_data?.available_days || 0}</div>
+                  <div>Missing days: {s3TestResults.event_data?.missing_days || 0}</div>
+                  <div>Coverage: {s3TestResults.event_data?.coverage_percentage || 0}%</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {s3TestError && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+            <div className="p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
+              S3 Test Error: {s3TestError}
+            </div>
+          </div>
+        )}
 
         {/* User Events Section */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">User Event History</h2>
           
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-1" htmlFor="user_id_input">
-              User ID<span className="text-red-500"> *</span>
-            </label>
-            <div className="flex">
-              <input
-                type="text"
-                id="user_id_input"
-                value={userIdInput}
-                onChange={(e) => setUserIdInput(e.target.value)}
-                className="flex-1 p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-                placeholder="Enter user ID or distinct ID"
-                required
-              />
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium mb-1" htmlFor="user_id_input">
+                  User ID or Distinct ID
+                </label>
+                <input
+                  type="text"
+                  id="user_id_input"
+                  value={userIdInput}
+                  onChange={(e) => setUserIdInput(e.target.value)}
+                  className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                  placeholder="Enter user ID or distinct ID"
+                />
+              </div>
               <button
                 type="button"
                 onClick={handleSearchUserEvents}
                 disabled={isLoadingUserEvents || !userIdInput.trim()}
-                className="ml-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
               >
                 {isLoadingUserEvents ? 'Loading...' : 'Search'}
               </button>
@@ -738,128 +766,6 @@ export const MixpanelDebugPage = () => {
           {!isLoadingUserEvents && userEvents.length === 0 && userIdInput && !userEventsError && (
             <div className="flex justify-center items-center py-8">
               <p className="text-gray-500">No events found for this user</p>
-            </div>
-          )}
-        </div>
-
-        {/* Add Database Stats Section */}
-        <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Database Statistics</h2>
-            <button 
-              onClick={fetchDatabaseStats} 
-              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-              disabled={isLoadingStats}
-            >
-              {isLoadingStats ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border border-gray-200 dark:border-gray-600">
-              <h3 className="text-md font-medium mb-2">Total Events</h3>
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{dbtStats.totalEvents.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border border-gray-200 dark:border-gray-600">
-              <h3 className="text-md font-medium mb-2">Total Users</h3>
-              <p className="text-2xl font-bold text-green-600 dark:text-green-400">{dbtStats.totalUsers.toLocaleString()}</p>
-            </div>
-          </div>
-
-          {/* Date Range Info */}
-          {dbtStats.dateRange && (dbtStats.dateRange.earliest || dbtStats.dateRange.latest) && (
-            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900 rounded border border-blue-200 dark:border-blue-700">
-              <h3 className="text-md font-medium mb-2 text-blue-800 dark:text-blue-200">Data Range</h3>
-              <div className="text-sm text-blue-700 dark:text-blue-300">
-                <p>Earliest Event: {dbtStats.dateRange.earliest ? new Date(dbtStats.dateRange.earliest).toLocaleString() : 'N/A'}</p>
-                <p>Latest Event: {dbtStats.dateRange.latest ? new Date(dbtStats.dateRange.latest).toLocaleString() : 'N/A'}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Monthly Breakdown */}
-          {dbtStats.monthlyBreakdown && dbtStats.monthlyBreakdown.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-md font-medium mb-2">Monthly Breakdown</h3>
-              <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Month</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Events</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Users</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Event Types</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                    {dbtStats.monthlyBreakdown.map((month, index) => (
-                      <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-800'}>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 font-medium">{month.month}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{month.events.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{month.users.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{month.uniqueEvents}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Daily Breakdown (Last 30 Days) */}
-          {dbtStats.dailyBreakdown && dbtStats.dailyBreakdown.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-md font-medium mb-2">Daily Breakdown (Last 30 Days)</h3>
-              <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded overflow-hidden max-h-96 overflow-y-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                  <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Events</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Users</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Event Types</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                    {dbtStats.dailyBreakdown.map((day, index) => (
-                      <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-800'}>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 font-medium">{day.date}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{day.events.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{day.users.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{day.uniqueEvents}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          
-          {dbtStats.eventBreakdown && dbtStats.eventBreakdown.length > 0 && (
-            <div>
-              <h3 className="text-md font-medium mb-2">Event Breakdown</h3>
-              <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Event Name</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Count</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Percentage</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                    {dbtStats.eventBreakdown.map((event, index) => (
-                      <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-800'}>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{event.name}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">{event.count.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200">
-                          {((event.count / dbtStats.totalEvents) * 100).toFixed(2)}%
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
           )}
         </div>

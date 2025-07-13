@@ -378,8 +378,9 @@ def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batc
                     invalid_distinct_id_count += 1
                     continue
                 
-                # Apply user filtering logic
-                email = user_data.get('email2') or user_data.get('mp_email', '')
+                # Apply user filtering logic - extract email from properties
+                properties = user_data.get('properties', {})
+                email = properties.get('$email', '')
                 filter_result = should_filter_user(distinct_id, email)
                 
                 if filter_result['filter']:
@@ -568,21 +569,24 @@ def should_filter_user(distinct_id: str, email: str) -> Dict[str, Any]:
 def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str, Any]:
     """Prepare user record with proper data types and validation"""
     
-    # Extract attribution data (use direct values, not hash)
-    abi_ad_id = user_data.get('abi_ad_id')
-    abi_campaign_id = user_data.get('abi_campaign_id')
-    abi_ad_set_id = user_data.get('abi_ad_set_id')
+    # Extract from properties (correct structure)
+    properties = user_data.get('properties', {})
     
-    # Extract location data
-    country = user_data.get('mp_country_code')
-    region = user_data.get('mp_region')
-    city = user_data.get('mp_city')
+    # Extract attribution data (use direct values, not hash)
+    abi_ad_id = properties.get('abi_~ad_id')
+    abi_campaign_id = properties.get('abi_~campaign_id')
+    abi_ad_set_id = properties.get('abi_~ad_set_id')
+    
+    # Extract location data from properties with correct field names
+    country = properties.get('$country_code')
+    region = properties.get('$region')
+    city = properties.get('$city')
     
     # Determine attribution status
     has_abi_attribution = bool(abi_ad_id)
     
-    # Extract timestamps
-    first_seen = user_data.get('first_install_date') or user_data.get('mp_ae_first_app_open_date')
+    # Extract timestamps from properties with correct field names
+    first_seen = properties.get('first_install_date') or properties.get('$ae_first_app_open_date')
     if first_seen:
         try:
             first_seen_dt = datetime.datetime.fromisoformat(first_seen.replace('Z', '+00:00'))
@@ -591,7 +595,7 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
     else:
         first_seen_dt = datetime.datetime.now()
     
-    last_updated = user_data.get('mp_last_seen')
+    last_updated = properties.get('$last_seen')
     if last_updated:
         try:
             last_updated_dt = datetime.datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
@@ -654,21 +658,25 @@ def prepare_event_record(event_data: Dict[str, Any], file_path: str, line_num: i
     try:
         properties = event_data.get('properties', {})
         
-        # Extract required fields
+        # Extract required fields - based on actual data structure
+        # Events only have $insert_id in properties (not at top level)
         event_uuid = properties.get('$insert_id')
+        # Events only have distinct_id in properties (not at top level)
         distinct_id = properties.get('distinct_id')
+        # Events have event name at top level
         event_name = event_data.get('event')
         
         # Validate required fields
         if not distinct_id:
             return None
         
-        # Generate fallback UUID
+        # Generate fallback UUID if needed
         if not event_uuid:
+            # Time is only in properties
             timestamp = properties.get('time', 0)
             event_uuid = f"{distinct_id}_{event_name}_{timestamp}_{hash(str(properties))}"
         
-        # Parse timestamp with proper UTC handling
+        # Parse timestamp with proper UTC handling - time is only in properties
         try:
             timestamp = properties.get('time', 0)
             if isinstance(timestamp, str):

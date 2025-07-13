@@ -59,7 +59,8 @@ EVENTS_TO_KEEP = [
     "RC Cancellation", 
     "RC Initial purchase", 
     "RC Trial cancelled", 
-    "RC Renewal"
+    "RC Renewal",
+    "RC Expiration"
 ]
 
 def get_database_connection():
@@ -281,21 +282,26 @@ def find_latest_data_date(conn):
     return result[0] if result and result[0] else None
 
 def identify_missing_data(conn, latest_date):
-    """Identify which dates need data downloads by checking database records for the last 90 days"""
-    yesterday = datetime.now().date() - timedelta(days=1)
+    """
+    Identify which dates need data downloads using two requirements:
+    1. Check last 90 days for missing data (gap filling)
+    2. Always re-download last 3 days (refresh requirement)
+    """
+    today = datetime.now().date()
     
-    # Always check the last 90 days (including yesterday)
-    start_date = yesterday - timedelta(days=89)  # 90 days total including yesterday
-    logger.info(f"Checking last 90 days for missing data: {start_date} to {yesterday}")
+    # REQUIREMENT 1: Check last 90 days for missing data (gap filling)
+    start_date = today - timedelta(days=89)  # 90 days total including today
+    logger.info(f"📅 GAP FILLING: Checking last 90 days ({start_date} to {today}) for missing data")
     
     missing_dates = []
+    gap_fill_dates = []
     current_date = start_date
     dates_checked = 0
     dates_found = 0
     
     cursor = conn.cursor()
     
-    while current_date <= yesterday:
+    while current_date <= today:
         dates_checked += 1
         # Check if this date has data in database
         if USE_POSTGRES:
@@ -305,7 +311,7 @@ def identify_missing_data(conn, latest_date):
         result = cursor.fetchone()
         
         if not result or result[0] == 0:
-            missing_dates.append(current_date)
+            gap_fill_dates.append(current_date)
             logger.info(f"🔍 Missing data: {current_date}")
         else:
             dates_found += 1
@@ -313,15 +319,37 @@ def identify_missing_data(conn, latest_date):
         
         current_date += timedelta(days=1)
     
-    logger.info(f"📊 Checked {dates_checked} dates: {dates_found} have data, {len(missing_dates)} are missing")
-    print(f"📊 Missing data for {len(missing_dates)} days (out of {dates_checked} checked)")
+    logger.info(f"📊 Checked {dates_checked} dates: {dates_found} have data, {len(gap_fill_dates)} are missing")
+    
+    # REQUIREMENT 2: Always re-download last 3 days (refresh requirement)
+    refresh_start = today - timedelta(days=2)  # Last 3 days including today
+    refresh_dates = []
+    current_date = refresh_start
+    
+    logger.info(f"🔄 REFRESH REQUIREMENT: Always re-downloading last 3 days ({refresh_start} to {today})")
+    
+    while current_date <= today:
+        refresh_dates.append(current_date)
+        logger.info(f"🔄 Refresh required: {current_date}")
+        current_date += timedelta(days=1)
+    
+    # COMBINE: Gap filling + refresh requirement (remove duplicates)
+    missing_dates = list(set(gap_fill_dates + refresh_dates))
+    missing_dates.sort()
+    
+    logger.info(f"📊 SUMMARY:")
+    logger.info(f"  - Gap filling: {len(gap_fill_dates)} missing dates")
+    logger.info(f"  - Refresh requirement: {len(refresh_dates)} dates (last 3 days)")
+    logger.info(f"  - Total downloads needed: {len(missing_dates)} dates")
+    
+    print(f"📊 Missing data for {len(gap_fill_dates)} days (out of {dates_checked} checked)")
+    print(f"🔄 Plus {len(refresh_dates)} days for refresh requirement")
+    print(f"📥 Total downloads needed: {len(missing_dates)} dates")
     
     if len(missing_dates) > 0:
-        logger.info(f"🔍 Found {len(missing_dates)} missing dates:")
+        logger.info(f"🔍 Will download {len(missing_dates)} dates:")
         for date in missing_dates:
             logger.info(f"  - {date}")
-    else:
-        logger.info("✅ All data for the last 90 days is present")
     
     return missing_dates
 
@@ -379,7 +407,8 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                 total_count += 1
                 try:
                     event_data = json.loads(line.decode('utf-8').strip())
-                    event_name = event_data.get("event")
+                    # Handle both old and new event data formats
+                    event_name = event_data.get("event") or event_data.get("event_name")
                     
                     # Only store events that match our filter list
                     if event_name in EVENTS_TO_KEEP:
@@ -439,7 +468,8 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
                 
                 try:
                     user_data = json.loads(line.decode('utf-8').strip())
-                    distinct_id = user_data.get('mp_distinct_id') or user_data.get('abi_distinct_id')
+                    # FIX: Use correct field name - distinct_id is at top level
+                    distinct_id = user_data.get('distinct_id')
                     
                     if distinct_id:
                         # Store in database (replace existing)
@@ -540,13 +570,15 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
         month = target_date.strftime('%m')
         day = target_date.strftime('%d')
         
-        event_s3_prefix = f"{PROJECT_ID}/{year}/{month}/{day}/full_day/"
+        # NEW BUCKET STRUCTURE: Use hourly pipeline structure
+        event_s3_prefix = f"{PROJECT_ID}/mp_master_event/{year}/{month}/{day}/"
+        
         logger.info(f"Downloading event files for {target_date.strftime('%Y-%m-%d')} from s3://{S3_BUCKET_EVENTS}/{event_s3_prefix}")
         
+        # Get event files from new bucket structure
         event_object_keys = list_s3_objects(s3_client, S3_BUCKET_EVENTS, prefix=event_s3_prefix)
-        # Filter for actual event export files
-        event_export_keys = [k for k in event_object_keys if k.endswith('export.json.gz')]
-
+        event_export_keys = [k for k in event_object_keys if k.endswith('.json.gz')]
+        
         if not event_export_keys:
             logger.warning(f"No event export files found for {target_date.strftime('%Y-%m-%d')}")
             return False

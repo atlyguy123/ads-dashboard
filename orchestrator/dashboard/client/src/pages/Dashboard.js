@@ -50,6 +50,10 @@ export const Dashboard = () => {
     return localStorage.getItem('dashboard_last_updated') || null;
   });
   
+  // Pipeline status state
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState(null);
+  
   // Dashboard controls state
   const [dateRange, setDateRange] = useState(() => {
     const saved = localStorage.getItem('dashboard_date_range');
@@ -506,8 +510,32 @@ export const Dashboard = () => {
     return sortedData;
   }, [dashboardData, textFilter, sortConfig, filterRecursive, applyBreakdownFiltering]);
 
+  // Check pipeline status
+  const checkPipelineStatus = useCallback(async () => {
+    try {
+      const result = await dashboardApi.checkPipelineStatus();
+      setPipelineRunning(result.isRunning);
+      setPipelineStatus(result.status);
+      
+      if (result.isRunning) {
+        console.log('🔄 Master pipeline is currently running - data refresh disabled');
+      }
+    } catch (error) {
+      console.error('Error checking pipeline status:', error);
+      // Set safe defaults on error
+      setPipelineRunning(false);
+      setPipelineStatus(null);
+    }
+  }, []);
+
   // Handle background data refresh (doesn't show main loading state)
   const handleBackgroundRefresh = useCallback(async () => {
+    // Check if pipeline is running first
+    if (pipelineRunning) {
+      console.log('⚠️ Background refresh skipped - master pipeline is running');
+      return;
+    }
+    
     setBackgroundLoading(true);
     setError(null);
     
@@ -546,10 +574,17 @@ export const Dashboard = () => {
     } finally {
       setBackgroundLoading(false);
     }
-  }, [rowOrder.length]);
+  }, [rowOrder.length, pipelineRunning]);
 
   // Handle dashboard data refresh (fast, pre-computed data)
   const handleRefresh = useCallback(async () => {
+    // Check if pipeline is running first
+    if (pipelineRunning) {
+      console.log('⚠️ Dashboard refresh skipped - master pipeline is running');
+      setError('Cannot refresh data while master pipeline is running. Please wait for the pipeline to complete.');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
@@ -594,7 +629,7 @@ export const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pipelineRunning]);
 
   // Initialize component state on mount (no automatic data refresh)
   useEffect(() => {
@@ -617,6 +652,17 @@ export const Dashboard = () => {
     
     hasInitialLoadRef.current = true;
   }, []); // Empty dependency array - only run once on mount
+
+  // Pipeline status polling
+  useEffect(() => {
+    // Check pipeline status on mount
+    checkPipelineStatus();
+    
+    // Set up polling interval
+    const interval = setInterval(checkPipelineStatus, 10000); // Check every 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [checkPipelineStatus]);
 
   // REMOVED: Auto-refresh on parameter changes - now only refresh when user clicks "Refresh Data"
   // This gives users full control over when data is fetched
@@ -788,6 +834,8 @@ export const Dashboard = () => {
             }}
             loading={loading}
             backgroundLoading={backgroundLoading}
+            pipelineRunning={pipelineRunning}
+            pipelineStatus={pipelineStatus}
           />
         </div>
 

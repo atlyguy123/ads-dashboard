@@ -318,6 +318,42 @@ class DashboardApiService {
     const queryParams = new URLSearchParams(params).toString();
     return this.makeRequest(`/analytics/overview-roas-chart?${queryParams}`);
   }
+
+  /**
+   * Check if master pipeline is currently running
+   * @returns {Promise<{isRunning: boolean, status: Object}>} - Pipeline running status and details
+   */
+  async checkPipelineStatus() {
+    try {
+      // Get currently running processes
+      const runningResponse = await fetch(`${API_BASE_URL}/api/running`);
+      const runningData = await runningResponse.json();
+      
+      // Check if master_pipeline has running processes
+      const masterPipelineRunning = runningData.master_pipeline && 
+        Object.keys(runningData.master_pipeline).length > 0 &&
+        Object.values(runningData.master_pipeline).some(process => process.poll === null);
+      
+      // Get detailed pipeline status
+      const pipelineResponse = await fetch(`${API_BASE_URL}/api/pipelines`);
+      const pipelineData = await pipelineResponse.json();
+      const masterPipelineStatus = pipelineData.find(p => p.name === 'master_pipeline');
+      
+      return {
+        isRunning: masterPipelineRunning,
+        status: masterPipelineStatus,
+        runningProcesses: runningData.master_pipeline || {}
+      };
+    } catch (error) {
+      console.error('Error checking pipeline status:', error);
+      // Return safe defaults if API call fails
+      return {
+        isRunning: false,
+        status: null,
+        runningProcesses: {}
+      };
+    }
+  }
 }
 
 // Create and export a singleton instance

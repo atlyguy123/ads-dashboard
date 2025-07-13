@@ -449,8 +449,9 @@ def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batc
                     invalid_distinct_id_count += 1
                     continue
                 
-                # Apply user filtering logic
-                email = user_data.get('email2') or user_data.get('mp_email', '')
+                # Apply user filtering logic - extract email from properties
+                properties = user_data.get('properties', {})
+                email = properties.get('$email', '')
                 filter_result = should_filter_user(distinct_id, email)
                 
                 if filter_result['filter']:
@@ -579,7 +580,8 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                         metrics.events_skipped_invalid += 1
                         continue
                     
-                    event_name = event_data.get('event')
+                    # Handle both old and new event data formats
+                    event_name = event_data.get('event') or event_data.get('event_name')
                     
                     # Skip unimportant events
                     if event_name not in IMPORTANT_EVENTS:
@@ -655,10 +657,13 @@ def should_filter_user(distinct_id: str, email: str) -> Dict[str, Any]:
 def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str, Any]:
     """Prepare user record with proper data types and validation"""
     
+    # Extract from properties (correct structure)
+    properties = user_data.get('properties', {})
+    
     # Extract attribution data (use direct values, not hash)
-    abi_ad_id = user_data.get('abi_ad_id')
-    abi_campaign_id = user_data.get('abi_campaign_id')
-    abi_ad_set_id = user_data.get('abi_ad_set_id')
+    abi_ad_id = properties.get('abi_~ad_id')
+    abi_campaign_id = properties.get('abi_~campaign_id')
+    abi_ad_set_id = properties.get('abi_~ad_set_id')
     
     # Validate attribution data extraction
     if abi_ad_id and not abi_campaign_id:
@@ -666,16 +671,16 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
     if abi_ad_id and not abi_ad_set_id:
         logger.warning(f"User {distinct_id} has abi_ad_id but missing abi_ad_set_id")
     
-    # Extract location data
-    country = user_data.get('mp_country_code')
-    region = user_data.get('mp_region')
-    city = user_data.get('mp_city')
+    # Extract location data from properties with correct field names
+    country = properties.get('$country_code')
+    region = properties.get('$region')
+    city = properties.get('$city')
     
     # Determine attribution status
     has_abi_attribution = bool(abi_ad_id)
     
-    # Extract timestamps
-    first_seen = user_data.get('first_install_date') or user_data.get('mp_ae_first_app_open_date')
+    # Extract timestamps from properties with correct field names
+    first_seen = properties.get('first_install_date') or properties.get('$ae_first_app_open_date')
     if first_seen:
         try:
             # Parse ISO format timestamp
@@ -685,7 +690,7 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
     else:
         first_seen_dt = datetime.datetime.now()
     
-    last_updated = user_data.get('mp_last_seen')
+    last_updated = properties.get('$last_seen')
     if last_updated:
         try:
             last_updated_dt = datetime.datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
@@ -773,24 +778,32 @@ def prepare_event_record(event_data: Dict[str, Any], file_path: str, line_num: i
     try:
         properties = event_data.get('properties', {})
         
-        # Extract required fields
-        event_uuid = properties.get('$insert_id')
-        distinct_id = properties.get('distinct_id')
-        event_name = event_data.get('event')
+        # Extract required fields - handle BOTH old and new data formats
+        # OLD FORMAT: fields in properties, NEW FORMAT: fields at top level
+        
+        # Event UUID: Try properties first, then top level
+        event_uuid = properties.get('$insert_id') or event_data.get('insert_id')
+        
+        # Distinct ID: Try properties first, then top level
+        distinct_id = properties.get('distinct_id') or event_data.get('distinct_id')
+        
+        # Event name: Try top level first (old: 'event', new: 'event_name'), then properties
+        event_name = event_data.get('event') or event_data.get('event_name') or properties.get('event')
         
         # Validate required fields
         if not distinct_id:
             logger.warning(f"Missing distinct_id in {file_path}:{line_num}")
             return None
         
-        # Generate fallback UUID
+        # Generate fallback UUID if needed
         if not event_uuid:
-            timestamp = properties.get('time', 0)
+            # Time: Try properties first, then top level
+            timestamp = properties.get('time') or event_data.get('time', 0)
             event_uuid = f"{distinct_id}_{event_name}_{timestamp}_{hash(str(properties))}"
         
-        # Parse timestamp with proper UTC handling
+        # Parse timestamp with proper UTC handling - try both locations
         try:
-            timestamp = properties.get('time', 0)
+            timestamp = properties.get('time') or event_data.get('time', 0)
             if isinstance(timestamp, str):
                 timestamp = float(timestamp)
             event_time = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
@@ -798,41 +811,16 @@ def prepare_event_record(event_data: Dict[str, Any], file_path: str, line_num: i
             logger.warning(f"Invalid timestamp in {file_path}:{line_num}")
             event_time = datetime.datetime.now(tz=datetime.timezone.utc)
         
-        # Extract attribution data - check multiple possible locations
+        # Extract attribution data - events don't have attribution fields
+        # Attribution is only available in user records
         abi_ad_id = None
         abi_campaign_id = None
         abi_ad_set_id = None
         
-        # Check subscriber_attributes for attribution
-        subscriber_attrs = properties.get('subscriber_attributes', {})
-        if subscriber_attrs:
-            # Look for attribution fields in subscriber_attributes
-            for key, value in subscriber_attrs.items():
-                if 'ad_id' in key.lower():
-                    abi_ad_id = value
-                elif 'campaign_id' in key.lower():
-                    abi_campaign_id = value
-                elif 'adset_id' in key.lower() or 'ad_set_id' in key.lower():
-                    abi_ad_set_id = value
-        
-        # Check direct properties for attribution
-        for key, value in properties.items():
-            if key == 'abi_ad_id':
-                abi_ad_id = value
-            elif key == 'abi_campaign_id':
-                abi_campaign_id = value
-            elif key == 'abi_ad_set_id':
-                abi_ad_set_id = value
-        
-        # Extract geographic data from IP
+        # Extract geographic data - events don't have location fields
+        # Geographic data is only available in user records
         country = None
         region = None
-        ip_address = subscriber_attrs.get('$ip') or properties.get('ip')
-        if ip_address:
-            # For now, we'll leave country/region as None
-            # In production, you'd use a geolocation service here
-            # country, region = lookup_location_from_ip(ip_address)
-            pass
         
         # Parse revenue safely
         try:

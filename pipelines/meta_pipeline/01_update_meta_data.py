@@ -199,7 +199,7 @@ class MetaDataUpdater:
             logger.error(f"❌ Error checking latest date in {table_name}: {e}")
             return None
     
-    def calculate_dates_to_update_for_table(self, table_latest_date: Optional[str], today: str) -> List[str]:
+    def calculate_dates_to_update_for_table(self, table_latest_date: Optional[str], today: str, table_name: str) -> List[str]:
         """
         Calculate which dates need to be updated for a specific table
         
@@ -210,8 +210,6 @@ class MetaDataUpdater:
         Returns:
             List of dates to update for this table
         """
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        
         if not table_latest_date:
             # If no data exists, start from May 1st, 2025
             start_date = '2025-05-01'
@@ -226,20 +224,16 @@ class MetaDataUpdater:
                 dates_to_update.append(current_date.strftime('%Y-%m-%d'))
                 current_date += timedelta(days=1)
         else:
-            logger.info(f"📅 Finding missing dates from {table_latest_date} to {today}")
+            logger.info(f"📅 Refreshing from most recent date {table_latest_date} through {today}")
             
-            # Generate all missing dates + always include yesterday for refresh
-            all_dates = []
+            # Generate all dates from table_latest_date to today (re-ingest most recent + fill gaps + include today)
+            dates_to_update = []
             current_date = datetime.strptime(table_latest_date, '%Y-%m-%d')
             end_date = datetime.strptime(today, '%Y-%m-%d')
             
             while current_date <= end_date:
-                all_dates.append(current_date.strftime('%Y-%m-%d'))
+                dates_to_update.append(current_date.strftime('%Y-%m-%d'))
                 current_date += timedelta(days=1)
-            
-            # Ensure yesterday is always included for data refresh
-            dates_to_update = list(set(all_dates + [yesterday]))
-            dates_to_update.sort()  # Keep chronological order
         
         logger.info(f"📊 Table needs {len(dates_to_update)} dates updated")
         if dates_to_update:
@@ -824,7 +818,7 @@ class MetaDataUpdater:
                 table_latest_date = self.get_table_latest_date(table_name)
                 
                 # Step 2: Calculate dates to update for THIS specific table
-                dates_to_update = self.calculate_dates_to_update_for_table(table_latest_date, today)
+                dates_to_update = self.calculate_dates_to_update_for_table(table_latest_date, today, table_name)
                 
                 if not dates_to_update:
                     logger.info(f"✅ No dates to update for {table_name} - already current")
