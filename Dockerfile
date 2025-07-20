@@ -31,8 +31,8 @@ ENV HOST=0.0.0.0
 
 # Note: PORT is set dynamically by Railway via environment variable
 
-# Create entrypoint script that runs app as a module
-RUN echo '#!/bin/bash\npython3 -m orchestrator.app' > /app/start.sh
+# Create entrypoint script that runs app as a module with proper PYTHONPATH
+RUN echo '#!/bin/bash\nexport PYTHONPATH=/app:$PYTHONPATH\npython3 -m orchestrator.app' > /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Start the application
