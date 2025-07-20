@@ -38,10 +38,10 @@ const OverviewROASSparkline = React.memo(({
       setError(null);
       
       try {
-        // Calculate 14 days ending at the end_date
+        // Calculate 28 days ending at the end_date
         const endDate = new Date(dateRange.end_date);
         const startDate = new Date(endDate);
-        startDate.setDate(endDate.getDate() - 13); // 13 days back = 14 days total
+        startDate.setDate(endDate.getDate() - 27); // 27 days back = 28 days total
         
         const response = await dashboardApi.getOverviewROASChartData({
           start_date: startDate.toISOString().split('T')[0],
@@ -189,17 +189,23 @@ const OverviewROASSparkline = React.memo(({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
-        {/* Center reference line */}
-        <line
-          x1={width / 2}
-          y1={padding}
-          x2={width / 2}
-          y2={height - padding}
-          stroke="#FFFFFF"
-          strokeWidth="1"
-          strokeDasharray="2,2"
-          style={{ opacity: 0.5 }}
-        />
+        {/* Weekly reference lines */}
+        {[7, 14, 21].map((day, index) => {
+          const x = padding + (day / 28) * (width - 2 * padding);
+          return (
+            <line
+              key={index}
+              x1={x}
+              y1={padding}
+              x2={x}
+              y2={height - padding}
+              stroke="#FFFFFF"
+              strokeWidth="1"
+              strokeDasharray="2,2"
+              style={{ opacity: 0.5 }}
+            />
+          );
+        })}
         
         {/* Render colored segments */}
         {segments.map((segment, index) => (
