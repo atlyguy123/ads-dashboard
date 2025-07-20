@@ -25,7 +25,11 @@ try:
     from .debug.api.debug_routes import debug_bp
     from .meta.api.meta_routes import meta_bp
 except ImportError:
-    # Fall back to absolute imports (for Railway deployment)
+    # Fall back to direct path imports (for Railway deployment)
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
     from orchestrator.config import config
     from orchestrator.auth import requires_auth
     from orchestrator.utils.timezone_utils import now_in_timezone, format_for_display
