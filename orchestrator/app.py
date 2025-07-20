@@ -15,21 +15,21 @@ from flask_cors import CORS
 import logging
 
 # Import configuration and authentication
-from .config import config
-from .auth import requires_auth
+from orchestrator.config import config
+from orchestrator.auth import requires_auth
 
 # Import timezone utilities for consistent timezone handling
-from .utils.timezone_utils import now_in_timezone, format_for_display
+from orchestrator.utils.timezone_utils import now_in_timezone, format_for_display
 
 # Import database initialization
-from .database_init import initialize_all_databases, check_database_health
+from orchestrator.database_init import initialize_all_databases, check_database_health
 
 # Import dashboard blueprint
-from .dashboard.api.dashboard_routes import dashboard_bp
+from orchestrator.dashboard.api.dashboard_routes import dashboard_bp
 # Import debug blueprint  
-from .debug.api.debug_routes import debug_bp
+from orchestrator.debug.api.debug_routes import debug_bp
 # Import meta blueprint
-from .meta.api.meta_routes import meta_bp
+from orchestrator.meta.api.meta_routes import meta_bp
 
 # Set up logging
 logging.basicConfig(
