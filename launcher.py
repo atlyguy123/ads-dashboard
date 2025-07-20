@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Simple launcher script for Railway deployment.
-This executes the orchestrator app from the correct directory context.
+This runs the orchestrator app as a module with proper Python path setup.
 """
 
 import sys
@@ -9,21 +9,20 @@ import os
 import subprocess
 
 if __name__ == "__main__":
-    # Get port from environment (Railway sets this automatically)
+    # Get environment variables
     port = os.environ.get('PORT', '5000')
     host = os.environ.get('HOST', '0.0.0.0')
     
     # Set environment variables for the Flask app
-    os.environ['PORT'] = port
-    os.environ['HOST'] = host
-    os.environ['FLASK_ENV'] = 'production'
+    env = os.environ.copy()
+    env['PORT'] = port
+    env['HOST'] = host
+    env['FLASK_ENV'] = 'production'
+    env['PYTHONPATH'] = '/app'
     
-    # Change to orchestrator directory and run app.py
-    os.chdir('orchestrator')
-    
-    # Execute the app.py directly
-    result = subprocess.run([sys.executable, 'app.py'], 
-                          cwd=os.getcwd(), 
-                          env=os.environ)
+    # Run as module from project root
+    result = subprocess.run([
+        sys.executable, '-m', 'orchestrator.app'
+    ], cwd='/app', env=env)
     
     sys.exit(result.returncode) 
