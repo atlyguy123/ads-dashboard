@@ -1690,11 +1690,12 @@ def mixpanel_debug_test_s3():
         
         # Test event data availability
         start_date = datetime(2025, 4, 14)
-        end_date = now_in_timezone()
+        end_date = now_in_timezone().date()  # Convert to date to avoid timezone issues
+        start_date = start_date.date()  # Convert to date to match
         total_days = (end_date - start_date).days + 1
         available_dates = []
         
-        current_date = start_date
+        current_date = start_date  
         while current_date <= end_date:
             year = current_date.strftime('%Y')
             month = current_date.strftime('%m')
