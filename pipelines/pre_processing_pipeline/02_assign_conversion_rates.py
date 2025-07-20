@@ -42,6 +42,10 @@ utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
 sys.path.append(utils_path)
 from database_utils import get_database_path
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # --- Configuration & Constants ---
 
 # Configure logging for clear, detailed output
@@ -143,14 +147,14 @@ class ConversionRateProcessor:
 
         # Define separate cohort date windows for trials and purchases
         # Trial cohort window: 53 days ago to 8 days ago
-        self.trial_cohort_start_date = (datetime.now() - timedelta(days=53)).strftime('%Y-%m-%d')
-        self.trial_cohort_end_date = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
-        self.trial_refund_cutoff = (datetime.now() - timedelta(days=38)).strftime('%Y-%m-%d %H:%M:%S')
+        self.trial_cohort_start_date = (now_in_timezone() - timedelta(days=53)).strftime('%Y-%m-%d')
+        self.trial_cohort_end_date = (now_in_timezone() - timedelta(days=8)).strftime('%Y-%m-%d')
+        self.trial_refund_cutoff = (now_in_timezone() - timedelta(days=38)).strftime('%Y-%m-%d %H:%M:%S')
 
         # Purchase cohort window: 45 days ago to 0 days ago (today)
-        self.purchase_cohort_start_date = (datetime.now() - timedelta(days=45)).strftime('%Y-%m-%d')
-        self.purchase_cohort_end_date = datetime.now().strftime('%Y-%m-%d')
-        self.purchase_refund_cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        self.purchase_cohort_start_date = (now_in_timezone() - timedelta(days=45)).strftime('%Y-%m-%d')
+        self.purchase_cohort_end_date = now_in_timezone().strftime('%Y-%m-%d')
+        self.purchase_refund_cutoff = (now_in_timezone() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
         
         logger.info(f"Trial Cohort Window (for start events based on credited_date): {self.trial_cohort_start_date} to {self.trial_cohort_end_date}")
         logger.info(f"Purchase Cohort Window: {self.purchase_cohort_start_date} to {self.purchase_cohort_end_date}")

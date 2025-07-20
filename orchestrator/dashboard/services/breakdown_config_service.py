@@ -13,6 +13,9 @@ from datetime import datetime
 import sqlite3
 from utils.database_utils import get_database_path
 
+# Import timezone utilities for consistent timezone handling
+from ...utils.timezone_utils import now_in_timezone
+
 logger = logging.getLogger(__name__)
 
 class BreakdownConfigService:
@@ -286,7 +289,7 @@ class BreakdownConfigService:
         return {
             'country_mappings': len(self.country_mappings),
             'device_mappings': len(self.device_mappings),
-            'last_updated': datetime.now().isoformat(),
+            'last_updated': now_in_timezone().isoformat(),
             'config_files': {
                 'country': str(self.country_mapping_file),
                 'device': str(self.device_mapping_file)

@@ -20,6 +20,9 @@ sys.path.insert(0, str(project_root))
 
 from utils.database_utils import get_database_path, get_database_connection
 
+# Import timezone utilities for consistent timezone handling
+from ...utils.timezone_utils import now_in_timezone
+
 # Import the breakdown mapping service
 from .breakdown_mapping_service import BreakdownMappingService, BreakdownData
 
@@ -129,7 +132,7 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'metadata': {
                     'query_config': config.__dict__,
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
     
@@ -156,7 +159,7 @@ class AnalyticsQueryService:
                     'table_used': table_name,
                     'record_count': len(structured_data),
                     'date_range': f"{config.start_date} to {config.end_date}",
-                    'generated_at': datetime.now().isoformat(),
+                    'generated_at': now_in_timezone().isoformat(),
                     'data_source': 'hierarchical_with_meta'
                 }
             }
@@ -168,7 +171,7 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'metadata': {
                     'query_config': config.__dict__,
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
     
@@ -407,7 +410,7 @@ class AnalyticsQueryService:
                     'table_used': 'mixpanel_user + mixpanel_event (Mixpanel-only mode)',
                     'record_count': len(structured_data),
                     'date_range': f"{config.start_date} to {config.end_date}",
-                    'generated_at': datetime.now().isoformat(),
+                    'generated_at': now_in_timezone().isoformat(),
                     'data_source': 'mixpanel_only'
                 }
             }
@@ -419,7 +422,7 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'metadata': {
                     'query_config': config.__dict__,
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
     
@@ -1595,8 +1598,8 @@ class AnalyticsQueryService:
                 end_date = config.end_date
             else:
                 from datetime import datetime, timedelta
-                end_date = datetime.now().date().strftime('%Y-%m-%d')
-                start_date = (datetime.now().date() - timedelta(days=7)).strftime('%Y-%m-%d')
+                end_date = now_in_timezone().date().strftime('%Y-%m-%d')
+                start_date = (now_in_timezone().date() - timedelta(days=7)).strftime('%Y-%m-%d')
             
             # Query database for rates
             with sqlite3.connect(self.mixpanel_db_path) as conn:
@@ -2233,7 +2236,7 @@ class AnalyticsQueryService:
                     'breakdown_value': breakdown_value,
                     'period_days': 14,
                     'rolling_window_days': 1,
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
             
@@ -2378,7 +2381,7 @@ class AnalyticsQueryService:
                         'actual_entity_id': actual_entity_id
                     },
                     'date_range': f"{start_date} to {end_date}",
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
                 
         except Exception as e:
@@ -2390,7 +2393,7 @@ class AnalyticsQueryService:
                     'entity_type': entity_type,
                     'entity_id': entity_id
                 },
-                'generated_at': datetime.now().isoformat()
+                'generated_at': now_in_timezone().isoformat()
             }
 
     def get_earliest_meta_date(self) -> str:
@@ -2439,7 +2442,7 @@ class AnalyticsQueryService:
         try:
             logger.info("Getting available date range for analytics data")
             earliest_date = self.get_earliest_meta_date()
-            latest_date = datetime.now().strftime('%Y-%m-%d')
+            latest_date = now_in_timezone().strftime('%Y-%m-%d')
             
             return {
                 'success': True,
@@ -2447,7 +2450,7 @@ class AnalyticsQueryService:
                     'earliest_date': earliest_date,
                     'latest_date': latest_date
                 },
-                'timestamp': datetime.now().isoformat()
+                'timestamp': now_in_timezone().isoformat()
             }
         except Exception as e:
             logger.error(f"Error getting available date range: {e}", exc_info=True)
@@ -2456,7 +2459,7 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'data': {
                     'earliest_date': '2025-01-01',
-                    'latest_date': datetime.now().strftime('%Y-%m-%d')
+                    'latest_date': now_in_timezone().strftime('%Y-%m-%d')
                 }
             }
 
@@ -2591,7 +2594,7 @@ class AnalyticsQueryService:
                         'filters_applied': filters,
                         'sort_column': sort_column,
                         'sort_direction': sort_direction,
-                        'generated_at': datetime.now().isoformat()
+                        'generated_at': now_in_timezone().isoformat()
                     }
                 }
                 
@@ -2986,7 +2989,7 @@ class AnalyticsQueryService:
                     'table_used': table_name,
                     'accuracy_ratio': overall_accuracy_ratio,
                     'event_priority': event_priority,
-                    'generated_at': datetime.now().isoformat()
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
                 
@@ -2997,7 +3000,7 @@ class AnalyticsQueryService:
                 'error': str(e),
                 'chart_data': [],
                 'metadata': {
-                    'generated_at': datetime.now().isoformat(),
+                    'generated_at': now_in_timezone().isoformat(),
                     'error_details': str(e),
                     'date_range_requested': f"{start_date} to {end_date}",
                     'breakdown_requested': breakdown

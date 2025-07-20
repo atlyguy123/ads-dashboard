@@ -1,6 +1,6 @@
 from flask import request, Response
 from functools import wraps
-from config import config
+from .config import config
 
 # Team credentials - read from configuration
 TEAM_CREDENTIALS = {

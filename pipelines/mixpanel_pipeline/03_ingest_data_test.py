@@ -18,6 +18,10 @@ from dataclasses import dataclass
 
 from urllib.parse import urlparse
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Try to import psycopg2, but don't fail if not available (for local SQLite testing)
 try:
     import psycopg2
@@ -104,7 +108,7 @@ class IngestionMetrics:
 def main():
     """Main ingestion orchestrator - TEST VERSION"""
     metrics = IngestionMetrics()
-    metrics.start_time = datetime.datetime.now()
+    metrics.start_time = now_in_timezone()
     
     try:
         print("🧪 === TEST VERSION: Module 3: Data Ingestion ===")
@@ -134,7 +138,7 @@ def main():
             raw_data_conn.close()
             sqlite_conn.close()
         
-        metrics.end_time = datetime.datetime.now()
+        metrics.end_time = now_in_timezone()
         log_final_metrics(metrics)
         
         print("🎉 Test data ingestion completed successfully")
@@ -142,7 +146,7 @@ def main():
         return 0
         
     except Exception as e:
-        metrics.end_time = datetime.datetime.now()
+        metrics.end_time = now_in_timezone()
         logger.error(f"🧪 Test Module 3 failed: {e}")
         logger.error(f"Elapsed time: {metrics.elapsed_time():.2f} seconds")
         print(f"❌ Test Module 3 failed: {e}", file=sys.stderr)
@@ -591,18 +595,18 @@ def prepare_user_record(user_data: Dict[str, Any], distinct_id: str) -> Dict[str
         try:
             first_seen_dt = datetime.datetime.fromisoformat(first_seen.replace('Z', '+00:00'))
         except:
-            first_seen_dt = datetime.datetime.now()
+            first_seen_dt = now_in_timezone()
     else:
-        first_seen_dt = datetime.datetime.now()
+        first_seen_dt = now_in_timezone()
     
     last_updated = properties.get('$last_seen')
     if last_updated:
         try:
             last_updated_dt = datetime.datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
         except:
-            last_updated_dt = datetime.datetime.now()
+            last_updated_dt = now_in_timezone()
     else:
-        last_updated_dt = datetime.datetime.now()
+        last_updated_dt = now_in_timezone()
     
     return {
         'distinct_id': distinct_id,

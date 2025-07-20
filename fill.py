@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Import production analytics pipeline code
 from analytics_pipeline.meta_processor import MetaDataProcessor
 
@@ -24,7 +28,7 @@ class AdPerformanceDailyFiller:
     def get_missing_dates(self, start_date='2025-01-01', end_date=None):
         """Get list of missing dates from the database"""
         if end_date is None:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = now_in_timezone().strftime('%Y-%m-%d')
             
         try:
             conn = sqlite3.connect(self.db_path)

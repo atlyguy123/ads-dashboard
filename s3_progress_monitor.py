@@ -12,6 +12,11 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 
+# Import timezone utilities for consistent timezone handling
+import sys
+sys.path.append(str(Path(__file__).resolve().parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 class S3ProgressMonitor:
     def __init__(self):
         # Load environment variables
@@ -36,22 +41,29 @@ class S3ProgressMonitor:
         
         # Monitoring configuration
         self.start_date = datetime(2025, 4, 14)
-        self.end_date = datetime.now()
+        self.end_date = now_in_timezone()
         self.total_days = (self.end_date - self.start_date).days + 1
         
-        # Progress tracking
+        # Progress tracking - NEW APPROACH
+        self.day_appearances = {}  # {date_str: timestamp when first seen}
+        self.previously_seen_dates = set()  # Track what we've seen before
+        self.start_time = now_in_timezone()
+        self.first_check_done = False  # Track if we've done the initial baseline check
+        
+        # Keep history for display purposes
         self.history = []  # List of (timestamp, available_count) tuples
-        self.start_time = datetime.now()
     
     def check_data_availability(self):
-        """Check current data availability in S3"""
+        """Check current data availability in S3 and track new appearances"""
         available_dates = []
+        new_dates = []
         
         current_date = self.start_date
         while current_date <= self.end_date:
             year = current_date.strftime('%Y')
             month = current_date.strftime('%m')
             day = current_date.strftime('%d')
+            date_str = current_date.strftime('%Y-%m-%d')
             
             event_prefix = f'{self.project_id}/mp_master_event/{year}/{month}/{day}/'
             
@@ -63,33 +75,50 @@ class S3ProgressMonitor:
                 )
                 
                 if 'Contents' in response and len(response['Contents']) > 0:
-                    available_dates.append(current_date.strftime('%Y-%m-%d'))
+                    available_dates.append(date_str)
+                    
+                    # Only track as "new appearance" if we've done the baseline check
+                    if self.first_check_done and date_str not in self.previously_seen_dates:
+                        self.day_appearances[date_str] = now_in_timezone()
+                        new_dates.append(date_str)
+                    
+                    # Always update our tracking of what we've seen
+                    self.previously_seen_dates.add(date_str)
+                        
             except Exception:
                 pass  # Ignore errors, treat as missing
             
             current_date += timedelta(days=1)
         
-        return available_dates
+        # Mark that we've done the first check
+        if not self.first_check_done:
+            self.first_check_done = True
+            print(f"📊 Baseline established: Found {len(available_dates)} existing days")
+        
+        return available_dates, new_dates
     
     def calculate_progress_rate(self):
-        """Calculate the rate of progress (days per hour)"""
-        if len(self.history) < 2:
+        """Calculate the rate based on actual day appearance times"""
+        if len(self.day_appearances) < 2:
             return None
         
-        # Use the last two data points to calculate rate
-        latest_time, latest_count = self.history[-1]
-        earlier_time, earlier_count = self.history[-2]
+        # Get all appearance times sorted by when they appeared
+        appearance_times = sorted(self.day_appearances.values())
         
-        time_diff_hours = (latest_time - earlier_time).total_seconds() / 3600
-        count_diff = latest_count - earlier_count
+        # Calculate rate based on time from first appearance to last appearance
+        first_appearance = appearance_times[0]
+        last_appearance = appearance_times[-1]
         
-        if time_diff_hours > 0 and count_diff > 0:
-            return count_diff / time_diff_hours  # days per hour
+        time_span_hours = (last_appearance - first_appearance).total_seconds() / 3600
+        days_appeared_in_span = len(appearance_times) - 1  # Don't count the initial day
+        
+        if time_span_hours > 0 and days_appeared_in_span > 0:
+            return days_appeared_in_span / time_span_hours  # days per hour
         
         return None
     
     def estimate_completion_time(self, current_count):
-        """Estimate when all data will be available"""
+        """Estimate when all data will be available based on actual appearance rate"""
         missing_days = self.total_days - current_count
         if missing_days <= 0:
             return "Complete!"
@@ -99,7 +128,7 @@ class S3ProgressMonitor:
             return "Calculating..."
         
         hours_remaining = missing_days / rate
-        completion_time = datetime.now() + timedelta(hours=hours_remaining)
+        completion_time = now_in_timezone() + timedelta(hours=hours_remaining)
         
         if hours_remaining < 1:
             return f"~{int(hours_remaining * 60)} minutes"
@@ -108,7 +137,7 @@ class S3ProgressMonitor:
         else:
             return f"~{hours_remaining/24:.1f} days"
     
-    def display_progress(self, available_dates):
+    def display_progress(self, available_dates, new_dates):
         """Display current progress in terminal"""
         current_count = len(available_dates)
         percentage = (current_count / self.total_days) * 100
@@ -123,7 +152,7 @@ class S3ProgressMonitor:
         
         print(f"📅 Monitoring Period: {self.start_date.strftime('%Y-%m-%d')} to {self.end_date.strftime('%Y-%m-%d')}")
         print(f"🕐 Started: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"🕐 Current: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"🕐 Current: {now_in_timezone().strftime('%Y-%m-%d %H:%M:%S')}")
         print()
         
         # Progress bar
@@ -134,60 +163,74 @@ class S3ProgressMonitor:
         print(f"📈 Available: {current_count}/{self.total_days} days")
         print()
         
-        # Rate and estimate
+        # Show new dates detected this check
+        if new_dates:
+            print(f"🆕 New dates detected this check: {', '.join(new_dates)}")
+            print()
+        
+        # Rate and estimate based on actual appearances
         rate = self.calculate_progress_rate()
         if rate is not None:
-            print(f"⚡ Rate: {rate:.2f} days/hour")
+            print(f"⚡ Rate: {rate:.2f} days/hour (based on {len(self.day_appearances)} witnessed appearances)")
+            
+            # Show time span being used for rate calculation
+            if len(self.day_appearances) >= 2:
+                appearance_times = sorted(self.day_appearances.values())
+                first_time = appearance_times[0]
+                last_time = appearance_times[-1]
+                time_span = (last_time - first_time).total_seconds() / 3600
+                print(f"📊 Rate calculation: {len(self.day_appearances)-1} days over {time_span:.1f} hours")
         else:
-            print("⚡ Rate: Calculating...")
+            if not self.first_check_done:
+                print("⚡ Rate: Establishing baseline...")
+            else:
+                print("⚡ Rate: Calculating... (need to witness at least 2 day appearances)")
         
         estimate = self.estimate_completion_time(current_count)
         print(f"⏰ Estimated completion: {estimate}")
         print()
         
-        # Recent dates (last 10)
-        if available_dates:
-            print("📋 Recent available dates:")
-            recent_dates = sorted(available_dates)[-10:]
-            for date in recent_dates:
-                print(f"   ✅ {date}")
-            if len(available_dates) > 10:
-                print(f"   ... and {len(available_dates) - 10} more")
+        # Show recent day appearances (last 10)
+        if self.day_appearances:
+            print("📋 Recent day appearances (NEW days witnessed):")
+            recent_appearances = sorted(self.day_appearances.items(), key=lambda x: x[1])[-10:]
+            for date, timestamp in recent_appearances:
+                time_str = timestamp.strftime('%H:%M:%S')
+                print(f"   ✅ {date} (first seen at {time_str})")
+            if len(self.day_appearances) > 10:
+                print(f"   ... and {len(self.day_appearances) - 10} more")
         else:
-            print("📋 No dates available yet")
+            if self.first_check_done:
+                print("📋 No new day appearances witnessed yet (monitoring for new days...)")
+            else:
+                print("📋 Establishing baseline...")
         
         print()
         print("Press Ctrl+C to stop monitoring...")
         print("-" * 60)
-        
-        # Show history if we have it
-        if len(self.history) > 1:
-            print("📈 Progress History:")
-            for i, (timestamp, count) in enumerate(self.history[-5:]):  # Last 5 entries
-                time_str = timestamp.strftime('%H:%M:%S')
-                print(f"   {time_str}: {count} days available")
     
     def run(self):
         """Main monitoring loop"""
         print("🚀 Starting S3 Progress Monitor...")
         print("📡 Checking data availability every 30 seconds...")
+        print("🧠 Using smart rate calculation based on actual day appearances...")
         print()
         
         try:
             while True:
-                # Check current availability
-                available_dates = self.check_data_availability()
+                # Check current availability and detect new dates
+                available_dates, new_dates = self.check_data_availability()
                 current_count = len(available_dates)
                 
-                # Record this data point
-                self.history.append((datetime.now(), current_count))
+                # Record this data point for history
+                self.history.append((now_in_timezone(), current_count))
                 
-                # Keep only last 20 data points
+                # Keep only last 20 data points for history
                 if len(self.history) > 20:
                     self.history = self.history[-20:]
                 
                 # Display progress
-                self.display_progress(available_dates)
+                self.display_progress(available_dates, new_dates)
                 
                 # Check if complete
                 if current_count >= self.total_days:

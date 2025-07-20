@@ -24,6 +24,10 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Dict, Set, Tuple, Optional, Any
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Add utils directory to path for database utilities
 utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
 sys.path.append(utils_path)
@@ -394,8 +398,8 @@ def create_user_product_relationships(conn: sqlite3.Connection, limit: Optional[
     # Prepare data for batch operations
     relationships_to_create = []
     relationships_to_update = []
-    current_date = datetime.now().date()
-    current_timestamp = datetime.now()
+    current_date = now_in_timezone().date()
+    current_timestamp = now_in_timezone()
     
     # Check which relationships already exist (to determine create vs update)
     logger.info("🔍 Checking for existing relationships...")

@@ -15,6 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Import the pipeline runner
 from app import PipelineRunner
 
+# Import timezone utilities for consistent timezone handling
+from utils.timezone_utils import now_in_timezone
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 def run_daily_pipeline():
     """Run the daily master pipeline"""
     logger.info("🚀 HEROKU SCHEDULER: Starting daily master pipeline...")
-    logger.info(f"   Time: {datetime.now()}")
+    logger.info(f"   Time: {now_in_timezone()}")
     
     try:
         # Initialize pipeline runner

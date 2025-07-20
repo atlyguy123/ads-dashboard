@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from utils.database_utils import get_database_path
 
+# Import timezone utilities for consistent timezone handling
+from ...utils.timezone_utils import now_in_timezone
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -148,7 +151,7 @@ class BreakdownMappingService:
                         INSERT OR IGNORE INTO meta_country_mapping 
                         (meta_country_name, mixpanel_country_code, created_at, updated_at)
                         VALUES (?, ?, ?, ?)
-                    """, (meta_code, mixpanel_code, datetime.now(), datetime.now()))
+                    """, (meta_code, mixpanel_code, now_in_timezone(), now_in_timezone()))
                 
                 # Device mappings (Meta impression_device → Mixpanel store)
                 device_mappings = [
@@ -165,7 +168,7 @@ class BreakdownMappingService:
                         INSERT OR IGNORE INTO meta_device_mapping 
                         (meta_device_type, mixpanel_store_category, device_category, platform, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (meta_device, mixpanel_store, category, platform, datetime.now(), datetime.now()))
+                    """, (meta_device, mixpanel_store, category, platform, now_in_timezone(), now_in_timezone()))
                 
                 conn.commit()
                 logger.info("✅ Initialized default breakdown mappings with ISO country codes")
@@ -915,7 +918,7 @@ class BreakdownMappingService:
                     SELECT meta_data, mixpanel_data, computed_at, expires_at
                     FROM breakdown_cache 
                     WHERE cache_key = ? AND expires_at > ?
-                """, (cache_key, datetime.now()))
+                """, (cache_key, now_in_timezone()))
                 
                 result = cursor.fetchone()
                 if result:
@@ -936,7 +939,7 @@ class BreakdownMappingService:
                 cursor = conn.cursor()
                 
                 # Cache for 1 hour
-                expires_at = datetime.now() + timedelta(hours=1)
+                expires_at = now_in_timezone() + timedelta(hours=1)
                 
                 # Serialize the data (simplified - you'd want proper serialization)
                 meta_data = json.dumps([bd.meta_data for bd in breakdown_data])
@@ -946,7 +949,7 @@ class BreakdownMappingService:
                     INSERT OR REPLACE INTO breakdown_cache
                     (cache_key, breakdown_type, start_date, end_date, meta_data, mixpanel_data, computed_at, expires_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (cache_key, breakdown_type, start_date, end_date, meta_data, mixpanel_data, datetime.now(), expires_at))
+                """, (cache_key, breakdown_type, start_date, end_date, meta_data, mixpanel_data, now_in_timezone(), expires_at))
                 
                 conn.commit()
                 logger.info(f"Cached breakdown data for {cache_key}")

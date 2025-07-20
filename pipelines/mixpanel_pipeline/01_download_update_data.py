@@ -18,6 +18,10 @@ import logging
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Try to import psycopg2, but don't fail if not available (for local SQLite testing)
 try:
     import psycopg2
@@ -287,7 +291,7 @@ def identify_missing_data(conn, latest_date):
     1. Check last 90 days for missing data (gap filling)
     2. Always re-download last 3 days (refresh requirement)
     """
-    today = datetime.now().date()
+    today = now_in_timezone().date()
     
     # REQUIREMENT 1: Check last 90 days for missing data (gap filling)
     start_date = today - timedelta(days=89)  # 90 days total including today

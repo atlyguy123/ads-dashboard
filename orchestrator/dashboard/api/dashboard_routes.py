@@ -9,6 +9,9 @@ from datetime import datetime
 from ..services.dashboard_service import DashboardService
 from ..services.analytics_query_service import AnalyticsQueryService, QueryConfig
 
+# Import timezone utilities for consistent timezone handling
+from ...utils.timezone_utils import now_in_timezone
+
 logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
@@ -179,7 +182,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'dashboard',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': now_in_timezone().isoformat()
     })
 
 

@@ -14,6 +14,11 @@ utils_path = str(Path(__file__).resolve().parent.parent.parent.parent.parent / "
 sys.path.append(utils_path)
 from database_utils import get_database_path
 
+# Add orchestrator path for timezone utilities
+orchestrator_path = str(Path(__file__).resolve().parent.parent.parent.parent)
+sys.path.append(orchestrator_path)
+from utils.timezone_utils import now_in_timezone
+
 logger = logging.getLogger(__name__)
 
 class ValueEstimationDebugger:
@@ -295,7 +300,7 @@ class ValueEstimationDebugger:
             if credited_date:
                 try:
                     start_date = datetime.strptime(credited_date, '%Y-%m-%d').date()
-                    days_since_start = (datetime.utcnow().date() - start_date).days
+                    days_since_start = (now_in_timezone().date() - start_date).days
                 except:
                     pass
             

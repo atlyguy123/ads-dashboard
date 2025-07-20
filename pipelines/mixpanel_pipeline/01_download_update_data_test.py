@@ -15,6 +15,10 @@ import logging
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Try to import psycopg2, but don't fail if not available (for local SQLite testing)
 try:
     import psycopg2
@@ -165,7 +169,7 @@ def ensure_raw_data_tables(conn, db_type):
 
 def identify_missing_data(conn, latest_date):
     """Identify which dates need data downloads - TEST VERSION: check last few days INCLUDING TODAY"""
-    today = datetime.now().date()
+    today = now_in_timezone().date()
     yesterday = today - timedelta(days=1)
     
     # TEST: Only check the last TEST_DAYS_TO_CHECK days including today for hourly data

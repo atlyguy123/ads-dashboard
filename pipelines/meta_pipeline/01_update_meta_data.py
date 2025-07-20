@@ -26,6 +26,10 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -37,10 +41,9 @@ sys.path.append(str(current_dir.parent.parent / "utils"))  # Add utils
 sys.path.append(str(current_dir.parent.parent / "orchestrator"))  # Add orchestrator
 
 try:
-    # Import specific Meta API functions to avoid initialization issues
-    sys.path.append(str(current_dir.parent.parent / "orchestrator" / "meta" / "services"))
-    from meta_service import fetch_meta_data, check_async_job_status, get_async_job_results
-    from utils.database_utils import get_database_path
+    # Import specific Meta API functions using full orchestrator paths
+    from orchestrator.meta.services.meta_service import fetch_meta_data, check_async_job_status, get_async_job_results
+    from orchestrator.utils.database_utils import get_database_path
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     logger.error("Ensure meta_service and utils modules are available")
@@ -251,8 +254,8 @@ class MetaDataUpdater:
         Returns:
             List of dates to update (only missing dates + always yesterday)
         """
-        today = datetime.now().strftime('%Y-%m-%d')
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        today = now_in_timezone().strftime('%Y-%m-%d')
+        yesterday = (now_in_timezone() - timedelta(days=1)).strftime('%Y-%m-%d')
         
         if not most_recent_date:
             # If no data exists, start from May 1st, 2025
@@ -803,7 +806,7 @@ class MetaDataUpdater:
             # Process each table individually
             total_success = 0
             total_requests = 0
-            today = datetime.now().strftime('%Y-%m-%d')
+            today = now_in_timezone().strftime('%Y-%m-%d')
             
             for table_config in table_configs:
                 table_name = table_config['table']

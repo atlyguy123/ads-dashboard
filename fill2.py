@@ -12,6 +12,10 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # Import ONLY production analytics pipeline code
 from analytics_pipeline.meta_processor import MetaDataProcessor
 
@@ -22,7 +26,7 @@ class RateLimitMonitor:
         self.monitoring = False
         self.log_data = []
         self.current_request_info = {}
-        self.log_file = f"meta_rate_limit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        self.log_file = f"meta_rate_limit_logs_{now_in_timezone().strftime('%Y%m%d_%H%M%S')}.json"
         
     def start_monitoring(self):
         """Start real-time monitoring thread"""
@@ -87,7 +91,7 @@ class RateLimitMonitor:
     def _monitor_loop(self):
         """Real-time monitoring loop"""
         while self.monitoring:
-            timestamp = datetime.now().isoformat()
+            timestamp = now_in_timezone().isoformat()
             
             if self.current_request_info:
                 status = self.current_request_info.get('status', 'unknown')
@@ -104,10 +108,10 @@ class RateLimitMonitor:
         """Save logs incrementally after each request"""
         log_summary = {
             'session_info': {
-                'start_time': datetime.now().isoformat(),
+                'start_time': now_in_timezone().isoformat(),
                 'total_requests': len(self.log_data),
                 'session_duration': sum(req.get('duration', 0) for req in self.log_data if req.get('duration')),
-                'last_updated': datetime.now().isoformat()
+                'last_updated': now_in_timezone().isoformat()
             },
             'requests': self.log_data
         }

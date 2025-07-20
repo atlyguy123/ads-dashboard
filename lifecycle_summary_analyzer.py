@@ -18,6 +18,12 @@ from collections import Counter
 import json
 from datetime import datetime
 
+# Import timezone utilities for consistent timezone handling
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 def connect_to_database(db_path):
     """Connect to the mixpanel database"""
     try:
@@ -141,7 +147,7 @@ def save_results(sequence_counts, output_file="lifecycle_sequences.json"):
     """Save results to JSON file"""
     # Convert Counter to regular dict for JSON serialization
     results = {
-        "analysis_timestamp": datetime.now().isoformat(),
+        "analysis_timestamp": now_in_timezone().isoformat(),
         "total_unique_sequences": len(sequence_counts),
         "total_user_product_pairings": sum(sequence_counts.values()),
         "sequences": dict(sequence_counts)

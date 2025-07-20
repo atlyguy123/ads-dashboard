@@ -16,6 +16,9 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from utils.database_utils import get_database_path
 
+# Import timezone utilities for consistent timezone handling
+from ...utils.timezone_utils import now_in_timezone
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -365,7 +368,7 @@ class MetaHistoricalService:
             failed_days=0,
             current_date=None,
             status='running',
-            start_time=datetime.now()
+            start_time=now_in_timezone()
         )
         self.collection_progress[job_id] = progress
         
@@ -408,7 +411,7 @@ class MetaHistoricalService:
                     progress.errors.append({
                         'date': date,
                         'error': error,
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': now_in_timezone().isoformat()
                     })
                     self._update_day_job_status(job_id, date, 'failed', error_message=error)
                     
@@ -432,7 +435,7 @@ class MetaHistoricalService:
                 else:
                     progress.status = 'failed'
             
-            progress.end_time = datetime.now()
+            progress.end_time = now_in_timezone()
             progress.current_date = None
             
             # Final database update
@@ -443,10 +446,10 @@ class MetaHistoricalService:
         except Exception as e:
             logger.error(f"Unexpected error in collection job {job_id}: {str(e)}")
             progress.status = 'failed'
-            progress.end_time = datetime.now()
+            progress.end_time = now_in_timezone()
             progress.errors.append({
                 'error': f"Unexpected error: {str(e)}",
-                'timestamp': datetime.now().isoformat()
+                'timestamp': now_in_timezone().isoformat()
             })
             self._update_collection_job_progress(job_id, progress)
     
@@ -478,7 +481,7 @@ class MetaHistoricalService:
             progress = self.collection_progress[job_id]
             if progress.status == 'running':
                 progress.status = 'cancelled'
-                progress.end_time = datetime.now()
+                progress.end_time = now_in_timezone()
                 self._update_collection_job_progress(job_id, progress)
                 logger.info(f"Collection job {job_id} cancelled")
                 return True
@@ -691,7 +694,7 @@ class MetaHistoricalService:
                     'entity_id': entity_id
                 } if entity_type and entity_id else None,
                 'export_format': format,
-                'exported_at': datetime.now().isoformat(),
+                'exported_at': now_in_timezone().isoformat(),
                 'total_days': len(results),
                 'data': results
             }

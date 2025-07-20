@@ -13,6 +13,12 @@ core value calculation logic for:
 Ported from mixpanel_processing_stage.py but adapted for the new consolidated schema.
 """
 
+# Import timezone utilities for consistent timezone handling
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
+
 # ========================================
 # CRITICAL ISSUE: PLACEHOLDER VALUES FOUND
 # ========================================
@@ -182,7 +188,7 @@ class ValueEstimator:
             Dictionary with processing results
         """
         try:
-            start_time = datetime.now()
+            start_time = now_in_timezone()
             
             # CRITICAL: Only clear the three specific value fields, preserve all other data
             logger.info("Clearing only current_status, current_value, and value_status fields...")
@@ -220,7 +226,7 @@ class ValueEstimator:
                 total_successful += batch_result['successful_calculations']
                 total_failed += batch_result['failed_calculations']
             
-            processing_time = (datetime.now() - start_time).total_seconds()
+            processing_time = (now_in_timezone() - start_time).total_seconds()
             
             # Display error summary
             self._display_error_summary()
@@ -620,7 +626,7 @@ class ValueEstimator:
             # This should align with Module 6 lifecycle validation (31-day rule)
             try:
                 event_date = datetime.strptime(last_event['event_time'][:10], '%Y-%m-%d').date()
-                days_since = (datetime.utcnow().date() - event_date).days
+                days_since = (now_in_timezone().date() - event_date).days
                 
                 if days_since > 31:
                     return 'extended_trial_error'
@@ -704,7 +710,7 @@ class ValueEstimator:
         - Applies platform fees based on store type (AppStore/PlayStore: 15%, Stripe: 5%)
         """
         try:
-            today = datetime.utcnow().date()
+            today = now_in_timezone().date()
             credited_date = datetime.strptime(start_event['event_time'][:10], '%Y-%m-%d').date()
             days_since = (today - credited_date).days
             

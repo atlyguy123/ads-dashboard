@@ -15,18 +15,21 @@ from flask_cors import CORS
 import logging
 
 # Import configuration and authentication
-from config import config
-from auth import requires_auth
+from .config import config
+from .auth import requires_auth
+
+# Import timezone utilities for consistent timezone handling
+from .utils.timezone_utils import now_in_timezone, format_for_display
 
 # Import database initialization
-from database_init import initialize_all_databases, check_database_health
+from .database_init import initialize_all_databases, check_database_health
 
 # Import dashboard blueprint
-from dashboard.api.dashboard_routes import dashboard_bp
+from .dashboard.api.dashboard_routes import dashboard_bp
 # Import debug blueprint
-from debug.api.debug_routes import debug_bp
+from .debug.api.debug_routes import debug_bp
 # Import meta blueprint
-from meta.api.meta_routes import meta_bp
+from .meta.api.meta_routes import meta_bp
 
 # Set up logging
 logging.basicConfig(
@@ -142,7 +145,7 @@ class PipelineRunner:
         
         current_status[step_id] = {
             'status': status,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': now_in_timezone().isoformat(),
             'error_message': error_message
         }
         
@@ -155,7 +158,7 @@ class PipelineRunner:
                 'pipeline': pipeline_name,
                 'step': step_id,
                 'status': status,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': now_in_timezone().isoformat(),
                 'error_message': error_message
             })
         except Exception:
@@ -187,19 +190,26 @@ class PipelineRunner:
                 step_name = target_step.get('name', step_id)
                 step_description = target_step.get('description', 'No description')
                 
+                # Calculate project root and absolute script path for proper execution
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(script_dir)
+                script_path = os.path.join(pipeline['dir'], step_file)
+                relative_script_path = os.path.relpath(script_path, project_root)
+                
                 print(f"🚀 ORCHESTRATOR: Starting module '{step_name}' (ID: {step_id})")
                 print(f"   Pipeline: {pipeline_name}")
                 print(f"   Description: {step_description}")
                 print(f"   File: {step_file}")
-                print(f"   Working Directory: {pipeline['dir']}")
+                print(f"   Working Directory: {project_root}")
+                print(f"   Script Path: {relative_script_path}")
                 
                 self.update_step_status(pipeline_name, step_id, 'running')
                 
                 # Run the step with Popen so we can track and cancel it
-                print(f"   Executing: python3 {step_file}")
+                print(f"   Executing: python3 {relative_script_path}")
                 process = subprocess.Popen(
-                    ['python3', step_file],
-                    cwd=pipeline['dir'],
+                    ['python3', relative_script_path],
+                    cwd=project_root,
                     stdout=None,  # Don't capture stdout - let it show live
                     stderr=None,  # Don't capture stderr - let it show live
                     text=True
@@ -279,7 +289,7 @@ class PipelineRunner:
         cursor = conn.cursor()
         cursor.execute(
             'INSERT INTO runs (pipeline_name, status, started_at) VALUES (?, ?, ?)',
-            (pipeline_name, 'running', datetime.now())
+            (pipeline_name, 'running', now_in_timezone())
         )
         run_id = cursor.lastrowid
         conn.commit()
@@ -289,6 +299,10 @@ class PipelineRunner:
             success = True
             error_message = None
             
+            # Calculate project root for consistent working directory
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            
             print(f"🎯 ORCHESTRATOR: Starting FULL PIPELINE '{pipeline_name}'")
             print(f"   Description: {pipeline.get('description', 'No description')}")
             print(f"   Total steps: {len(pipeline['steps'])}")
@@ -296,7 +310,7 @@ class PipelineRunner:
             for step in pipeline['steps']:
                 step_name = step.get('name', step['id'])
                 print(f"     {step['id']}: {step_name}")
-            print(f"   Working Directory: {pipeline['dir']}")
+            print(f"   Working Directory: {project_root}")
             print("")
             
             try:
@@ -305,17 +319,24 @@ class PipelineRunner:
                     step_name = step.get('name', step['id'])
                     step_description = step.get('description', 'No description')
                     
+                    # Calculate project root and absolute script path for proper execution
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.dirname(script_dir)
+                    script_path = os.path.join(pipeline['dir'], step_file)
+                    relative_script_path = os.path.relpath(script_path, project_root)
+                    
                     print(f"🚀 ORCHESTRATOR: Starting step {i}/{len(pipeline['steps'])}: '{step_name}' (ID: {step['id']})")
                     print(f"   Description: {step_description}")
                     print(f"   File: {step_file}")
+                    print(f"   Script Path: {relative_script_path}")
                     
                     self.update_step_status(pipeline_name, step['id'], 'running')
                     
                     # Run the step with Popen so we can track and cancel it
-                    print(f"   Executing: python3 {step_file}")
+                    print(f"   Executing: python3 {relative_script_path}")
                     process = subprocess.Popen(
-                        ['python3', step_file],
-                        cwd=pipeline['dir'],
+                        ['python3', relative_script_path],
+                        cwd=project_root,
                         stdout=None,  # Don't capture stdout - let it show live
                         stderr=None,  # Don't capture stderr - let it show live
                         text=True
@@ -369,7 +390,7 @@ class PipelineRunner:
             cursor = conn.cursor()
             cursor.execute(
                 'UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?',
-                ('success' if success else 'failed', datetime.now(), error_message, run_id)
+                ('success' if success else 'failed', now_in_timezone(), error_message, run_id)
             )
             conn.commit()
             conn.close()
@@ -663,7 +684,7 @@ class PipelineRunner:
                         'pipeline': pipeline_name,
                         'step': step_id,
                         'status': 'pending',
-                        'timestamp': datetime.now().isoformat(),
+                        'timestamp': now_in_timezone().isoformat(),
                         'error_message': None
                     })
                     print(f"   📡 Emitted reset event for step: {step_id}")
@@ -675,7 +696,7 @@ class PipelineRunner:
                 socketio.emit('pipeline_reset', {
                     'pipeline': pipeline_name,
                     'message': 'All steps reset to pending status',
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': now_in_timezone().isoformat(),
                     'step_count': len(step_ids_to_reset)
                 })
                 print(f"   📡 Emitted pipeline_reset event")
@@ -1008,10 +1029,10 @@ def analytics_pipeline_status():
     return jsonify({
         "status": "ready",
         "service": "analytics-pipeline", 
-        "last_update": datetime.now().isoformat(),
+        "last_update": now_in_timezone().isoformat(),
         "pipeline_health": "operational",
         "data_freshness": "current",
-        "last_run": datetime.now().isoformat(),
+        "last_run": now_in_timezone().isoformat(),
         "next_run": None,
         "processing_state": "idle"
     })
@@ -1023,7 +1044,7 @@ def analytics_pipeline_cancel():
         "success": True,
         "message": "Analytics pipeline operations cancelled",
         "status": "cancelled",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/analytics-pipeline/health', methods=['GET'])
@@ -1039,7 +1060,7 @@ def analytics_pipeline_health():
             "storage": "available",
             "compute": "ready"
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Additional API endpoints that the frontend expects (comprehensive error prevention)
@@ -1054,8 +1075,8 @@ def mixpanel_process_status():
         "processing": False,
         "progress": 0,
         "message": "No active processing",
-        "last_run": datetime.now().isoformat(),
-        "timestamp": datetime.now().isoformat()
+        "last_run": now_in_timezone().isoformat(),
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/process/start', methods=['POST'])
@@ -1064,9 +1085,9 @@ def mixpanel_process_start():
     return jsonify({
         "success": True,
         "message": "Mixpanel processing started",
-        "job_id": f"mixpanel_{int(datetime.now().timestamp())}",
+        "job_id": f"mixpanel_{int(now_in_timezone().timestamp())}",
         "status": "started",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/process/cancel', methods=['POST'])
@@ -1076,7 +1097,7 @@ def mixpanel_process_cancel():
         "success": True,
         "message": "Mixpanel processing cancelled",
         "status": "cancelled",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Meta API endpoints
@@ -1090,9 +1111,9 @@ def meta_analytics_start():
     return jsonify({
         "success": True,
         "message": "Analytics data collection started",
-        "job_id": f"analytics_{int(datetime.now().timestamp())}",
+        "job_id": f"analytics_{int(now_in_timezone().timestamp())}",
         "status": "started",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Backward compatibility route
@@ -1111,7 +1132,7 @@ def meta_analytics_job_status(job_id):
         "status": "completed",
         "progress": 100,
         "message": "Analytics job completed",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/jobs/<job_id>/cancel', methods=['POST'])
@@ -1122,7 +1143,7 @@ def meta_analytics_job_cancel(job_id):
         "job_id": job_id,
         "message": "Analytics job cancelled",
         "status": "cancelled",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/coverage', methods=['GET'])
@@ -1135,10 +1156,10 @@ def meta_analytics_coverage():
             "coverage_percentage": 0,
             "date_range": {
                 "start": "2025-01-01",
-                "end": datetime.now().strftime("%Y-%m-%d")
+                "end": now_in_timezone().strftime("%Y-%m-%d")
             }
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/missing-dates', methods=['GET'])
@@ -1150,7 +1171,7 @@ def meta_analytics_missing_dates():
             "missing_dates": [],
             "total_missing": 0
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/configurations', methods=['GET'])
@@ -1159,7 +1180,7 @@ def meta_analytics_configurations():
     return jsonify({
         "success": True,
         "data": [],
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/configurations/<config_id>', methods=['DELETE'])
@@ -1168,7 +1189,7 @@ def meta_analytics_delete_configuration(config_id):
     return jsonify({
         "success": True,
         "message": f"Configuration {config_id} deleted",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/analytics/export', methods=['GET'])
@@ -1180,7 +1201,7 @@ def meta_analytics_export():
             "export_url": "/downloads/meta_export.csv",
             "record_count": 0
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Legacy Historical Routes (Backward compatibility - redirect to analytics)
@@ -1227,7 +1248,7 @@ def meta_action_mappings_get():
         "data": {
             "mappings": {}
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/meta/action-mappings', methods=['POST'])
@@ -1236,7 +1257,7 @@ def meta_action_mappings_post():
     return jsonify({
         "success": True,
         "message": "Action mappings saved",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Cohort Analysis API endpoints
@@ -1250,7 +1271,7 @@ def cohort_analysis():
             "cohorts": [],
             "summary": "No data available"
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/v2/cohort/analyze', methods=['POST'])
@@ -1263,7 +1284,7 @@ def cohort_v2_analyze():
             "results": [],
             "metadata": {}
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/v3/cohort/analyze-refactored', methods=['POST'])
@@ -1274,7 +1295,7 @@ def cohort_v3_analyze():
         "message": "V3 Refactored analysis completed",
         "stage_results": {},
         "final_analysis": {},
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/cohort-pipeline/timeline', methods=['POST'])
@@ -1286,7 +1307,7 @@ def cohort_pipeline_timeline():
             "timeline": [],
             "user_count": 0
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Cohort Analyzer API endpoints
@@ -1296,7 +1317,7 @@ def cohort_analyzer_properties():
     return jsonify({
         "success": True,
         "data": [],
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/cohort_analyzer/property_values', methods=['GET'])
@@ -1305,7 +1326,7 @@ def cohort_analyzer_property_values():
     return jsonify({
         "success": True,
         "data": [],
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/cohort_analyzer/trigger_discovery', methods=['POST'])
@@ -1314,7 +1335,7 @@ def cohort_analyzer_trigger_discovery():
     return jsonify({
         "success": True,
         "message": "Property discovery triggered",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/cohort_analyzer/enable_properties', methods=['POST'])
@@ -1323,7 +1344,7 @@ def cohort_analyzer_enable_properties():
     return jsonify({
         "success": True,
         "message": "Properties enabled",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/cohort_analyzer/discovery_status', methods=['GET'])
@@ -1332,7 +1353,7 @@ def cohort_analyzer_discovery_status():
     return jsonify({
         "success": True,
         "status": "idle",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Conversion Probability API endpoints
@@ -1345,7 +1366,7 @@ def conversion_probability_analyze_properties():
             "properties": [],
             "analysis": {}
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/start-analysis', methods=['POST'])
@@ -1354,10 +1375,10 @@ def conversion_probability_start_analysis():
     return jsonify({
         "success": True,
         "data": {
-            "analysis_id": f"conv_{int(datetime.now().timestamp())}",
+            "analysis_id": f"conv_{int(now_in_timezone().timestamp())}",
             "cached": False
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/progress/<analysis_id>', methods=['GET'])
@@ -1369,7 +1390,7 @@ def conversion_probability_progress(analysis_id):
             "progress": 100,
             "status": "completed"
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/results/<analysis_id>', methods=['GET'])
@@ -1381,7 +1402,7 @@ def conversion_probability_results(analysis_id):
             "results": [],
             "analysis_id": analysis_id
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/results/latest', methods=['GET'])
@@ -1393,7 +1414,7 @@ def conversion_probability_results_latest():
             "results": [],
             "analysis_id": "latest"
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/analyses', methods=['GET'])
@@ -1404,7 +1425,7 @@ def conversion_probability_analyses():
         "data": {
             "files": []
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/conversion-probability/run-new-hierarchical-analysis', methods=['POST'])
@@ -1414,7 +1435,7 @@ def conversion_probability_hierarchical():
         "success": True,
         "message": "Hierarchical analysis completed",
         "data": {},
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Pricing API endpoints
@@ -1429,7 +1450,7 @@ def pricing_rules_get():
             "products": [],
             "missing_products": []
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/rules', methods=['POST'])
@@ -1438,7 +1459,7 @@ def pricing_rules_post():
     return jsonify({
         "success": True,
         "message": "Pricing rule created",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/rules/<rule_id>', methods=['PUT'])
@@ -1447,7 +1468,7 @@ def pricing_rules_put(rule_id):
     return jsonify({
         "success": True,
         "message": f"Pricing rule {rule_id} updated",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/rules/<rule_id>', methods=['DELETE'])
@@ -1456,7 +1477,7 @@ def pricing_rules_delete(rule_id):
     return jsonify({
         "success": True,
         "message": f"Pricing rule {rule_id} deleted",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/products', methods=['GET'])
@@ -1467,7 +1488,7 @@ def pricing_products():
         "data": {
             "products": []
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/countries', methods=['GET'])
@@ -1478,7 +1499,7 @@ def pricing_countries():
         "data": {
             "countries": []
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/repair-rules', methods=['POST'])
@@ -1487,7 +1508,7 @@ def pricing_repair_rules():
     return jsonify({
         "success": True,
         "message": "Pricing rules repaired",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/rules/<rule_id>/history', methods=['GET'])
@@ -1496,7 +1517,7 @@ def pricing_rule_history(rule_id):
     return jsonify({
         "success": True,
         "data": [],
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/rules/<rule_id>/provenance', methods=['GET'])
@@ -1505,7 +1526,7 @@ def pricing_rule_provenance(rule_id):
     return jsonify({
         "success": True,
         "data": {},
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/pricing/products/<product_id>/most-recent-conversion-price', methods=['GET'])
@@ -1516,7 +1537,7 @@ def pricing_product_recent_price(product_id):
         "data": {
             "suggested_price": 9.99
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 # Additional Mixpanel debug endpoints
@@ -1526,9 +1547,9 @@ def mixpanel_debug_sync_ts_get():
     return jsonify({
         "success": True,
         "data": {
-            "sync_timestamp": datetime.now().isoformat()
+            "sync_timestamp": now_in_timezone().isoformat()
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/debug/sync-ts/reset', methods=['POST'])
@@ -1537,7 +1558,7 @@ def mixpanel_debug_sync_ts_reset():
     return jsonify({
         "success": True,
         "message": "Sync timestamp reset",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/debug/latest-processed-date', methods=['GET'])
@@ -1546,9 +1567,9 @@ def mixpanel_debug_latest_processed_date():
     return jsonify({
         "success": True,
         "data": {
-            "latest_date": datetime.now().strftime("%Y-%m-%d")
+            "latest_date": now_in_timezone().strftime("%Y-%m-%d")
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/debug/database/reset', methods=['POST'])
@@ -1592,7 +1613,7 @@ def mixpanel_debug_database_reset():
         return jsonify({
             "success": True,
             "message": f"Database reset completed - deleted {total_deleted} raw data records",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_in_timezone().isoformat(),
             "tables_reset": raw_tables,
             "total_deleted": total_deleted
         })
@@ -1602,7 +1623,7 @@ def mixpanel_debug_database_reset():
         return jsonify({
             "success": False,
             "message": f"Database reset failed: {str(e)}",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": now_in_timezone().isoformat()
         }), 500
 
 @app.route('/api/mixpanel/debug/data/refresh', methods=['POST'])
@@ -1611,7 +1632,7 @@ def mixpanel_debug_data_refresh():
     return jsonify({
         "success": True,
         "message": "Data refresh completed",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/debug/test-s3', methods=['GET'])
@@ -1633,7 +1654,7 @@ def mixpanel_debug_test_s3():
             return jsonify({
                 "success": False,
                 "message": "Missing required environment variables for S3 access",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": now_in_timezone().isoformat()
             }), 500
         
         # Initialize S3 client
@@ -1662,7 +1683,7 @@ def mixpanel_debug_test_s3():
         
         # Test event data availability
         start_date = datetime(2025, 4, 14)
-        end_date = datetime.now()
+        end_date = now_in_timezone()
         total_days = (end_date - start_date).days + 1
         available_dates = []
         
@@ -1704,7 +1725,7 @@ def mixpanel_debug_test_s3():
         return jsonify({
             "success": True,
             "message": "S3 connection test completed",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_in_timezone().isoformat(),
             "user_data": user_data,
             "event_data": event_data
         })
@@ -1714,7 +1735,7 @@ def mixpanel_debug_test_s3():
         return jsonify({
             "success": False,
             "message": f"S3 connection test failed: {str(e)}",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": now_in_timezone().isoformat()
         }), 500
 
 @app.route('/api/mixpanel/debug/test-db-events', methods=['GET'])
@@ -1723,7 +1744,7 @@ def mixpanel_debug_test_db_events():
     return jsonify({
         "success": True,
         "data": [],
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_in_timezone().isoformat()
     })
 
 @app.route('/api/mixpanel/debug/database-stats', methods=['GET'])

@@ -59,7 +59,7 @@ osascript -e "
 tell application \"Terminal\"
     activate
     tell application \"System Events\" to tell process \"Terminal\" to keystroke \"t\" using command down
-    do script \"cd '$SCRIPT_DIR' && echo '🔧 Starting Backend (Flask)...' && echo 'Port: 5001' && source venv/bin/activate && cd orchestrator && python3 app.py\" in front window
+    do script \"cd '$SCRIPT_DIR' && echo '🔧 Starting Backend (Flask)...' && echo 'Port: 5001' && source venv/bin/activate && python3 -m orchestrator.app\" in front window
 end tell
 "
 

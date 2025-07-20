@@ -16,6 +16,9 @@ import sys
 # Import the pipeline runner
 from app import PipelineRunner
 
+# Import timezone utilities for consistent timezone handling
+from utils.timezone_utils import now_in_timezone
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +56,7 @@ class BackgroundWorker:
         try:
             with open('last_daily_run.json', 'w') as f:
                 json.dump({
-                    'last_run': datetime.now().isoformat()
+                    'last_run': now_in_timezone().isoformat()
                 }, f)
             logger.info("Saved last daily run time")
         except Exception as e:
@@ -65,7 +68,7 @@ class BackgroundWorker:
             return True
         
         # Run if it's been more than 22 hours (allows for some flexibility)
-        time_since_last_run = datetime.now() - self.last_daily_run
+        time_since_last_run = now_in_timezone() - self.last_daily_run
         return time_since_last_run > timedelta(hours=22)
     
     def run_daily_pipeline(self):
@@ -79,7 +82,7 @@ class BackgroundWorker:
             if success:
                 logger.info("✅ Daily master pipeline completed successfully")
                 self.save_last_run_time()
-                self.last_daily_run = datetime.now()
+                self.last_daily_run = now_in_timezone()
             else:
                 logger.error(f"❌ Daily master pipeline failed: {message}")
                 
@@ -98,7 +101,7 @@ class BackgroundWorker:
         
         # Log some basic stats
         if self.last_daily_run:
-            hours_since_last = (datetime.now() - self.last_daily_run).total_seconds() / 3600
+            hours_since_last = (now_in_timezone() - self.last_daily_run).total_seconds() / 3600
             logger.info(f"   Last daily run: {hours_since_last:.1f} hours ago")
         else:
             logger.info("   No daily run recorded yet")
@@ -126,7 +129,7 @@ class BackgroundWorker:
                 self.process_job_queue()
                 
                 # Health check every hour
-                current_minute = datetime.now().minute
+                current_minute = now_in_timezone().minute
                 if current_minute == 0:  # Top of the hour
                     self.health_check()
                 

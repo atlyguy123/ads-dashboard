@@ -20,6 +20,7 @@ import OverviewROASSparkline from '../components/dashboard/OverviewROASSparkline
 
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
+import { getCurrentETDate, formatDateForDisplay } from '../config/api';
 
 
 // Import centralized column configuration
@@ -66,7 +67,7 @@ export const Dashboard = () => {
     }
     return {
       start_date: '2024-01-01',
-      end_date: new Date().toISOString().split('T')[0]
+      end_date: getCurrentETDate()
     };
   });
 
@@ -935,7 +936,7 @@ export const Dashboard = () => {
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
               <Clock className="mr-2 h-4 w-4" />
-              Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleString() : 'Loading...'}
+              Last updated: {lastUpdated ? formatDateForDisplay(lastUpdated) : 'Loading...'}
             </div>
             
             {backgroundLoading && (

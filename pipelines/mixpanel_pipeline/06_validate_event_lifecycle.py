@@ -58,8 +58,12 @@ import json
 import time
 from datetime import datetime, timedelta
 from collections import namedtuple, defaultdict
-from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple, Set
+
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from orchestrator.utils.timezone_utils import now_in_timezone
 
 # Add utils directory to path for database utilities
 utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
@@ -267,7 +271,7 @@ def setup_and_validate_lifecycles(conn):
                     'PLACEHOLDER_STATUS',
                     -999.99,
                     'PLACEHOLDER_VALUE_STATUS',
-                    datetime.now(),
+                    now_in_timezone(),
                     1 if is_valid else 0,
                     country,                # PRESERVED geographic data
                     region,                 # PRESERVED geographic data
@@ -288,7 +292,7 @@ def setup_and_validate_lifecycles(conn):
                     'PLACEHOLDER_STATUS',
                     -999.99,
                     'PLACEHOLDER_VALUE_STATUS',
-                    datetime.now(),
+                    now_in_timezone(),
                     1 if is_valid else 0
                 ))
             
@@ -529,7 +533,7 @@ def validate_lifecycle_pattern(events, distinct_id, product_id):
         # If so, it should have ended by now, so it's invalid
         # If not, the trial could still be legitimately active
         try:
-            current_time = datetime.now(state.trial_start_time.tzinfo)
+            current_time = now_in_timezone()
             days_since_trial_start = (current_time - state.trial_start_time).days
             
             if days_since_trial_start > 31:

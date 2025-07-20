@@ -55,6 +55,19 @@ class Config:
     # CORS Configuration
     ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5001').split(',')
     
+    # Timezone Configuration
+    # Primary timezone options:
+    # 'America/New_York'      # Eastern Time (ET/EDT) - Default
+    # 'America/Chicago'       # Central Time (CT/CDT)
+    # 'America/Denver'        # Mountain Time (MT/MDT)
+    # 'America/Los_Angeles'   # Pacific Time (PT/PDT)
+    # 'Asia/Jerusalem'        # Israel Time (IST/IDT)
+    # 'Europe/London'         # GMT/BST
+    # 'UTC'                   # UTC (no DST)
+    DEFAULT_TIMEZONE = os.getenv('DEFAULT_TIMEZONE', 'America/New_York')
+    DISPLAY_TIMEZONE = os.getenv('DISPLAY_TIMEZONE', 'America/New_York')
+    USE_UTC_STORAGE = os.getenv('USE_UTC_STORAGE', 'true').lower() == 'true'
+    
     # Production specific settings
     @property
     def is_production(self):

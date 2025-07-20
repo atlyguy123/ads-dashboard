@@ -62,12 +62,59 @@ export const apiRequest = async (endpoint, options = {}) => {
 };
 
 /**
+ * Timezone utility functions for consistent time handling
+ */
+export const formatDateForDisplay = (dateString) => {
+  const date = new Date(dateString);
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+};
+
+export const getCurrentETTime = () => {
+  return new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York'
+  });
+};
+
+export const getCurrentETDate = () => {
+  return new Date().toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('/').reverse().join('-'); // Returns YYYY-MM-DD format
+};
+
+export const formatDateForAPI = (dateString) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('/').reverse().join('-'); // Returns YYYY-MM-DD format
+};
+
+/**
  * Configuration object for easy access
  */
 export const apiConfig = {
   baseUrl: normalizedBaseUrl,
   buildUrl: buildApiUrl,
   request: apiRequest,
+  timezone: {
+    formatDateForDisplay,
+    getCurrentETTime,
+    getCurrentETDate,
+    formatDateForAPI
+  }
 };
 
 export default apiConfig; 

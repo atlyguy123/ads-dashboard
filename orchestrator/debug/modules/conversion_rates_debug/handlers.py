@@ -15,6 +15,10 @@ utils_path = str(Path(__file__).resolve().parent.parent.parent.parent.parent / "
 sys.path.append(utils_path)
 from database_utils import get_database_path
 
+# Import timezone utilities for consistent timezone handling
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
+from utils.timezone_utils import now_in_timezone
+
 logger = logging.getLogger(__name__)
 
 # Constants from the conversion rates pipeline
@@ -138,8 +142,8 @@ def build_hierarchical_tree(user_data: List[sqlite3.Row]) -> Tuple[List[Dict], D
     Build a clean hierarchical tree structure by adding users one by one and checking for rate consistency
     """
     # Define cohort date windows (matching the conversion rate processor logic)
-    cohort_start_date = (datetime.now() - timedelta(days=53)).strftime('%Y-%m-%d')
-    cohort_end_date = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
+    cohort_start_date = (now_in_timezone() - timedelta(days=53)).strftime('%Y-%m-%d')
+    cohort_end_date = (now_in_timezone() - timedelta(days=8)).strftime('%Y-%m-%d')
     
     # Initialize tree structure and statistics
     tree_root = {}
