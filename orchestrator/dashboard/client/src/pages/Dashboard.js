@@ -17,6 +17,9 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { DashboardGrid } from '../components/DashboardGrid';
 import OverviewROASSparkline from '../components/dashboard/OverviewROASSparkline';
+import OverviewSpendSparkline from '../components/dashboard/OverviewSpendSparkline';
+import OverviewRevenueSparkline from '../components/dashboard/OverviewRevenueSparkline';
+import OverviewProfitSparkline from '../components/dashboard/OverviewProfitSparkline';
 
 import ImprovedDashboardControls from '../components/dashboard/ImprovedDashboardControls';
 import { dashboardApi } from '../services/dashboardApi';
@@ -864,37 +867,67 @@ export const Dashboard = () => {
           return (
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <DollarSign className="h-8 w-8 text-blue-500" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <DollarSign className="h-8 w-8 text-blue-500" />
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Spend</p>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                        ${Math.round(stats.totalSpend).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Spend</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      ${stats.totalSpend.toLocaleString()}
-                    </p>
+                    <OverviewSpendSparkline 
+                      dateRange={dateRange}
+                      breakdown={breakdown}
+                      width={180}
+                      height={60}
+                    />
                   </div>
                 </div>
               </div>
               
               <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <TrendingUp className="h-8 w-8 text-green-500" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <TrendingUp className="h-8 w-8 text-green-500" />
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400">EST. Revenue</p>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                        ${Math.round(stats.totalRevenue).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Estimated Revenue</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      ${stats.totalRevenue.toLocaleString()}
-                    </p>
+                    <OverviewRevenueSparkline 
+                      dateRange={dateRange}
+                      breakdown={breakdown}
+                      width={180}
+                      height={60}
+                    />
                   </div>
                 </div>
               </div>
               
               <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <BarChart3 className={`h-8 w-8 ${stats.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <BarChart3 className={`h-8 w-8 ${stats.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400">EST. Profit</p>
+                      <p className={`text-2xl font-bold ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${Math.round(stats.totalProfit).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Profit</p>
-                    <p className={`text-2xl font-bold ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      ${stats.totalProfit.toLocaleString()}
-                    </p>
+                    <OverviewProfitSparkline 
+                      dateRange={dateRange}
+                      breakdown={breakdown}
+                      width={180}
+                      height={60}
+                    />
                   </div>
                 </div>
               </div>

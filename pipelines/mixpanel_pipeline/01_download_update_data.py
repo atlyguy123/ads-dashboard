@@ -67,6 +67,10 @@ EVENTS_TO_KEEP = [
     "RC Expiration"
 ]
 
+# DEBUG MODE: Set to True to save JSON files locally for verification
+DEBUG_SAVE_JSON_FILES = os.environ.get('DEBUG_SAVE_JSON_FILES', 'False').lower() == 'true'
+DEBUG_JSON_OUTPUT_DIR = Path("data/events")
+
 def get_database_connection():
     """Get connection to database (PostgreSQL if available, otherwise SQLite)"""
     if USE_POSTGRES:
@@ -393,8 +397,24 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
     """
     Downloads an event .json.gz file from S3, decompresses it,
     filters events by name, and stores in database.
+    
+    In DEBUG mode, also saves filtered events to JSON files for verification.
     """
     cursor = conn.cursor()
+    
+    # Prepare debug JSON file if in debug mode
+    debug_json_file = None
+    if DEBUG_SAVE_JSON_FILES:
+        # Create directory structure: data/events/YYYY-MM-DD/
+        date_str = str(target_date)  # Convert datetime.date to string
+        date_dir = DEBUG_JSON_OUTPUT_DIR / date_str
+        date_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename based on S3 object key
+        s3_filename = Path(object_key).stem.replace('.json', '')  # Remove .json from .json.gz
+        debug_json_filename = f"{s3_filename}.json"
+        debug_json_file = date_dir / debug_json_filename
+        logger.info(f"🔍 DEBUG MODE: Will save filtered events to {debug_json_file}")
 
     try:
         logger.info(f"Downloading and processing s3://{bucket_name}/{object_key}")
@@ -404,6 +424,7 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
         
         filtered_count = 0
         total_count = 0
+        debug_events = []  # Store filtered events for debug file
         
         # Process gzipped content
         with gzip.GzipFile(fileobj=response['Body']) as f:
@@ -427,12 +448,24 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                                 INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
                                 VALUES (?, ?, ?)
                             """, (target_date, file_sequence, json.dumps(event_data)))
+                        
+                        # Save for debug JSON file
+                        if DEBUG_SAVE_JSON_FILES:
+                            debug_events.append(event_data)
+                        
                         filtered_count += 1
                         
                 except json.JSONDecodeError as e:
                     logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing line: {e}")
+        
+        # Write debug JSON file if in debug mode
+        if DEBUG_SAVE_JSON_FILES and debug_json_file and debug_events:
+            with open(debug_json_file, 'w', encoding='utf-8') as f:
+                for event in debug_events:
+                    f.write(json.dumps(event) + '\n')
+            logger.info(f"🔍 DEBUG: Saved {len(debug_events)} filtered events to {debug_json_file}")
         
         conn.commit()
         logger.info(f"Stored {filtered_count} out of {total_count} events from {object_key}")
