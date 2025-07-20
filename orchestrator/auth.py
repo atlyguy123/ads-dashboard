@@ -1,6 +1,9 @@
 from flask import request, Response
 from functools import wraps
-from .config import config
+try:
+    from .config import config
+except ImportError:
+    from orchestrator.config import config
 
 # Team credentials - read from configuration
 TEAM_CREDENTIALS = {
