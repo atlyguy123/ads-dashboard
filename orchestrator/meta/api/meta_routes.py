@@ -58,6 +58,85 @@ def fetch_meta_data_endpoint():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@meta_bp.route('/update-data', methods=['POST'])
+def update_meta_data_endpoint():
+    """Trigger Meta data update pipeline to refresh analytics data"""
+    try:
+        import subprocess
+        import logging
+        from pathlib import Path
+        
+        logger = logging.getLogger(__name__)
+        logger.info("🚀 Meta data update requested via API")
+        
+        # Get the path to the Meta pipeline script
+        current_dir = Path(__file__).resolve().parent
+        project_root = current_dir.parent.parent.parent
+        script_path = project_root / "pipelines" / "meta_pipeline" / "01_update_meta_data.py"
+        
+        if not script_path.exists():
+            logger.error(f"❌ Meta update script not found at {script_path}")
+            return jsonify({
+                'success': False,
+                'error': f'Meta update script not found at {script_path}'
+            }), 404
+        
+        logger.info(f"📁 Executing script: {script_path}")
+        
+        # Execute the Meta data update script
+        result = subprocess.run(
+            ['python3', str(script_path)],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minute timeout
+        )
+        
+        # Log the output for debugging
+        if result.stdout:
+            logger.info(f"📊 Script output: {result.stdout}")
+        if result.stderr:
+            logger.warning(f"⚠️ Script stderr: {result.stderr}")
+        
+        if result.returncode == 0:
+            logger.info("✅ Meta data update completed successfully")
+            
+            # Extract summary from output if available
+            summary = ""
+            if "SUCCESS" in result.stdout:
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if "Summary:" in line or "requests:" in line or "Elapsed time:" in line:
+                        summary += line + " "
+            
+            return jsonify({
+                'success': True,
+                'message': 'Meta data update completed successfully',
+                'summary': summary.strip() if summary else None,
+                'output': result.stdout[-500:] if result.stdout else None  # Last 500 chars
+            })
+        else:
+            logger.error(f"❌ Meta data update failed with exit code {result.returncode}")
+            return jsonify({
+                'success': False,
+                'error': f'Meta data update script failed (exit code {result.returncode})',
+                'stderr': result.stderr[-500:] if result.stderr else None  # Last 500 chars
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        logger.error("❌ Meta data update timed out")
+        return jsonify({
+            'success': False,
+            'error': 'Meta data update timed out (>10 minutes)'
+        }), 408
+        
+    except Exception as e:
+        logger.error(f"❌ Error running Meta data update: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Error executing Meta data update: {str(e)}'
+        }), 500
+
 @meta_bp.route('/job/<report_run_id>/status', methods=['GET'])
 def check_job_status(report_run_id):
     """Check the status of an async Meta API job"""

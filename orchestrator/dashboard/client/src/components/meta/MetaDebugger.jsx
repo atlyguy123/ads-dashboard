@@ -5,6 +5,7 @@ import ActionMapper from './ActionMapper';
 import TableViewer from './TableViewer';
 import { DEFAULT_FIELDS } from './utils/metaConstants';
 import { compactObject } from './utils/metaApiUtils';
+import { apiRequest } from '../../config/api';
 
 export const MetaDebugger = () => {
   // Mode state
@@ -22,6 +23,10 @@ export const MetaDebugger = () => {
   
   // Shared error state
   const [error, setError] = useState(null);
+  
+  // Meta data update state
+  const [isUpdatingMeta, setIsUpdatingMeta] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null);
   
   // Initialize fields with defaults
   useEffect(() => {
@@ -79,6 +84,41 @@ export const MetaDebugger = () => {
     };
   }, [showDropdown]);
 
+  // Handle Meta data update
+  const handleMetaDataUpdate = async () => {
+    setIsUpdatingMeta(true);
+    setUpdateStatus(null);
+    setError(null);
+    
+    try {
+      const response = await apiRequest('/api/meta/update-data', {
+        method: 'POST',
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        setUpdateStatus({
+          type: 'success',
+          message: `Meta data update completed successfully! ${result.summary || ''}`
+        });
+      } else {
+        setUpdateStatus({
+          type: 'error',
+          message: result.error || 'Meta data update failed'
+        });
+      }
+    } catch (err) {
+      console.error('Meta data update error:', err);
+      setUpdateStatus({
+        type: 'error',
+        message: `Network error: ${err.message}`
+      });
+    } finally {
+      setIsUpdatingMeta(false);
+    }
+  };
+
   return (
     <div className="flex">
       <div className="flex-1 p-6 max-w-5xl">
@@ -104,6 +144,31 @@ export const MetaDebugger = () => {
                   : 'bg-gray-200 text-gray-700'}`}
               >
                 Live API Testing
+              </button>
+            </div>
+            
+            {/* Meta Data Update Button (center) */}
+            <div className="flex space-x-3">
+              <button
+                onClick={handleMetaDataUpdate}
+                disabled={isUpdatingMeta}
+                className={`px-4 py-2 rounded flex items-center space-x-2 transition-colors ${
+                  isUpdatingMeta 
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isUpdatingMeta ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Updating...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔄</span>
+                    <span>Update Meta Data</span>
+                  </>
+                )}
               </button>
             </div>
             
@@ -201,6 +266,17 @@ export const MetaDebugger = () => {
         {error && (
           <div className="mt-4 p-3 bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100 rounded">
             Error: {error}
+          </div>
+        )}
+
+        {/* Update Status display */}
+        {updateStatus && (
+          <div className={`mt-4 p-3 rounded ${
+            updateStatus.type === 'success' 
+              ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-100' 
+              : 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-100'
+          }`}>
+            {updateStatus.message}
           </div>
         )}
       </div>

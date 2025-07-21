@@ -23,8 +23,8 @@ from utils.database_utils import get_database_path, get_database_connection
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
 
-# Import the breakdown mapping service
-from .breakdown_mapping_service import BreakdownMappingService, BreakdownData
+# Import breakdown data type (service will be imported lazily)
+from .breakdown_mapping_service import BreakdownData
 
 # Import the modular calculator system
 from ..calculators import (
@@ -68,9 +68,10 @@ class AnalyticsQueryService:
         self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
         self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_database_path('mixpanel_data')
         
-        # 🔥 CRITICAL FIX: Initialize breakdown mapping service with the CORRECT Meta database path
-        # The breakdown service needs meta_analytics.db for Meta data, not mixpanel_data.db!
-        self.breakdown_service = BreakdownMappingService(self.mixpanel_db_path, meta_db_path=self.meta_db_path)
+        # 🔥 CRITICAL FIX: Make breakdown service initialization LAZY to prevent Railway startup failures
+        # Instead of initializing immediately, store the path and create the service only when needed
+        self._breakdown_service = None
+        self._breakdown_service_initialized = False
         
         # Table mapping based on breakdown parameter
         self.table_mapping = {
@@ -79,6 +80,40 @@ class AnalyticsQueryService:
             'region': 'ad_performance_daily_region',
             'device': 'ad_performance_daily_device'
         }
+    
+    @property
+    def breakdown_service(self):
+        """
+        Lazy initialization of BreakdownMappingService to prevent Railway startup failures.
+        
+        Only creates the service when it's actually needed, and handles any initialization
+        errors gracefully by returning None (which disables breakdown functionality).
+        """
+        if not self._breakdown_service_initialized:
+            try:
+                # Import here to avoid circular imports
+                from .breakdown_mapping_service import BreakdownMappingService
+                
+                # Only initialize if we have valid database paths
+                if self.mixpanel_db_path and self.meta_db_path:
+                    logger.info(f"🔧 Initializing BreakdownMappingService: mixpanel={self.mixpanel_db_path}, meta={self.meta_db_path}")
+                    self._breakdown_service = BreakdownMappingService(
+                        self.mixpanel_db_path, 
+                        meta_db_path=self.meta_db_path
+                    )
+                    logger.info("✅ BreakdownMappingService initialized successfully")
+                else:
+                    logger.warning(f"❌ Cannot initialize BreakdownMappingService: missing paths (mixpanel={bool(self.mixpanel_db_path)}, meta={bool(self.meta_db_path)})")
+                    self._breakdown_service = None
+                    
+            except Exception as e:
+                logger.warning(f"❌ Failed to initialize BreakdownMappingService: {e}")
+                logger.info("🔧 Breakdown functionality will be disabled, but analytics will continue to work")
+                self._breakdown_service = None
+                
+            self._breakdown_service_initialized = True
+            
+        return self._breakdown_service
     
     def get_table_name(self, breakdown: str) -> str:
         """Get the appropriate table name based on breakdown parameter"""
@@ -184,6 +219,11 @@ class AnalyticsQueryService:
         """
         try:
             logger.info(f"🔍 Enriching hierarchy with {config.breakdown} breakdown data")
+            
+            # CRITICAL FIX: Check if breakdown service is available before using it
+            if not self.breakdown_service:
+                logger.warning("⚠️ Breakdown service not available, skipping breakdown enrichment")
+                return hierarchical_result
             
             # CRITICAL FIX: Get breakdown data for ALL hierarchy levels, not just group_by level
             # This enables breakdown data to appear at all levels (campaign, adset, and ad)
@@ -365,6 +405,11 @@ class AnalyticsQueryService:
         Discover unmapped breakdown values and return mapping suggestions
         """
         try:
+            # CRITICAL FIX: Check if breakdown service is available
+            if not self.breakdown_service:
+                logger.warning("⚠️ Breakdown service not available, cannot discover mappings")
+                return {'unmapped_countries': [], 'unmapped_devices': []}
+                
             return self.breakdown_service.discover_and_update_mappings()
         except Exception as e:
             logger.error(f"Error discovering breakdown mappings: {e}")
@@ -1024,8 +1069,13 @@ class AnalyticsQueryService:
         return formatted_ads
     
     def _execute_meta_query(self, query: str, params: List) -> List[Dict[str, Any]]:
-        """Execute query against meta analytics database"""
+        """Execute query against meta analytics database with graceful fallback"""
         try:
+            # Check if meta database path is valid and database exists
+            if not self.meta_db_path or not Path(self.meta_db_path).exists():
+                logger.info(f"Meta analytics database not available at {self.meta_db_path}, returning empty results")
+                return []
+            
             conn = sqlite3.connect(self.meta_db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1040,8 +1090,9 @@ class AnalyticsQueryService:
             return data
             
         except Exception as e:
-            logger.error(f"Error executing meta query: {e}")
-            raise
+            logger.warning(f"Error executing meta query, falling back to empty results: {e}")
+            # Return empty results instead of raising exception
+            return []
     
     def _add_mixpanel_data_to_records(self, records: List[Dict[str, Any]], config: QueryConfig):
         """
@@ -1954,9 +2005,16 @@ class AnalyticsQueryService:
     def _get_breakdown_chart_data(self, config: QueryConfig, entity_type: str, parent_entity_id: str, breakdown_value: str) -> Dict[str, Any]:
         """Get chart data for a specific breakdown value (e.g., US breakdown for a campaign)"""
         try:
-            # Import BreakdownMappingService here to avoid circular imports
-            from .breakdown_mapping_service import BreakdownMappingService
-            breakdown_service = BreakdownMappingService()
+            # CRITICAL FIX: Use the lazy-loaded breakdown service instead of creating a new instance
+            # This prevents Railway initialization failures
+            if not self.breakdown_service:
+                logger.warning(f"⚠️ Breakdown service not available, cannot get chart data for {breakdown_value}")
+                return {
+                    'success': False,
+                    'error': 'Breakdown functionality is not available at this time'
+                }
+            
+            breakdown_service = self.breakdown_service
             
             # Determine which breakdown table to use based on config.breakdown
             if config.breakdown == 'country':
