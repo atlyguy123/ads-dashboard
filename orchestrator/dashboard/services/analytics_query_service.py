@@ -23,6 +23,27 @@ from utils.database_utils import get_database_path, get_database_connection
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
 
+# Railway-specific database path handling
+import os
+from pathlib import Path
+
+def get_railway_database_path(database_name: str) -> str:
+    """Get database path that works in both local and Railway environments"""
+    # Check if we're in Railway environment
+    railway_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+    
+    if railway_volume_path:
+        # Railway environment - use the volume mount path
+        return str(Path(railway_volume_path) / f"{database_name}.db")
+    else:
+        # Local environment - use the existing function
+        try:
+            from ....utils.database_utils import get_database_path
+            return get_database_path(database_name)
+        except ImportError:
+            # Fallback to relative path
+            return str(Path(__file__).resolve().parent.parent.parent.parent / "database" / f"{database_name}.db")
+
 # Import the breakdown mapping service
 from .breakdown_mapping_service import BreakdownMappingService, BreakdownData
 
@@ -58,15 +79,15 @@ class AnalyticsQueryService:
                  meta_db_path: Optional[str] = None,
                  mixpanel_db_path: Optional[str] = None,
                  mixpanel_analytics_db_path: Optional[str] = None):
-        # Use centralized database path discovery or provided paths
+        # Use Railway-aware database path discovery or provided paths
         try:
-            self.meta_db_path = meta_db_path or get_database_path('meta_analytics')
+            self.meta_db_path = meta_db_path or get_railway_database_path('meta_analytics')
         except Exception:
             # Fallback for meta_analytics if not found (might not exist yet)
             self.meta_db_path = meta_db_path or ""
             
-        self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
-        self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_database_path('mixpanel_data')
+        self.mixpanel_db_path = mixpanel_db_path or get_railway_database_path('mixpanel_data')
+        self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_railway_database_path('mixpanel_data')
         
         # 🔥 CRITICAL FIX: Initialize breakdown mapping service with the CORRECT Meta database path
         # The breakdown service needs meta_analytics.db for Meta data, not mixpanel_data.db!
