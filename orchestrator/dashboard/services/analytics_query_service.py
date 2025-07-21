@@ -23,27 +23,6 @@ from utils.database_utils import get_database_path, get_database_connection
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
 
-# Railway-specific database path handling
-import os
-from pathlib import Path
-
-def get_railway_database_path(database_name: str) -> str:
-    """Get database path that works in both local and Railway environments"""
-    # Check if we're in Railway environment
-    railway_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
-    
-    if railway_volume_path:
-        # Railway environment - use the volume mount path
-        return str(Path(railway_volume_path) / f"{database_name}.db")
-    else:
-        # Local environment - use the existing function
-        try:
-            from ....utils.database_utils import get_database_path
-            return get_database_path(database_name)
-        except ImportError:
-            # Fallback to relative path
-            return str(Path(__file__).resolve().parent.parent.parent.parent / "database" / f"{database_name}.db")
-
 # Import the breakdown mapping service
 from .breakdown_mapping_service import BreakdownMappingService, BreakdownData
 
@@ -79,15 +58,15 @@ class AnalyticsQueryService:
                  meta_db_path: Optional[str] = None,
                  mixpanel_db_path: Optional[str] = None,
                  mixpanel_analytics_db_path: Optional[str] = None):
-        # Use Railway-aware database path discovery or provided paths
+        # Use centralized database path discovery or provided paths
         try:
-            self.meta_db_path = meta_db_path or get_railway_database_path('meta_analytics')
+            self.meta_db_path = meta_db_path or get_database_path('meta_analytics')
         except Exception:
             # Fallback for meta_analytics if not found (might not exist yet)
             self.meta_db_path = meta_db_path or ""
             
-        self.mixpanel_db_path = mixpanel_db_path or get_railway_database_path('mixpanel_data')
-        self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_railway_database_path('mixpanel_data')
+        self.mixpanel_db_path = mixpanel_db_path or get_database_path('mixpanel_data')
+        self.mixpanel_analytics_db_path = mixpanel_analytics_db_path or get_database_path('mixpanel_data')
         
         # 🔥 CRITICAL FIX: Initialize breakdown mapping service with the CORRECT Meta database path
         # The breakdown service needs meta_analytics.db for Meta data, not mixpanel_data.db!
@@ -1698,9 +1677,7 @@ class AnalyticsQueryService:
             expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
             expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
             
-            logger.info(f"📊 CHART DATA: Fetching 14 days from {chart_start_date} to {chart_end_date} for 1-day rolling calculations")
-            logger.info(f"📊 DISPLAY PERIOD: Showing 14 days from {display_start_str} to {chart_end_date}")
-            logger.info(f"📊 ACTIVITY ANALYSIS: Checking spend activity from {expanded_start_str} to {expanded_end_str}")
+            # Chart data configuration validated
             
             # Build WHERE clause for Meta data based on entity type
             if entity_type == 'campaign':
@@ -1737,7 +1714,7 @@ class AnalyticsQueryService:
                     first_spend_date = min(spend_dates)
                     last_spend_date = max(spend_dates)
             
-            logger.info(f"📊 ACTIVITY PERIOD: First spend: {first_spend_date}, Last spend: {last_spend_date}")
+            # Activity period determined
             
             # Get daily Meta data for the 14-day display period
             meta_query = f"""
@@ -1948,8 +1925,7 @@ class AnalyticsQueryService:
             # Extract only the 14-day display period (no need to skip days for 1-day rolling)
             chart_data = all_data[-14:]  # Return only the last 14 days for display
             
-            logger.info(f"📊 CHART RESULT: {len(chart_data)} display days from {chart_data[0]['date']} to {chart_data[-1]['date']}")
-            logger.info(f"📊 ROLLING CALCULATION: Used {len(all_data)} total days for 1-day rolling averages")
+            # Chart calculation completed
             
             return {
                 'success': True,
@@ -2742,7 +2718,7 @@ class AnalyticsQueryService:
         This aggregates data across all campaigns to show overall performance trends
         """
         try:
-            logger.info(f"🔍 Getting overview ROAS chart data from {start_date} to {end_date} with breakdown: {breakdown}")
+            # Getting overview ROAS chart data
             
             # Calculate date range for chart period
             from datetime import datetime, timedelta
@@ -2751,7 +2727,7 @@ class AnalyticsQueryService:
             
             # Calculate how many days we need
             date_diff = (end_dt - start_dt).days + 1
-            logger.info(f"📅 Generating {date_diff} days from {start_date} to {end_date}")
+            # Generate date range for overview period
             
             # Generate all dates in the requested range
             daily_data = {}
@@ -2779,7 +2755,7 @@ class AnalyticsQueryService:
                 current_dt += timedelta(days=1)
             
             # ✅ STEP 1: Get aggregated Meta data from correct table (ad_performance_daily)
-            logger.info("📊 STEP 1: Querying Meta data from ad_performance_daily")
+            # Step 1: Query Meta data
             
             # Determine which table to use based on breakdown
             table_name = self.get_table_name(breakdown)  # Uses existing table mapping logic
@@ -2802,7 +2778,7 @@ class AnalyticsQueryService:
             logger.info(f"📊 Retrieved {len(meta_data)} days of Meta data")
             
             # ✅ STEP 2: Get aggregated Mixpanel data from correct tables
-            logger.info("📊 STEP 2: Querying Mixpanel data from user_product_metrics + mixpanel_event")
+            # Step 2: Query Mixpanel data
             
             # Get estimated revenue from user_product_metrics (attributed by credited_date)
             with get_database_connection('mixpanel_data') as mixpanel_conn:
@@ -2912,7 +2888,7 @@ class AnalyticsQueryService:
                 event_priority = 'purchases'
                 overall_accuracy_ratio = (total_mixpanel_purchases / total_meta_purchases) if total_meta_purchases > 0 else 0.0
             
-            logger.info(f"📊 OVERVIEW ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
+            # Overview accuracy calculated
             
             # Convert to list and calculate rolling metrics
             all_data = []
@@ -2988,9 +2964,7 @@ class AnalyticsQueryService:
             total_revenue = sum(d['daily_estimated_revenue'] for d in chart_data)
             avg_daily_roas = sum(d['rolling_1d_roas'] for d in chart_data) / len(chart_data) if chart_data else 0
             
-            logger.info(f"✅ OVERVIEW CHART SUCCESS: {len(chart_data)} total days, {total_days_with_data} days with data")
-            logger.info(f"💰 OVERVIEW TOTALS: ${total_spend:.2f} spend, ${total_revenue:.2f} revenue, {avg_daily_roas:.2f}x avg ROAS")
-            logger.info(f"📊 OVERVIEW DATE RANGE: {chart_data[0]['date']} to {chart_data[-1]['date']}")
+                    # Overview chart data completed
             
             return {
                 'success': True,

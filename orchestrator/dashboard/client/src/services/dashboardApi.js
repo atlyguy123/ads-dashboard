@@ -7,11 +7,15 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 class DashboardApiService {
   constructor() {
     this.baseUrl = `${API_BASE_URL}/api/dashboard`;
+    // Debug: Log the actual base URL being used
+    if (!API_BASE_URL) {
+      console.error('🚨 SPARKLINE CONFIG ERROR: REACT_APP_API_URL not set, API calls will fail');
+    }
+    console.log(`🔧 SPARKLINE CONFIG: baseUrl = "${this.baseUrl}"`);
   }
 
   async makeRequest(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
-    console.log('🔥🔥🔥 DASHBOARD API - makeRequest called:', url, options);
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -21,18 +25,23 @@ class DashboardApiService {
     };
 
     try {
-      console.log('🔥🔥🔥 DASHBOARD API - Fetching:', url, config);
       const response = await fetch(url, config);
       const data = await response.json();
-      console.log('🔥🔥🔥 DASHBOARD API - Response:', data);
       
       if (!response.ok) {
+        // Only log failures for sparkline debugging
+        if (endpoint.includes('chart-data')) {
+          console.error(`🚨 SPARKLINE API FAILURE: ${response.status} - ${url}`, data);
+        }
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
       
       return data;
     } catch (error) {
-      console.error(`API request failed for ${endpoint}:`, error);
+      // Only log failures for sparkline debugging
+      if (endpoint.includes('chart-data')) {
+        console.error(`🚨 SPARKLINE FETCH ERROR: ${url}`, error);
+      }
       throw error;
     }
   }
@@ -165,10 +174,8 @@ class DashboardApiService {
    * Get chart data for analytics sparklines and detailed views
    */
   async getAnalyticsChartData(params) {
-    console.log('🔥🔥🔥 DASHBOARD API - getAnalyticsChartData called with:', params);
     const queryParams = new URLSearchParams(params).toString();
-    console.log('🔥🔥🔥 DASHBOARD API - Query params:', queryParams);
-    console.log('🔥🔥🔥 DASHBOARD API - Full URL:', `/analytics/chart-data?${queryParams}`);
+    console.log(`🔍 SPARKLINE DEBUG: ${params.entity_type}/${params.entity_id} → ${this.baseUrl}/analytics/chart-data?${queryParams}`);
     return this.makeRequest(`/analytics/chart-data?${queryParams}`);
   }
 
@@ -277,7 +284,7 @@ class DashboardApiService {
    */
   async getAvailableDateRange() {
     try {
-      const response = await this.makeRequest('/api/dashboard/analytics/date-range');
+      const response = await this.makeRequest('/analytics/date-range');
       return response;
     } catch (error) {
       console.error('Error fetching available date range:', error);
@@ -314,7 +321,6 @@ class DashboardApiService {
    * Get overview ROAS chart data for dashboard sparkline
    */
   async getOverviewROASChartData(params) {
-    console.log('📊 OVERVIEW ROAS API - getOverviewROASChartData called with:', params);
     const queryParams = new URLSearchParams(params).toString();
     return this.makeRequest(`/analytics/overview-roas-chart?${queryParams}`);
   }

@@ -178,13 +178,9 @@ export const Dashboard = () => {
   // Validate column consistency (prevents future issues)
   const validationResult = useColumnValidation(columnOrder, columnVisibility);
   
-  // Debug column visibility (temporary)
+  // Column visibility monitoring
   useEffect(() => {
-    console.log('Column Status:', {
-      'estimated_revenue_adjusted': columnVisibility.estimated_revenue_adjusted,
-      'visible_columns_count': Object.keys(columnVisibility).filter(key => columnVisibility[key]).length,
-      'validation_passed': validationResult.isValid
-    });
+    // Column visibility state updated
   }, [columnVisibility, validationResult]);
 
 

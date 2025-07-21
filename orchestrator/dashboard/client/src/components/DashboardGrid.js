@@ -1076,12 +1076,7 @@ export const DashboardGrid = ({
 
   const visibleColumns = getOrderedVisibleColumns();
   
-  // Debug column visibility (cleanup after fix)
-  console.log('Column Visibility Status:', {
-    'visible_columns': visibleColumns.length,
-    'estimated_revenue_adjusted_visible': visibleColumns.some(col => col.key === 'estimated_revenue_adjusted'),
-    'mixpanel_revenue_net_visible': visibleColumns.some(col => col.key === 'mixpanel_revenue_net')
-  });
+  // Column visibility configured
 
   // Helper function to check if a column should be visible
   const isColumnVisible = (columnKey) => {
@@ -1373,14 +1368,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       const isBreakdownRow = row.id && row.id.includes('_') && !row.id.startsWith('campaign_') && !row.id.startsWith('adset_') && !row.id.startsWith('ad_');
       
       if (isBreakdownRow) {
-        // DEBUG: Log breakdown row detection
-        console.log('🔥 SPARKLINE CELL DEBUG (BREAKDOWN):', {
-          rowId: row.id,
-          entityType: row.entity_type,
-          currentROAS: value,
-          isBreakdownDetected: true,
-          breakdown: dashboardParams?.breakdown
-        });
+        // Breakdown row detected
         
         // For breakdown rows, show sparkline with breakdown entity info
         const [breakdownValue, parentEntityId] = row.id.split('_', 2);
@@ -1399,15 +1387,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         );
       }
       
-      // DEBUG: Log the row data to understand the structure
-      console.log('🔥 SPARKLINE CELL DEBUG (REGULAR):', {
-        rowId: row.id,
-        rowType: row.type,
-        entityId: entityId,
-        hasSpend: !!row.spend,
-        hasRevenue: !!calculatedRow.estimated_revenue_usd,
-        isBreakdownDetected: false
-      });
+      // Regular entity row
       
       return (
         <ROASSparkline 

@@ -95,9 +95,11 @@ const ROASSparkline = React.memo(({
           sparklineCache.set(cacheKey, response.chart_data);
           setChartData(response.chart_data);
         } else {
-          setError('Invalid API response');
+          console.error(`🚨 SPARKLINE RESPONSE ERROR (${entityType}/${entityId}):`, response);
+          setError(`Invalid response: ${response?.error || 'No chart data'}`);
         }
       } catch (error) {
+        console.error(`🚨 SPARKLINE CATCH ERROR (${entityType}/${entityId}):`, error);
         setError(error.message);
       } finally {
         setLoading(false);
