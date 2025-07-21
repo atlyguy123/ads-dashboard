@@ -930,7 +930,7 @@ def handle_json_get_requests():
         # For analytics chart-data endpoints, handle this gracefully
         if 'chart-data' in request.path:
             from flask import jsonify
-            from .dashboard.services.analytics_query_service import AnalyticsQueryService, QueryConfig
+            from orchestrator.dashboard.services.analytics_query_service import AnalyticsQueryService, QueryConfig
             
             try:
                 # Extract query parameters manually since Flask is confused by Content-Type
