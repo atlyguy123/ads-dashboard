@@ -1,0 +1,66 @@
+# Git and version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.pytest_cache
+venv/
+*.egg-info/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# React build (we rebuild inside Docker)
+orchestrator/dashboard/client/build/
+orchestrator/dashboard/static/static/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment files (secrets should be set via Railway env vars)
+.env
+.env.local
+.env.production
+
+# Documentation and development files
+*.md
+README.md
+DEPLOYMENT.md
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Database files (will be mounted as volume)
+database/*.db
+data/*.db 

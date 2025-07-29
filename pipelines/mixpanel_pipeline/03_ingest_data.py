@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass
+from datetime import timedelta
 
 from urllib.parse import urlparse
 
@@ -65,7 +66,7 @@ IMPORTANT_EVENTS = {
 }
 
 # Performance and safety configuration
-BATCH_SIZE = 1000
+BATCH_SIZE = 10000  # Optimized for 32GB RAM
 MAX_MEMORY_USAGE = 100_000
 CONNECTION_TIMEOUT = 60.0
 MAX_RETRY_ATTEMPTS = 3
@@ -347,9 +348,56 @@ def process_all_data(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Conne
     logger.info("=== Step 1: Refreshing User Data ===")
     refresh_all_users(raw_data_conn, raw_db_type, sqlite_conn, metrics)
     
-    # Step 2: Process events incrementally  
-    logger.info("=== Step 2: Processing Events Incrementally ===")
-    process_events_incrementally(raw_data_conn, raw_db_type, sqlite_conn, metrics)
+    # Step 2: Pre-load user mappings for performance (32GB RAM optimization)
+    logger.info("=== Step 2: Pre-loading User Mappings for Performance ===")
+    global_user_mappings = load_user_mappings_to_memory(sqlite_conn)
+    logger.info(f"Loaded {len(global_user_mappings['distinct_ids'])} direct mappings and {len(global_user_mappings['user_id_to_distinct_id'])} identity merges into memory")
+    
+    # Step 3: Process events incrementally with pre-loaded mappings
+    logger.info("=== Step 3: Processing Events Incrementally ===")
+    process_events_incrementally(raw_data_conn, raw_db_type, sqlite_conn, metrics, global_user_mappings)
+
+def load_user_mappings_to_memory(sqlite_conn: sqlite3.Connection) -> dict:
+    """
+    Pre-load all user identity mappings into memory for fast event processing
+    
+    Returns:
+        dict: {
+            'distinct_ids': set of all user distinct_ids,
+            'user_id_to_distinct_id': dict mapping $user_id -> distinct_id  
+        }
+    """
+    logger.info("Loading user mappings into memory for performance optimization...")
+    
+    cursor = sqlite_conn.cursor()
+    
+    # Load all user distinct_ids and their profile JSON
+    cursor.execute("""
+        SELECT distinct_id, profile_json FROM mixpanel_user 
+        WHERE profile_json IS NOT NULL
+    """)
+    
+    distinct_ids = set()
+    user_id_to_distinct_id = {}
+    
+    for row in cursor.fetchall():
+        distinct_id, profile_json = row
+        distinct_ids.add(distinct_id)
+        
+        # Extract $user_id from profile_json for identity merging
+        try:
+            profile = json.loads(profile_json)
+            properties = profile.get('properties', {})
+            user_id = properties.get('$user_id')
+            if user_id:
+                user_id_to_distinct_id[user_id] = distinct_id
+        except (json.JSONDecodeError, KeyError):
+            continue
+    
+    return {
+        'distinct_ids': distinct_ids,
+        'user_id_to_distinct_id': user_id_to_distinct_id
+    }
 
 def refresh_all_users(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
     """Process users from raw_user_data table"""
@@ -372,7 +420,7 @@ def refresh_all_users(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Conn
             return
         
         # Process users in batches
-        batch_size = 1000
+        batch_size = 10000  # Optimized for 32GB RAM
         offset = 0
         
         while offset < user_count:
@@ -503,12 +551,25 @@ def process_user_batch_from_raw_data(sqlite_conn: sqlite3.Connection, users_batc
         logger.error(f"Failed to process user batch from raw data: {e}")
         raise
 
-def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics):
+def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: sqlite3.Connection, metrics: IngestionMetrics, global_user_mappings: dict):
     """Process events incrementally by date from raw_event_data table"""
     
     # Get already processed dates from SQLite
     processed_dates = get_processed_dates(sqlite_conn)
     logger.info(f"Found {len(processed_dates)} already processed dates in SQLite")
+    
+    # REFRESH LOGIC: Identify last 3 days for refresh requirement
+    today = now_in_timezone().date()
+    refresh_start = today - timedelta(days=2)  # Last 3 days including today
+    refresh_dates = []
+    current_date = refresh_start
+    
+    while current_date <= today:
+        refresh_dates.append(current_date.strftime('%Y-%m-%d'))
+        current_date += timedelta(days=1)
+    
+    refresh_dates_set = set(refresh_dates)
+    logger.info(f"🔄 REFRESH REQUIREMENT: Will re-process last 3 days: {refresh_dates}")
     
     # Find unprocessed event dates in raw data database
     raw_cursor = raw_data_conn.cursor()
@@ -522,10 +583,30 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
     
     # Handle date formatting differences between PostgreSQL and SQLite
     if raw_db_type == 'postgres':
-        unprocessed_dates = [date for date in available_dates if date.strftime('%Y-%m-%d') not in processed_dates]
+        # For refresh dates, include them even if already processed
+        unprocessed_dates = []
+        refresh_dates_to_process = []
+        
+        for date in available_dates:
+            date_str = date.strftime('%Y-%m-%d')
+            
+            if date_str in refresh_dates_set:
+                # This is a refresh date - always process it
+                refresh_dates_to_process.append(date)
+                logger.info(f"🔄 Will re-process refresh date: {date_str}")
+            elif date_str not in processed_dates:
+                # This is a new date that hasn't been processed
+                unprocessed_dates.append(date)
+                logger.info(f"🆕 Will process new date: {date_str}")
+        
+        # Combine new dates + refresh dates
+        dates_to_process = unprocessed_dates + refresh_dates_to_process
+        
     else:
         # SQLite stores dates as strings, so we need to parse them
         unprocessed_dates = []
+        refresh_dates_to_process = []
+        
         for date_str in available_dates:
             try:
                 if isinstance(date_str, str):
@@ -533,20 +614,43 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                 else:
                     date_obj = date_str
                 
-                if date_obj.strftime('%Y-%m-%d') not in processed_dates:
+                normalized_date_str = date_obj.strftime('%Y-%m-%d')
+                
+                if normalized_date_str in refresh_dates_set:
+                    # This is a refresh date - always process it
+                    refresh_dates_to_process.append(date_obj)
+                    logger.info(f"🔄 Will re-process refresh date: {normalized_date_str}")
+                elif normalized_date_str not in processed_dates:
+                    # This is a new date that hasn't been processed
                     unprocessed_dates.append(date_obj)
+                    logger.info(f"🆕 Will process new date: {normalized_date_str}")
+                    
             except ValueError:
                 logger.warning(f"Invalid date format in raw data: {date_str}")
+        
+        # Combine new dates + refresh dates
+        dates_to_process = unprocessed_dates + refresh_dates_to_process
     
-    logger.info(f"Found {len(unprocessed_dates)} dates to process from {raw_db_type}")
-    if not unprocessed_dates:
-        logger.info("No new event dates to process")
+    logger.info(f"Found {len(unprocessed_dates)} new dates and {len(refresh_dates_to_process)} refresh dates to process from {raw_db_type}")
+    if not dates_to_process:
+        logger.info("No new or refresh event dates to process")
         return
     
     # Process each date
-    for date_obj in unprocessed_dates:
+    for date_obj in dates_to_process:
         date_str = date_obj.strftime('%Y-%m-%d')
-        logger.info(f"Processing events for date {date_str}")
+        is_refresh_date = date_str in refresh_dates_set
+        
+        if is_refresh_date:
+            logger.info(f"🔄 RE-PROCESSING refresh date: {date_str}")
+            # Clear existing processed data for refresh dates
+            sqlite_cursor = sqlite_conn.cursor()
+            sqlite_cursor.execute("DELETE FROM mixpanel_event WHERE DATE(event_time) = ?", (date_str,))
+            sqlite_cursor.execute("DELETE FROM processed_event_days WHERE date_day = ?", (date_str,))
+            sqlite_conn.commit()
+            logger.info(f"🗑️  Cleared existing processed data for refresh date: {date_str}")
+        else:
+            logger.info(f"🆕 PROCESSING new date: {date_str}")
         
         try:
             # Process all events for this date in transaction
@@ -602,7 +706,7 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                     
                     # Process in batches
                     if len(event_batch) >= BATCH_SIZE:
-                        events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics)
+                        events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics, is_refresh_date, global_user_mappings)
                         date_events += events_inserted
                         event_batch.clear()
                     
@@ -614,8 +718,8 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                     metrics.events_skipped_invalid += 1
             
             # Process remaining batch
-            if event_batch:
-                events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics)
+                            if event_batch:
+                    events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics, is_refresh_date, global_user_mappings)
                 date_events += events_inserted
             
             # Mark date as processed
@@ -626,7 +730,8 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
             metrics.dates_processed += 1
             metrics.events_processed += date_events
             
-            logger.info(f"Processed {date_events} events for date {date_str}")
+            action_type = "Re-processed" if is_refresh_date else "Processed"
+            logger.info(f"{action_type} {date_events} events for date {date_str}")
             
         except Exception as e:
             sqlite_cursor.execute("ROLLBACK")
@@ -636,6 +741,8 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
     # Log summary of event processing
     if metrics.dates_processed > 0:
         logger.info(f"Event processing completed: {metrics.dates_processed} dates, {metrics.events_processed} events ingested")
+        if len(refresh_dates_to_process) > 0:
+            logger.info(f"🔄 Successfully re-processed {len(refresh_dates_to_process)} refresh dates for data freshness")
 
 def should_filter_user(distinct_id: str, email: str) -> Dict[str, Any]:
     """Determine if user should be filtered and why"""
@@ -870,29 +977,32 @@ def prepare_event_record(event_data: Dict[str, Any], file_path: str, line_num: i
         logger.error(f"Error preparing event record {file_path}:{line_num}: {e}")
         return None
 
-def insert_event_batch(cursor: sqlite3.Cursor, event_batch: List[Tuple], metrics: IngestionMetrics) -> int:
-    """Insert event batch with user existence validation and error handling"""
+def insert_event_batch(cursor: sqlite3.Cursor, event_batch: List[Tuple], metrics: IngestionMetrics, is_refresh_date: bool, global_user_mappings: dict) -> int:
+    """Insert event batch with pre-loaded user mappings for optimal performance"""
     
     # Filter events to only include those with existing users
     valid_events = []
     skipped_events = 0
     
-    # Get all distinct_ids from the batch
-    batch_distinct_ids = {event[5] for event in event_batch}  # distinct_id is at index 5
-    
-    # Check which distinct_ids exist in the user table
-    placeholders = ','.join('?' * len(batch_distinct_ids))
-    cursor.execute(
-        f"SELECT distinct_id FROM mixpanel_user WHERE distinct_id IN ({placeholders})",
-        list(batch_distinct_ids)
-    )
-    existing_distinct_ids = {row[0] for row in cursor.fetchall()}
+    # Use pre-loaded mappings (32GB RAM optimization - no database queries needed!)
+    existing_distinct_ids = global_user_mappings['distinct_ids']
+    user_id_to_distinct_id = global_user_mappings['user_id_to_distinct_id']
     
     # Filter events to only include those with existing users
     for event in event_batch:
-        distinct_id = event[5]  # distinct_id is at index 5
-        if distinct_id in existing_distinct_ids:
+        original_distinct_id = event[5]  # distinct_id is at index 5
+        
+        # Check if event distinct_id matches user distinct_id OR user $user_id
+        if original_distinct_id in existing_distinct_ids:
+            # Direct match - use event as-is
             valid_events.append(event)
+        elif original_distinct_id in user_id_to_distinct_id:
+            # Cross-reference match - update event's distinct_id to match user table
+            mapped_distinct_id = user_id_to_distinct_id[original_distinct_id]
+            # Create new event tuple with corrected distinct_id
+            corrected_event = list(event)
+            corrected_event[5] = mapped_distinct_id  # Update distinct_id field
+            valid_events.append(tuple(corrected_event))
         else:
             skipped_events += 1
     
@@ -902,17 +1012,30 @@ def insert_event_batch(cursor: sqlite3.Cursor, event_batch: List[Tuple], metrics
     
     # Insert only valid events
     if valid_events:
-        cursor.executemany(
+        # CRITICAL: Use INSERT OR REPLACE for refresh dates to ensure updates are applied
+        # Use INSERT OR IGNORE for new dates to avoid duplicates
+        if is_refresh_date:
+            insert_sql = """
+                INSERT OR REPLACE INTO mixpanel_event 
+                (event_uuid, event_name, abi_ad_id, abi_campaign_id, abi_ad_set_id, 
+                 distinct_id, event_time, country, region, revenue_usd, 
+                 raw_amount, currency, refund_flag, is_late_event, 
+                 trial_expiration_at_calc, event_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            INSERT OR IGNORE INTO mixpanel_event 
-            (event_uuid, event_name, abi_ad_id, abi_campaign_id, abi_ad_set_id, 
-             distinct_id, event_time, country, region, revenue_usd, 
-             raw_amount, currency, refund_flag, is_late_event, 
-             trial_expiration_at_calc, event_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            valid_events
-        )
+            logger.debug(f"Using INSERT OR REPLACE for {len(valid_events)} refresh events")
+        else:
+            insert_sql = """
+                INSERT OR IGNORE INTO mixpanel_event 
+                (event_uuid, event_name, abi_ad_id, abi_campaign_id, abi_ad_set_id, 
+                 distinct_id, event_time, country, region, revenue_usd, 
+                 raw_amount, currency, refund_flag, is_late_event, 
+                 trial_expiration_at_calc, event_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            logger.debug(f"Using INSERT OR IGNORE for {len(valid_events)} new events")
+        
+        cursor.executemany(insert_sql, valid_events)
     
     return len(valid_events)
 

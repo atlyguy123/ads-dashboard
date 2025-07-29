@@ -68,6 +68,7 @@ EVENTS_TO_KEEP = [
 ]
 
 # DEBUG MODE: Set to True to save JSON files locally for verification
+# PERFORMANCE: Disabled by default for maximum speed
 DEBUG_SAVE_JSON_FILES = os.environ.get('DEBUG_SAVE_JSON_FILES', 'False').lower() == 'true'
 DEBUG_JSON_OUTPUT_DIR = Path("data/events")
 
@@ -241,13 +242,13 @@ def main():
         
         # Determine what data needs to be downloaded
         logger.info("Calculating missing dates...")
-        missing_dates = identify_missing_data(conn, latest_date)
+        missing_dates, refresh_dates_set = identify_missing_data(conn, latest_date)
         print(f"Missing data for {len(missing_dates)} days")
         
         if missing_dates:
             print("⬇️  Downloading missing data...")
             logger.info("Starting download process for missing data...")
-            success = download_missing_data(conn, db_type, missing_dates)
+            success = download_missing_data(conn, db_type, missing_dates, refresh_dates_set)
             if not success:
                 print("Some downloads failed, but continuing...")
                 logger.warning("Some downloads failed, but process completed")
@@ -345,6 +346,10 @@ def identify_missing_data(conn, latest_date):
     missing_dates = list(set(gap_fill_dates + refresh_dates))
     missing_dates.sort()
     
+    # CRITICAL: Store refresh dates separately for download logic
+    # This allows download_events_for_date to know when to force re-download
+    refresh_dates_set = set(refresh_dates)
+    
     logger.info(f"📊 SUMMARY:")
     logger.info(f"  - Gap filling: {len(gap_fill_dates)} missing dates")
     logger.info(f"  - Refresh requirement: {len(refresh_dates)} dates (last 3 days)")
@@ -357,9 +362,10 @@ def identify_missing_data(conn, latest_date):
     if len(missing_dates) > 0:
         logger.info(f"🔍 Will download {len(missing_dates)} dates:")
         for date in missing_dates:
-            logger.info(f"  - {date}")
+            is_refresh = date in refresh_dates_set
+            logger.info(f"  - {date} {'(REFRESH)' if is_refresh else '(GAP FILL)'}")
     
-    return missing_dates
+    return missing_dates, refresh_dates_set
 
 def get_s3_client():
     """Initializes and returns an S3 client."""
@@ -396,11 +402,12 @@ def list_s3_objects(s3_client, bucket_name, prefix=''):
 def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_key, target_date, file_sequence):
     """
     Downloads an event .json.gz file from S3, decompresses it,
-    filters events by name, and stores in database.
+    filters events by name, and stores in database with optimized bulk processing.
     
     In DEBUG mode, also saves filtered events to JSON files for verification.
     """
     cursor = conn.cursor()
+    BATCH_SIZE = 25000  # Optimized batch size for events
     
     # Prepare debug JSON file if in debug mode
     debug_json_file = None
@@ -425,40 +432,65 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
         filtered_count = 0
         total_count = 0
         debug_events = []  # Store filtered events for debug file
+        batch_data = []  # Collect data for bulk insert
         
-        # Process gzipped content
+        # Process gzipped content with optimized bulk processing
         with gzip.GzipFile(fileobj=response['Body']) as f:
             for line in f:
                 total_count += 1
                 try:
-                    event_data = json.loads(line.decode('utf-8').strip())
+                    # SPEED OPTIMIZATION: Parse JSON once, store raw line if needed
+                    line_str = line.decode('utf-8').strip()
+                    event_data = json.loads(line_str)
                     # Handle both old and new event data formats
                     event_name = event_data.get("event") or event_data.get("event_name")
                     
                     # Only store events that match our filter list
                     if event_name in EVENTS_TO_KEEP:
-                        # Store in database
-                        if db_type == 'postgres':
-                            cursor.execute("""
-                                INSERT INTO raw_event_data (date_day, file_sequence, event_data)
-                                VALUES (%s, %s, %s)
-                            """, (target_date, file_sequence, json.dumps(event_data)))
-                        else:
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
-                                VALUES (?, ?, ?)
-                            """, (target_date, file_sequence, json.dumps(event_data)))
-                        
+                        # Store raw JSON string (avoid re-encoding)
+                        batch_data.append((target_date, file_sequence, line_str))
+
                         # Save for debug JSON file
                         if DEBUG_SAVE_JSON_FILES:
                             debug_events.append(event_data)
                         
                         filtered_count += 1
                         
+                        # SPEED OPTIMIZATION: Use bulk insert every BATCH_SIZE records
+                        if len(batch_data) >= BATCH_SIZE:
+                            if db_type == 'postgres':
+                                cursor.executemany("""
+                                    INSERT INTO raw_event_data (date_day, file_sequence, event_data)
+                                    VALUES (%s, %s, %s)
+                                """, batch_data)
+                            else:
+                                cursor.executemany("""
+                                    INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
+                                    VALUES (?, ?, ?)
+                                """, batch_data)
+                            
+                            conn.commit()
+                            batch_data.clear()  # Clear batch after commit
+                        
                 except json.JSONDecodeError as e:
                     logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing line: {e}")
+        
+        # SPEED OPTIMIZATION: Final bulk insert for remaining records
+        if batch_data:
+            if db_type == 'postgres':
+                cursor.executemany("""
+                    INSERT INTO raw_event_data (date_day, file_sequence, event_data)
+                    VALUES (%s, %s, %s)
+                """, batch_data)
+            else:
+                cursor.executemany("""
+                    INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
+                    VALUES (?, ?, ?)
+                """, batch_data)
+            
+            conn.commit()
         
         # Write debug JSON file if in debug mode
         if DEBUG_SAVE_JSON_FILES and debug_json_file and debug_events:
@@ -467,7 +499,6 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                     f.write(json.dumps(event) + '\n')
             logger.info(f"🔍 DEBUG: Saved {len(debug_events)} filtered events to {debug_json_file}")
         
-        conn.commit()
         logger.info(f"Stored {filtered_count} out of {total_count} events from {object_key}")
         return filtered_count
         
@@ -479,10 +510,10 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
 def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_key):
     """
     Downloads a user profile .json.gz file from S3, decompresses it,
-    and stores all users in database with batch processing.
+    and stores all users in database with optimized bulk processing.
     """
     cursor = conn.cursor()
-    BATCH_SIZE = 10000  # Commit every 10000 users to prevent hanging
+    BATCH_SIZE = 50000  # Increased from 10k for better performance
 
     try:
         logger.info(f"Downloading and processing user file s3://{bucket_name}/{object_key}")
@@ -492,53 +523,72 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
         
         total_count = 0
         stored_count = 0
-        batch_count = 0
+        batch_data = []  # Collect data for bulk insert
         
-        # Process gzipped content with batch commits
+        # Process gzipped content with optimized bulk processing
         with gzip.GzipFile(fileobj=response['Body']) as f:
             for line in f:
                 total_count += 1
                 
-                # Progress logging every 50,000 lines
-                if total_count % 50000 == 0:
+                # Progress logging every 100,000 lines (less frequent)
+                if total_count % 100000 == 0:
                     logger.info(f"Progress: {total_count:,} lines processed, {stored_count:,} users stored")
                 
                 try:
-                    user_data = json.loads(line.decode('utf-8').strip())
-                    # FIX: Use correct field name - distinct_id is at top level
+                    # SPEED OPTIMIZATION: Parse JSON only to extract distinct_id, 
+                    # then store raw line to avoid double JSON processing
+                    line_str = line.decode('utf-8').strip()
+                    user_data = json.loads(line_str)
                     distinct_id = user_data.get('distinct_id')
                     
                     if distinct_id:
-                        # Store in database (replace existing)
-                        if db_type == 'postgres':
-                            cursor.execute("""
-                                INSERT INTO raw_user_data (distinct_id, user_data)
-                                VALUES (%s, %s)
-                                ON CONFLICT (distinct_id) DO UPDATE SET
-                                    user_data = EXCLUDED.user_data,
-                                    downloaded_at = CURRENT_TIMESTAMP
-                            """, (distinct_id, json.dumps(user_data)))
-                        else:
-                            cursor.execute("""
-                                INSERT OR REPLACE INTO raw_user_data (distinct_id, user_data)
-                                VALUES (?, ?)
-                            """, (distinct_id, json.dumps(user_data)))
+                        # Store raw JSON string (avoid re-encoding)
+                        batch_data.append((distinct_id, line_str))
                         stored_count += 1
-                        batch_count += 1
                         
-                        # Commit every BATCH_SIZE records to prevent hanging
-                        if batch_count >= BATCH_SIZE:
+                        # SPEED OPTIMIZATION: Use bulk insert every BATCH_SIZE records
+                        if len(batch_data) >= BATCH_SIZE:
+                            if db_type == 'postgres':
+                                # Bulk insert with ON CONFLICT for PostgreSQL
+                                cursor.executemany("""
+                                    INSERT INTO raw_user_data (distinct_id, user_data)
+                                    VALUES (%s, %s)
+                                    ON CONFLICT (distinct_id) DO UPDATE SET
+                                        user_data = EXCLUDED.user_data,
+                                        downloaded_at = CURRENT_TIMESTAMP
+                                """, batch_data)
+                            else:
+                                # Bulk insert for SQLite
+                                cursor.executemany("""
+                                    INSERT OR REPLACE INTO raw_user_data (distinct_id, user_data)
+                                    VALUES (?, ?)
+                                """, batch_data)
+                            
                             conn.commit()
                             logger.info(f"Committed batch: {stored_count:,} users processed so far...")
-                            batch_count = 0
+                            batch_data.clear()  # Clear batch after commit
                         
                 except json.JSONDecodeError as e:
                     logger.warning(f"Skipping invalid JSON line: {e}")
                 except Exception as e:
                     logger.error(f"Error processing user line: {e}")
         
-        # Final commit for remaining records
-        if batch_count > 0:
+        # SPEED OPTIMIZATION: Final bulk insert for remaining records
+        if batch_data:
+            if db_type == 'postgres':
+                cursor.executemany("""
+                    INSERT INTO raw_user_data (distinct_id, user_data)
+                    VALUES (%s, %s)
+                    ON CONFLICT (distinct_id) DO UPDATE SET
+                        user_data = EXCLUDED.user_data,
+                        downloaded_at = CURRENT_TIMESTAMP
+                """, batch_data)
+            else:
+                cursor.executemany("""
+                    INSERT OR REPLACE INTO raw_user_data (distinct_id, user_data)
+                    VALUES (?, ?)
+                """, batch_data)
+            
             conn.commit()
             logger.info(f"Final commit: {stored_count:,} total users processed")
         
@@ -550,7 +600,7 @@ def download_and_store_user_file(conn, db_type, s3_client, bucket_name, object_k
         conn.rollback()
         return 0
 
-def download_missing_data(conn, db_type, missing_dates):
+def download_missing_data(conn, db_type, missing_dates, refresh_dates_set):
     """Download data for missing dates - one at a time, always download user data"""
     logger.info(f"=== STARTING DOWNLOAD PROCESS ===")
     logger.info(f"Will download data for {len(missing_dates)} missing dates...")
@@ -583,7 +633,9 @@ def download_missing_data(conn, db_type, missing_dates):
         for i, date in enumerate(missing_dates, 1):
             logger.info(f">>> Processing date {i}/{len(missing_dates)}: {date.strftime('%Y-%m-%d')}")
             try:
-                if download_events_for_date(conn, db_type, s3_client, date):
+                # Pass refresh_dates_set to download_events_for_date
+                is_refresh_date = date in refresh_dates_set
+                if download_events_for_date(conn, db_type, s3_client, date, is_refresh_date):
                     success_count += 1
                     logger.info(f"✓ Successfully downloaded data for {date.strftime('%Y-%m-%d')} ({i}/{len(missing_dates)})")
                 else:
@@ -600,7 +652,7 @@ def download_missing_data(conn, db_type, missing_dates):
         logger.info("All event data is already up to date")
         return True
 
-def download_events_for_date(conn, db_type, s3_client, target_date):
+def download_events_for_date(conn, db_type, s3_client, target_date, is_refresh_date=False):
     """Download event data for a specific date and store in database"""
     try:
         year = target_date.strftime('%Y')
@@ -630,7 +682,19 @@ def download_events_for_date(conn, db_type, s3_client, target_date):
             cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (target_date,))
         result = cursor.fetchone()
 
-        if result and result[0] > 0:
+        # If it's a refresh date and data exists, force re-download
+        if result and result[0] > 0 and is_refresh_date:
+            logger.info(f"Event data for {target_date.strftime('%Y-%m-%d')} already exists in database. Forcing re-download for refresh.")
+            # Clear existing data for this date to force re-download
+            if db_type == 'postgres':
+                cursor.execute("DELETE FROM raw_event_data WHERE date_day = %s", (target_date,))
+                cursor.execute("DELETE FROM downloaded_dates WHERE date_day = %s", (target_date,))
+            else:
+                cursor.execute("DELETE FROM raw_event_data WHERE date_day = ?", (target_date,))
+                cursor.execute("DELETE FROM downloaded_dates WHERE date_day = ?", (target_date,))
+            conn.commit()
+            logger.info(f"🗑️  Cleared existing raw data for {target_date.strftime('%Y-%m-%d')} to enable refresh")
+        elif result and result[0] > 0 and not is_refresh_date:
             logger.info(f"Event data for {target_date.strftime('%Y-%m-%d')} already exists in database. Skipping download.")
             return True
 

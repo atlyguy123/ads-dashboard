@@ -704,6 +704,9 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
                                 <span className="font-medium">Price:</span> {user.price_bucket}
                               </div>
                               <div className="text-gray-300">
+                                <span className="font-medium">Value Status:</span> {user.value_status}
+                              </div>
+                              <div className="text-gray-300">
                                 <span className="font-medium">Tier:</span> {user.economic_tier}
                               </div>
                               <div className="text-gray-300">
@@ -714,6 +717,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
                               <span>Status: <span className="text-gray-400">{user.status}</span></span>
                               <span>Credited: <span className="text-gray-400">{user.credited_date}</span></span>
                               <span>Value: <span className="text-gray-400">${user.estimated_value}</span></span>
+                              <span>Value Status: <span className="text-gray-400">{user.value_status}</span></span>
                             </div>
                           </div>
                           <div className="text-right ml-6">

@@ -261,8 +261,8 @@ def main():
         # Initialize S3 client
         s3_client = get_s3_client()
         
-        # Get dates to download (default: last 7 days)
-        dates_to_download = get_dates_to_download(days_back=7)
+        # Get dates to download (July 16-29, 2025 for investigation)
+        dates_to_download = get_dates_to_download(days_back=14)
         
         print(f"\n📥 Starting downloads...")
         

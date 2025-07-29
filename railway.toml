@@ -1,18 +1,11 @@
 # Railway configuration for persistent database storage
-# This ensures all team members get the same volume configuration
-
 [deploy]
-  startCommand = "python orchestrator/app.py"
+  startCommand = "python launcher.py"
 
 # Volume configuration for persistent SQLite databases
 [[volumes]]
   name = "database-storage"
   mountPath = "/app/database"
-
-# Environment optimizations
-[build]
-  # Build React frontend with relative API URL, copy to Flask static directory, then install Python dependencies
-  buildCommand = "cd orchestrator/dashboard/client && REACT_APP_API_URL='' npm run build && cp -r build/* ../static/ && cd ../../../ && pip install -r requirements.txt"
 
 # Service configuration
 [service]

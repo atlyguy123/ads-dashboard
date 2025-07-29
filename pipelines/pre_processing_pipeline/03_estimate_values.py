@@ -736,41 +736,51 @@ class ValueEstimator:
             if start_event['event_name'] == 'RC Trial started':
                 # TRIAL STARTED USERS - 3 PHASES
                 
+                # PHASE DETERMINATION: Prioritize days_since over current_status
                 if 0 <= days_since <= 7:
-                    # Phase 1: Days 0-7 (Trial Pending)
+                    # Phase 1: Trial phase (0-7 days) - Estimate value regardless of actual status
                     current_value = price_bucket * trial_conversion_rate * (1 - trial_refund_rate)
                     value_status = "pending_trial"
                     
                 elif 8 <= days_since <= 37:
-                    # Phase 2: Days 8-37 (Post-Conversion Pre-Refund)
-                    # Extract product_id from start_event to ensure we're checking the right product
-                    try:
-                        start_event_json = json.loads(start_event['event_json'])
-                        target_product_id = start_event_json.get('properties', {}).get('product_id', '')
-                    except (json.JSONDecodeError, KeyError):
-                        target_product_id = ''
-                    
-                    # Check if user actually converted (has RC Trial converted event for this product)
-                    has_converted = any(
-                        event['event_name'] == 'RC Trial converted' and
-                        self._get_product_id_from_event(event) == target_product_id
-                        for event in events
-                    )
-                    
-                    if has_converted:
-                        current_value = actual_revenue_from_trial_conversion * (1 - trial_refund_rate)
+                    # Phase 2: Post-trial phase (8-37 days) - Check if user converted
+                    if current_status in ['trial_converted', 'trial_converted_cancelled']:
+                        # User converted - calculate post-conversion value
+                        try:
+                            start_event_json = json.loads(start_event['event_json'])
+                            target_product_id = start_event_json.get('properties', {}).get('product_id', '')
+                        except (json.JSONDecodeError, KeyError):
+                            target_product_id = ''
+                        
+                        # Check if user actually converted (has RC Trial converted event for this product)
+                        has_converted = any(
+                            event['event_name'] == 'RC Trial converted' and
+                            self._get_product_id_from_event(event) == target_product_id
+                            for event in events
+                        )
+                        
+                        if has_converted:
+                            current_value = actual_revenue_from_trial_conversion * (1 - trial_refund_rate)
+                        else:
+                            # Fallback: if status says converted but no event found, use estimated value
+                            current_value = price_bucket * (1 - trial_refund_rate)
+                        value_status = "post_conversion_pre_refund"
                     else:
-                        current_value = 0.0  # They didn't convert, so value is $0
-                    value_status = "post_conversion_pre_refund"
-                    
+                        # User cancelled or didn't convert - value is zero
+                        current_value = 0.0
+                        value_status = "post_conversion_pre_refund"
+                        
                 else:  # days_since >= 38
-                    # Phase 3: Days 38+ (Final Value) - Only check refund/cancel status in final phase
+                    # Phase 3: Final value phase (38+ days) - Check final status
                     if current_status in ['trial_converted_refunded', 'trial_cancelled', 'extended_trial_error']:
                         current_value = 0.0  # Refunded users get $0, trial cancelled users never paid, error users never paid
-                    else:
+                    elif current_status in ['trial_converted', 'trial_converted_cancelled']:
                         current_value = actual_revenue_from_trial_conversion  # trial_converted_cancelled users keep their value (they paid)
+                    else:
+                        # Still pending after 38+ days - use Phase 1 logic but mark as extended
+                        current_value = price_bucket * trial_conversion_rate * (1 - trial_refund_rate)
                     value_status = "final_value"
-                    
+            
             else:
                 # INITIAL PURCHASE USERS - 2 PHASES
                 

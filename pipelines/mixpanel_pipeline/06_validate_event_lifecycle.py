@@ -169,6 +169,65 @@ def print_validation_statistics():
     """Print concise statistics about invalid lifecycles"""
     # This function is now simplified - detailed stats shown in main output
 
+def deduplicate_user_lifecycles(conn):
+    """
+    Ensure each user has only one valid lifecycle.
+    For users with multiple valid lifecycles, keep only the most recent one.
+    
+    Business Rule: Users shouldn't have multiple active trials/subscriptions.
+    This prevents over-estimation in revenue calculations.
+    
+    Returns: (users_deduplicated, lifecycles_invalidated)
+    """
+    cursor = conn.cursor()
+    
+    # Find users with multiple valid lifecycles
+    cursor.execute("""
+        SELECT distinct_id, COUNT(*) as lifecycle_count
+        FROM user_product_metrics
+        WHERE valid_lifecycle = 1
+        GROUP BY distinct_id
+        HAVING COUNT(*) > 1
+    """)
+    
+    users_with_multiple = cursor.fetchall()
+    deduplication_count = 0
+    
+    for distinct_id, lifecycle_count in users_with_multiple:
+        # For each user with multiple lifecycles, find the most recent one
+        cursor.execute("""
+            SELECT 
+                ump.product_id,
+                MIN(e.event_time) as first_event_time
+            FROM user_product_metrics ump
+            JOIN mixpanel_event e ON ump.distinct_id = e.distinct_id
+            WHERE ump.distinct_id = ?
+              AND ump.valid_lifecycle = 1
+              AND e.event_name IN ('RC Trial started', 'RC Initial purchase')
+              AND JSON_EXTRACT(e.event_json, '$.properties.product_id') = ump.product_id
+            GROUP BY ump.product_id
+            ORDER BY first_event_time DESC
+            LIMIT 1
+        """, (distinct_id,))
+        
+        most_recent = cursor.fetchone()
+        if most_recent:
+            most_recent_product_id = most_recent[0]
+            
+            # Mark all other lifecycles for this user as invalid
+            cursor.execute("""
+                UPDATE user_product_metrics
+                SET valid_lifecycle = 0
+                WHERE distinct_id = ?
+                  AND product_id != ?
+                  AND valid_lifecycle = 1
+            """, (distinct_id, most_recent_product_id))
+            
+            deduplication_count += lifecycle_count - 1
+    
+    conn.commit()
+    return len(users_with_multiple), deduplication_count
+
 def main():
     try:
         print("=== Module 6: Validate Event Lifecycle ===")
@@ -304,6 +363,14 @@ def setup_and_validate_lifecycles(conn):
     # Clean up temporary table
     cursor.execute("DROP TABLE temp_attribution_backup_setup")
     conn.commit()
+    
+    # DEDUPLICATION: Ensure each user has only one valid lifecycle
+    users_deduplicated, lifecycles_invalidated = deduplicate_user_lifecycles(conn)
+    if users_deduplicated > 0:
+        print(f"🔄 Deduplicated {users_deduplicated:,} users with multiple lifecycles")
+        print(f"   Invalidated {lifecycles_invalidated:,} duplicate lifecycles")
+        # Update valid_count to reflect deduplication
+        valid_count -= lifecycles_invalidated
     
     # Display concise results
     print(f"✅ Processed {total_count:,} user-product relationships")

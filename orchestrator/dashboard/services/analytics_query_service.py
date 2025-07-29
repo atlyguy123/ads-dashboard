@@ -1076,18 +1076,17 @@ class AnalyticsQueryService:
                 logger.info(f"Meta analytics database not available at {self.meta_db_path}, returning empty results")
                 return []
             
-            conn = sqlite3.connect(self.meta_db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute(query, params)
-            results = cursor.fetchall()
-            
-            # Convert to list of dictionaries
-            data = [dict(row) for row in results]
-            
-            conn.close()
-            return data
+            with sqlite3.connect(self.meta_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                cursor.execute(query, params)
+                results = cursor.fetchall()
+                
+                # Convert to list of dictionaries
+                data = [dict(row) for row in results]
+                
+                return data
             
         except Exception as e:
             logger.warning(f"Error executing meta query, falling back to empty results: {e}")
@@ -1784,39 +1783,38 @@ class AnalyticsQueryService:
             meta_data = self._execute_meta_query(meta_query, [entity_id, chart_start_date, chart_end_date])
             
             # Get daily Mixpanel data for the 14-day period (attributed to credited_date)
-            mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
-            mixpanel_conn.row_factory = sqlite3.Row
-            
-            mixpanel_query = f"""
-            SELECT 
-                upm.credited_date as date,
-                -- Trial metrics by credited date
-                COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
+            with sqlite3.connect(self.mixpanel_analytics_db_path) as mixpanel_conn:
+                mixpanel_conn.row_factory = sqlite3.Row
                 
-                -- Purchase metrics by credited date
-                COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
-                COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
+                mixpanel_query = f"""
+                SELECT 
+                    upm.credited_date as date,
+                    -- Trial metrics by credited date
+                    COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
+                    
+                    -- Purchase metrics by credited date
+                    COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
+                    COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
+                    
+                    -- Revenue metrics by credited date (sum of current_value attributed to this date)
+                    SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
+                    SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
+                    SUM(upm.current_value) as daily_estimated_revenue,
+                    
+                    -- User count for statistical significance
+                    COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
+                    
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.{mixpanel_attr_field} = ? 
+                  AND upm.credited_date BETWEEN ? AND ?
+                GROUP BY upm.credited_date
+                ORDER BY upm.credited_date ASC
+                """
                 
-                -- Revenue metrics by credited date (sum of current_value attributed to this date)
-                SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
-                SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
-                SUM(upm.current_value) as daily_estimated_revenue,
-                
-                -- User count for statistical significance
-                COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
-                
-            FROM user_product_metrics upm
-            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-            WHERE u.{mixpanel_attr_field} = ? 
-              AND upm.credited_date BETWEEN ? AND ?
-            GROUP BY upm.credited_date
-            ORDER BY upm.credited_date ASC
-            """
-            
-            cursor = mixpanel_conn.cursor()
-            cursor.execute(mixpanel_query, [entity_id, chart_start_date, chart_end_date])
-            mixpanel_data = [dict(row) for row in cursor.fetchall()]
-            mixpanel_conn.close()
+                cursor = mixpanel_conn.cursor()
+                cursor.execute(mixpanel_query, [entity_id, chart_start_date, chart_end_date])
+                mixpanel_data = [dict(row) for row in cursor.fetchall()]
             
             # Generate ALL data fetch days (14 total display days), filling missing days with zeros
             daily_data = {}
@@ -2098,31 +2096,30 @@ class AnalyticsQueryService:
                 [parent_entity_id, breakdown_value, chart_start_date, chart_end_date])
             
             # Get daily Mixpanel breakdown data
-            mixpanel_conn = sqlite3.connect(self.mixpanel_analytics_db_path)
-            mixpanel_conn.row_factory = sqlite3.Row
-            
-            mixpanel_query = f"""
-            SELECT 
-                upm.credited_date as date,
-                COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
-                COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
-                COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
-                SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
-                SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
-                SUM(upm.current_value) as daily_estimated_revenue,
-                COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
-            FROM user_product_metrics upm
-            JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-            WHERE u.{mixpanel_attr_field} = ? AND u.{mixpanel_filter_field} = ?
-              AND upm.credited_date BETWEEN ? AND ?
-            GROUP BY upm.credited_date
-            ORDER BY upm.credited_date ASC
-            """
-            
-            cursor = mixpanel_conn.cursor()
-            cursor.execute(mixpanel_query, [parent_entity_id, mixpanel_filter_value, chart_start_date, chart_end_date])
-            mixpanel_data = [dict(row) for row in cursor.fetchall()]
-            mixpanel_conn.close()
+            with sqlite3.connect(self.mixpanel_analytics_db_path) as mixpanel_conn:
+                mixpanel_conn.row_factory = sqlite3.Row
+                
+                mixpanel_query = f"""
+                SELECT 
+                    upm.credited_date as date,
+                    COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
+                    COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
+                    COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
+                    SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
+                    SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
+                    SUM(upm.current_value) as daily_estimated_revenue,
+                    COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
+                FROM user_product_metrics upm
+                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                WHERE u.{mixpanel_attr_field} = ? AND u.{mixpanel_filter_field} = ?
+                  AND upm.credited_date BETWEEN ? AND ?
+                GROUP BY upm.credited_date
+                ORDER BY upm.credited_date ASC
+                """
+                
+                cursor = mixpanel_conn.cursor()
+                cursor.execute(mixpanel_query, [parent_entity_id, mixpanel_filter_value, chart_start_date, chart_end_date])
+                mixpanel_data = [dict(row) for row in cursor.fetchall()]
             
             # Generate daily data structure (same as regular chart data)
             daily_data = {}
@@ -2352,6 +2349,7 @@ class AnalyticsQueryService:
                     upm.trial_converted_to_refund_rate,
                     upm.initial_purchase_to_refund_rate,
                     upm.current_value,
+                    upm.value_status,
                     upm.credited_date,
                     upm.price_bucket,
                     u.economic_tier,
@@ -2360,7 +2358,6 @@ class AnalyticsQueryService:
                 FROM user_product_metrics upm
                 JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
                 WHERE {entity_field} = ?
-                  AND upm.credited_date BETWEEN ? AND ?
                   {breakdown_filter}
                   AND upm.trial_conversion_rate IS NOT NULL
                   AND upm.trial_converted_to_refund_rate IS NOT NULL  
@@ -2374,7 +2371,7 @@ class AnalyticsQueryService:
                 ORDER BY upm.trial_conversion_rate DESC
                 """
                 
-                query_params = [actual_entity_id, start_date, end_date] + breakdown_params + [start_date, end_date]
+                query_params = [actual_entity_id] + breakdown_params + [start_date, end_date]
                 cursor.execute(user_details_query, query_params)
                 user_records = [dict(row) for row in cursor.fetchall()]
                 
@@ -2417,6 +2414,7 @@ class AnalyticsQueryService:
                         'trial_refund_rate': round(record['trial_converted_to_refund_rate'] * 100, 1) if record['trial_converted_to_refund_rate'] else 0,
                         'purchase_refund_rate': round(record['initial_purchase_to_refund_rate'] * 100, 1) if record['initial_purchase_to_refund_rate'] else 0,
                         'estimated_value': round(record['current_value'], 2) if record['current_value'] else 0,
+                        'value_status': record['value_status'] or 'N/A',
                         'credited_date': record['credited_date'],
                         'price_bucket': f"${record['price_bucket']:.2f}" if record['price_bucket'] else 'N/A',
                         'economic_tier': record['economic_tier'] or 'N/A',
@@ -2455,37 +2453,35 @@ class AnalyticsQueryService:
         """Get the earliest date available in meta analytics database"""
         try:
             # Connect to meta analytics database
-            conn = sqlite3.connect(self.meta_db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # Query all performance tables to find the absolute earliest date
-            tables = ['ad_performance_daily', 'ad_performance_daily_country', 
-                     'ad_performance_daily_region', 'ad_performance_daily_device']
-            
-            earliest_dates = []
-            
-            for table in tables:
-                try:
-                    query = f"SELECT MIN(date) as earliest_date FROM {table} WHERE date IS NOT NULL AND date != ''"
-                    cursor.execute(query)
-                    result = cursor.fetchone()
-                    
-                    if result and result['earliest_date']:
-                        earliest_dates.append(result['earliest_date'])
+            with sqlite3.connect(self.meta_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Query all performance tables to find the absolute earliest date
+                tables = ['ad_performance_daily', 'ad_performance_daily_country', 
+                         'ad_performance_daily_region', 'ad_performance_daily_device']
+                
+                earliest_dates = []
+                
+                for table in tables:
+                    try:
+                        query = f"SELECT MIN(date) as earliest_date FROM {table} WHERE date IS NOT NULL AND date != ''"
+                        cursor.execute(query)
+                        result = cursor.fetchone()
                         
-                except sqlite3.Error as e:
-                    logger.warning(f"Could not query {table}: {e}")
-                    continue
-            
-            conn.close()
-            
-            # Return the earliest date found across all tables
-            if earliest_dates:
-                return min(earliest_dates)
-            else:
-                # Fallback if no data found
-                return '2025-01-01'
+                        if result and result['earliest_date']:
+                            earliest_dates.append(result['earliest_date'])
+                            
+                    except sqlite3.Error as e:
+                        logger.warning(f"Could not query {table}: {e}")
+                        continue
+                
+                # Return the earliest date found across all tables
+                if earliest_dates:
+                    return min(earliest_dates)
+                else:
+                    # Fallback if no data found
+                    return '2025-01-01'
                 
         except Exception as e:
             logger.error(f"Error getting earliest meta date: {e}", exc_info=True)
