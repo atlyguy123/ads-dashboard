@@ -295,7 +295,7 @@ const OverviewProfitSparkline = React.memo(({
                   Daily Profit: {formatProfit(backendProfit)}
                 </div>
                 <div className="text-gray-300 text-xs">
-                  Daily Revenue: ${backendRevenue.toFixed(2)}
+                  Daily Est. Revenue: ${backendRevenue.toFixed(2)}
                 </div>
                 <div className="text-gray-300 text-xs">
                   Daily Spend: ${backendSpend.toFixed(2)}

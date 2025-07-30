@@ -289,7 +289,7 @@ const OverviewSpendSparkline = React.memo(({
                   Daily ROAS: {(parseFloat(dayData.rolling_1d_roas) || 0).toFixed(2)}
                 </div>
                 <div className="text-gray-300 text-xs">
-                  Daily Revenue: ${(parseFloat(dayData.rolling_1d_revenue) || 0).toFixed(2)}
+                  Daily Est. Revenue: ${(parseFloat(dayData.rolling_1d_revenue) || 0).toFixed(2)}
                 </div>
               </>
             );

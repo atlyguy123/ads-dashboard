@@ -283,7 +283,7 @@ const OverviewRevenueSparkline = React.memo(({
                   {formatDate(dayData.date)}
                 </div>
                 <div className={getRevenueColor(backendRevenue).replace('text-', 'text-').replace(/\d00/, '300')}>
-                  Daily Revenue: {formatRevenue(backendRevenue)}
+                  Daily Est. Revenue: {formatRevenue(backendRevenue)}
                 </div>
                 <div className="text-gray-300 text-xs">
                   Daily Spend: ${(parseFloat(dayData.rolling_1d_spend) || 0).toFixed(2)}

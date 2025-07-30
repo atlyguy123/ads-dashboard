@@ -346,7 +346,7 @@ const ROASSparkline = React.memo(({
                             Daily Spend: ${(parseFloat(chartData[hoveredPoint].rolling_1d_spend) || 0).toFixed(2)}
                           </div>
                           <div className="text-gray-300 text-xs">
-                            Daily Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_1d_revenue) || 0).toFixed(2)}
+                            Daily Est. Revenue: ${(parseFloat(chartData[hoveredPoint].rolling_1d_revenue) || 0).toFixed(2)}
                           </div>
                           {/* Display accuracy ratio using same logic as main dashboard */}
                           {chartData[hoveredPoint].period_accuracy_ratio && chartData[hoveredPoint].period_accuracy_ratio !== 1.0 && (
