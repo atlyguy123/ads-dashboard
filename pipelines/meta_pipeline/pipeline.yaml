@@ -1,7 +1,15 @@
 name: meta_pipeline
-description: Meta pipeline for processing and analyzing meta data with advanced analytics
+description: Meta pipeline for processing and analyzing meta data with advanced analytics and ID mapping
 steps:
 - file: 01_update_meta_data.py
   id: update_meta_data
   tested: false
-  description: Update Meta advertising data from most recent date to today 
+  description: Update Meta advertising data from most recent date to today
+- file: 02_create_id_name_mapping.py
+  id: create_id_name_mapping
+  tested: false
+  description: Create canonical ID-to-name mappings based on frequency analysis
+- file: 03_create_hierarchy_mapping.py
+  id: create_hierarchy_mapping
+  tested: false
+  description: Establish campaign → adset → ad hierarchy relationships 

@@ -403,6 +403,77 @@ CREATE INDEX idx_meta_device_mapping_active ON meta_device_mapping(is_active, me
 CREATE INDEX idx_breakdown_cache_expires ON breakdown_cache(expires_at, cache_key);
 
 -- ========================================
+-- PIPELINE ENHANCEMENT TABLES
+-- ========================================
+
+-- ID to Canonical Name Mapping
+-- Maps every advertising ID to its most frequently used display name
+CREATE TABLE id_name_mapping (
+    entity_type TEXT NOT NULL,      -- 'campaign', 'adset', 'ad'
+    entity_id TEXT NOT NULL,        -- The actual ID (campaign_id, adset_id, ad_id)
+    canonical_name TEXT NOT NULL,   -- Most common name for this ID
+    frequency_count INTEGER NOT NULL, -- How often this name appears
+    last_seen_date DATE NOT NULL,   -- When this name was last seen
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entity_type, entity_id)
+);
+
+-- Advertising Hierarchy Mapping
+-- Establishes clear campaign → adset → ad relationships
+CREATE TABLE id_hierarchy_mapping (
+    ad_id TEXT NOT NULL,
+    adset_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    relationship_confidence DECIMAL(3,2) NOT NULL, -- 0.00 to 1.00
+    first_seen_date DATE NOT NULL,
+    last_seen_date DATE NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ad_id)
+);
+
+-- Daily Mixpanel Metrics Pre-computation
+-- Pre-computed daily metrics for every entity ID and date
+CREATE TABLE daily_mixpanel_metrics (
+    metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE NOT NULL,
+    entity_type TEXT NOT NULL,        -- 'campaign', 'adset', 'ad'
+    entity_id TEXT NOT NULL,          -- The actual ID
+    
+    -- Trial Metrics
+    trial_users_count INTEGER NOT NULL DEFAULT 0,
+    trial_users_list TEXT,            -- JSON array of distinct_ids
+    
+    -- Purchase Metrics  
+    purchase_users_count INTEGER NOT NULL DEFAULT 0,
+    purchase_users_list TEXT,         -- JSON array of distinct_ids
+    
+    -- Revenue Metrics
+    estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    
+    -- Metadata
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    data_quality_score DECIMAL(3,2), -- 0.00 to 1.00
+    
+    UNIQUE (date, entity_type, entity_id)
+);
+
+-- Performance Indexes for Pipeline Enhancement Tables
+CREATE INDEX idx_id_name_mapping_type_id ON id_name_mapping(entity_type, entity_id);
+CREATE INDEX idx_id_name_mapping_name ON id_name_mapping(canonical_name);
+CREATE INDEX idx_id_name_mapping_updated ON id_name_mapping(updated_at);
+
+CREATE INDEX idx_hierarchy_adset ON id_hierarchy_mapping(adset_id);
+CREATE INDEX idx_hierarchy_campaign ON id_hierarchy_mapping(campaign_id);
+CREATE INDEX idx_hierarchy_confidence ON id_hierarchy_mapping(relationship_confidence);
+
+CREATE INDEX idx_daily_metrics_date_type_id ON daily_mixpanel_metrics(date, entity_type, entity_id);
+CREATE INDEX idx_daily_metrics_entity_type ON daily_mixpanel_metrics(entity_type);
+CREATE INDEX idx_daily_metrics_date_range ON daily_mixpanel_metrics(date);
+CREATE INDEX idx_daily_metrics_computed ON daily_mixpanel_metrics(computed_at);
+
+-- ========================================
 -- MERGE BENEFITS & RELATIONSHIPS
 -- ========================================
 

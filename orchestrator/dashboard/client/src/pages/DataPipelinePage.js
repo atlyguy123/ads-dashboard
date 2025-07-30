@@ -40,7 +40,10 @@ const DataPipelinePage = () => {
     { id: "⚙️ Pre-processing - Assign Price Bucket", name: "Price Bucket" },
     { id: "⚙️ Pre-processing - Assign Conversion Rates", name: "Conversion Rates" },
     { id: "⚙️ Pre-processing - Estimate Values", name: "Estimate Values" },
-    { id: "🔮 Meta - Update Data", name: "Meta Data" }
+    { id: "🔮 Meta - Update Data", name: "Meta Data" },
+    { id: "🔮 Meta - Create ID Name Mapping", name: "ID Name Mapping" },
+    { id: "🔮 Meta - Create Hierarchy Mapping", name: "Hierarchy Mapping" },
+    { id: "📊 Mixpanel - Compute Daily Metrics", name: "Daily Metrics" }
   ];
 
   // Add WebSocket ID validation for debugging

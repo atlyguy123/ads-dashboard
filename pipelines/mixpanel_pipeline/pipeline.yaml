@@ -30,3 +30,7 @@ steps:
   file: 07_assign_economic_tier.py
   id: assign_economic_tier
   tested: true
+- description: Pre-compute daily metrics for all advertising entities and dates
+  file: 08_compute_daily_metrics.py
+  id: compute_daily_metrics
+  tested: false

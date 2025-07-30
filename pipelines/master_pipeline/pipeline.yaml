@@ -51,3 +51,15 @@ steps:
   file: ../meta_pipeline/01_update_meta_data.py
   id: "\U0001F52E Meta - Update Data"
   tested: true
+- description: Create canonical ID-to-name mappings based on frequency analysis
+  file: ../meta_pipeline/02_create_id_name_mapping.py
+  id: "\U0001F52E Meta - Create ID Name Mapping"
+  tested: false
+- description: Establish campaign → adset → ad hierarchy relationships
+  file: ../meta_pipeline/03_create_hierarchy_mapping.py
+  id: "\U0001F52E Meta - Create Hierarchy Mapping"
+  tested: false
+- description: Pre-compute daily metrics for all advertising entities and dates
+  file: ../mixpanel_pipeline/08_compute_daily_metrics.py
+  id: "\U0001F4CA Mixpanel - Compute Daily Metrics"
+  tested: false

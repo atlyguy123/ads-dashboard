@@ -26,6 +26,30 @@ const PipelineDebugPage = () => {
       icon: '📊',
       path: '/debug/value-estimation',
       status: 'ready'
+    },
+    {
+      id: 'id-name-mapping',
+      title: 'ID-Name Mapping Debug',
+      description: 'Debug and validate canonical ID-to-name mappings from Meta pipeline',
+      icon: '🏷️',
+      path: '/debug/id-name-mapping',
+      status: 'in-development'
+    },
+    {
+      id: 'hierarchy-mapping',
+      title: 'Hierarchy Mapping Debug',
+      description: 'Debug campaign → adset → ad hierarchy relationships and confidence scores',
+      icon: '🏗️',
+      path: '/debug/hierarchy-mapping',
+      status: 'in-development'
+    },
+    {
+      id: 'daily-metrics',
+      title: 'Daily Metrics Debug',
+      description: 'Debug pre-computed daily metrics with user deduplication and revenue calculations',
+      icon: '📈',
+      path: '/debug/daily-metrics',
+      status: 'in-development'
     }
   ];
 
@@ -82,6 +106,9 @@ const PipelineDebugPage = () => {
             <li>• <strong>Conversion Rates:</strong> Analyze how conversion rates are calculated and assigned to user cohorts</li>
             <li>• <strong>Price Bucket:</strong> Debug price bucket assignments and validate data integrity</li>
             <li>• <strong>Value Estimation:</strong> Examine value estimation calculations and timeline data</li>
+            <li>• <strong>ID-Name Mapping:</strong> Validate canonical name assignments and frequency analysis for all advertising IDs</li>
+            <li>• <strong>Hierarchy Mapping:</strong> Debug campaign → adset → ad relationships and confidence scoring</li>
+            <li>• <strong>Daily Metrics:</strong> Analyze pre-computed metrics with user deduplication and revenue calculations</li>
           </ul>
         </div>
       </div>
