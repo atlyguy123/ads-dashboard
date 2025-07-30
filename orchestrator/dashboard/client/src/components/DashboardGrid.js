@@ -1418,7 +1418,6 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       
       // Regular entity row
       
-      // ✅ FIX: Use row.entity_type instead of row.type
       return (
         <ROASSparkline 
           entityType={row.entity_type}

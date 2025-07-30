@@ -338,7 +338,7 @@ def get_analytics_chart_data():
     - entity_type: Entity type ('campaign', 'adset', 'ad')
     - entity_id: Entity ID
     """
-    print("🔥🔥🔥 CHART DATA ENDPOINT CALLED! 🔥🔥🔥")
+
     try:
         # Handle the case where frontend sends Content-Type: application/json on GET requests
         # This is a workaround for a frontend bug where makeRequest always adds this header
@@ -357,18 +357,8 @@ def get_analytics_chart_data():
         entity_type = request.args.get('entity_type')
         entity_id = request.args.get('entity_id')
         
-        print(f"🔥 RAW REQUEST ARGS: {dict(request.args)}")
-        
         # Debug logging
         logger.info(f"Chart data request: entity_type={entity_type}, entity_id={entity_id}, start_date={start_date}, end_date={end_date}, breakdown={breakdown}")
-        
-        # CRITICAL DEBUG: Log exactly what we're receiving
-        print(f"🔍 SPARKLINE DEBUG - Received parameters:")
-        print(f"   entity_type: {entity_type}")
-        print(f"   entity_id: {entity_id}")
-        print(f"   start_date: {start_date}")
-        print(f"   end_date: {end_date}")
-        print(f"   breakdown: {breakdown}")
         
         # Validate required parameters
         required_params = {
@@ -421,18 +411,11 @@ def get_analytics_chart_data():
             with analytics_lock:
                 result = analytics_service.get_chart_data(config, entity_type, entity_id)
             
-            print(f"🔍 ANALYTICS SERVICE RESULT: {result.get('success', False)}")
             if result.get('success'):
-                chart_data = result.get('chart_data', [])
-                print(f"🔍 RETURNING REAL DATA: {len(chart_data)} days")
-                if chart_data:
-                    print(f"🔍 FIRST RECORD BEING SENT: {chart_data[0]}")
-                    print(f"🔍 ALL DAILY_ROAS BEING SENT: {[r.get('daily_roas', 0) for r in chart_data]}")
                 return jsonify(result)
             else:
                 # If analytics service failed, return the error
                 error_msg = result.get('error', 'Unknown analytics service error')
-                print(f"🔍 ANALYTICS SERVICE ERROR: {error_msg}")
                 return jsonify(result), 500
             
         except Exception as analytics_error:

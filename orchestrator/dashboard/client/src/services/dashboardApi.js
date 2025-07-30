@@ -7,11 +7,6 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 class DashboardApiService {
   constructor() {
     this.baseUrl = `${API_BASE_URL}/api/dashboard`;
-    // Debug: Log the actual base URL being used
-    if (!API_BASE_URL) {
-      console.error('🚨 SPARKLINE CONFIG ERROR: REACT_APP_API_URL not set, API calls will fail');
-    }
-    console.log(`🔧 SPARKLINE CONFIG: baseUrl = "${this.baseUrl}"`);
   }
 
   async makeRequest(endpoint, options = {}) {
@@ -29,19 +24,11 @@ class DashboardApiService {
       const data = await response.json();
       
       if (!response.ok) {
-        // Only log failures for sparkline debugging
-        if (endpoint.includes('chart-data')) {
-          console.error(`🚨 SPARKLINE API FAILURE: ${response.status} - ${url}`, data);
-        }
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
       
       return data;
     } catch (error) {
-      // Only log failures for sparkline debugging
-      if (endpoint.includes('chart-data')) {
-        console.error(`🚨 SPARKLINE FETCH ERROR: ${url}`, error);
-      }
       throw error;
     }
   }
@@ -175,7 +162,6 @@ class DashboardApiService {
    */
   async getAnalyticsChartData(params) {
     const queryParams = new URLSearchParams(params).toString();
-    console.log(`🔍 SPARKLINE DEBUG: ${params.entity_type}/${params.entity_id} → ${this.baseUrl}/analytics/chart-data?${queryParams}`);
     return this.makeRequest(`/analytics/chart-data?${queryParams}`);
   }
 

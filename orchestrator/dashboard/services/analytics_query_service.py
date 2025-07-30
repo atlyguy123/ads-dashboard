@@ -2289,15 +2289,7 @@ class AnalyticsQueryService:
                 daily_roas = (adjusted_revenue / spend) if spend > 0 else 0.0
                 daily_profit = adjusted_revenue - spend
                 
-                # 🔍 DEBUG: Log daily calculation values
-                if date == sorted(daily_data.keys())[0]:  # Only log first day to avoid spam
-                    print(f"🔍 SPARKLINE DAILY CALC ({date}):")
-                    print(f"   💰 Raw Revenue: ${raw_revenue:.2f}")
-                    print(f"   📊 Adjustment Ratio: {adjustment_ratio:.3f}")
-                    print(f"   ✨ Adjusted Revenue: ${adjusted_revenue:.2f}")
-                    print(f"   💸 Spend: ${spend:.2f}")
-                    print(f"   📈 ROAS: {daily_roas:.2f}")
-                    print(f"   🎯 Mixpanel Trials: {daily_mixpanel_trials}, Meta Trials: {daily_meta_trials}")
+
                 
                 # Update day data with calculated values
                 day_data.update({

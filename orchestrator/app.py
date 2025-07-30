@@ -925,7 +925,7 @@ def debug_static_files():
 def handle_json_get_requests():
     """Handle the case where frontend sends Content-Type: application/json on GET requests"""
     if request.method == 'GET' and request.content_type == 'application/json':
-        print(f"🔧 Fixing GET request with application/json content-type: {request.path}")
+
         
         # For analytics chart-data endpoints, handle this gracefully
         if 'chart-data' in request.path:
