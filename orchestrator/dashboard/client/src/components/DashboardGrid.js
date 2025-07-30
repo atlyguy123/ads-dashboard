@@ -265,14 +265,30 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     
     try {
       // Extract entity information from row
-      // For breakdown rows, use the parent entity type instead of row.type
-      let entityType = row.type; // 'campaign', 'adset', or 'ad'
+      // ✅ FIX: Handle both 'entity_type' and 'type' field names from backend
+      let entityType = row.entity_type || row.type; // 'campaign', 'adset', or 'ad'
       const entityId = row.id; // e.g., 'campaign_123' or 'US_123' for breakdowns
+      
+      console.log('🔍 ConversionRateTooltip Debug:', {
+        'row.entity_type': row.entity_type,
+        'row.type': row.type,
+        'entityType': entityType,
+        'entityId': entityId,
+        'available_fields': Object.keys(row)
+      });
       
       // Handle breakdown rows - they might not have proper entity_type
       if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
         // This is a breakdown row like "US_123" - use the parent entity type
-        entityType = row.entity_type || 'campaign'; // fallback to campaign if not specified
+        entityType = row.entity_type || row.type || 'campaign'; // fallback to campaign if not specified
+      }
+      
+      // Validate that we have entity type
+      if (!entityType) {
+        console.error('❌ ConversionRateTooltip: Unable to determine entity type from row data:', row);
+        setError('Unable to determine entity type for this item');
+        setLoading(false);
+        return;
       }
       
       // Build API parameters
@@ -285,6 +301,15 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
         breakdownValue = parts[0]; // e.g., "US" from "US_120215772671800178"
         apiEntityId = parts.slice(1).join('_'); // e.g., "120215772671800178" from "US_120215772671800178"
       }
+      
+      console.log('🔍 ConversionRateTooltip API Call Parameters:', {
+        'entity_type': entityType,
+        'entity_id': apiEntityId,
+        'breakdown_value': breakdownValue,
+        'start_date': dashboardParams?.start_date || '2025-01-01',
+        'end_date': dashboardParams?.end_date || '2025-12-31',
+        'breakdown': dashboardParams?.breakdown || 'all'
+      });
       
       const params = new URLSearchParams({
         entity_type: entityType,
@@ -1393,9 +1418,10 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       
       // Regular entity row
       
+      // ✅ FIX: Use row.entity_type instead of row.type
       return (
         <ROASSparkline 
-          entityType={row.type}
+          entityType={row.entity_type}
           entityId={entityId}
           currentROAS={value}
           conversionCount={calculatedRow.mixpanel_purchases || 0}
@@ -1407,12 +1433,12 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       );
     }
 
-          return (
-        <span className={colorClass}>
-          {formattedValue}
-          {isEstimated && <span className="ml-1 text-xs">*</span>}
-        </span>
-      );
+    return (
+      <span className={colorClass}>
+        {formattedValue}
+        {isEstimated && <span className="ml-1 text-xs">*</span>}
+      </span>
+    );
   };
 
   // Simple column drag handlers

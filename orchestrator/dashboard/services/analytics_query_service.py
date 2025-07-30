@@ -1337,6 +1337,81 @@ class AnalyticsQueryService:
             logger.error(f"Error fetching child ads for adset {adset_id}: {e}")
             return []
     
+    def _get_precomputed_sparkline_data(self, entity_type: str, entity_id: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """Get pre-computed daily Mixpanel data for sparkline charts from daily_mixpanel_metrics"""
+        try:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Check if daily_mixpanel_metrics exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_mixpanel_metrics'")
+                if not cursor.fetchone():
+                    logger.warning("daily_mixpanel_metrics table not found. Sparkline will use fallback.")
+                    return []
+                
+                sparkline_query = """
+                SELECT 
+                    date,
+                    trial_users_count,
+                    purchase_users_count,
+                    estimated_revenue_usd
+                FROM daily_mixpanel_metrics
+                WHERE entity_type = ? 
+                  AND entity_id = ?
+                  AND date BETWEEN ? AND ?
+                ORDER BY date ASC
+                """
+                
+                cursor.execute(sparkline_query, [entity_type, entity_id, start_date, end_date])
+                results = cursor.fetchall()
+                
+                logger.info(f"📊 SPARKLINE MIXPANEL: Retrieved {len(results)} days from daily_mixpanel_metrics for {entity_type} {entity_id}")
+                return [dict(row) for row in results]
+                
+        except Exception as e:
+            logger.error(f"Error getting pre-computed sparkline data for {entity_type} {entity_id}: {e}")
+            return []
+    
+    def _get_meta_sparkline_data(self, entity_type: str, entity_id: str, start_date: str, end_date: str, breakdown: str) -> List[Dict[str, Any]]:
+        """Get Meta data for sparkline charts (real-time from Meta tables)"""
+        try:
+            # Get table name for Meta data
+            table_name = self.get_table_name(breakdown)
+            
+            # Build WHERE clause based on entity type
+            if entity_type == 'campaign':
+                meta_where = "campaign_id = ?"
+            elif entity_type == 'adset':
+                meta_where = "adset_id = ?"
+            elif entity_type == 'ad':
+                meta_where = "ad_id = ?"
+            else:
+                raise ValueError(f"Invalid entity_type: {entity_type}")
+            
+            meta_query = f"""
+            SELECT 
+                date,
+                SUM(spend) as daily_spend,
+                SUM(impressions) as daily_impressions,
+                SUM(clicks) as daily_clicks,
+                SUM(meta_trials) as daily_meta_trials,
+                SUM(meta_purchases) as daily_meta_purchases
+            FROM {table_name}
+            WHERE {meta_where} AND date BETWEEN ? AND ?
+            GROUP BY date
+            ORDER BY date ASC
+            """
+            
+            meta_results = self._execute_meta_query(meta_query, [entity_id, start_date, end_date])
+            logger.info(f"📊 SPARKLINE META: Retrieved {len(meta_results)} days from {table_name} for {entity_type} {entity_id}")
+            
+            return meta_results
+            
+        except Exception as e:
+            logger.error(f"Error getting Meta sparkline data for {entity_type} {entity_id}: {e}")
+            return []
+    
     def _execute_mixpanel_query(self, query: str, params: List) -> List[Dict[str, Any]]:
         """Execute query against Mixpanel database"""
         try:
@@ -1923,7 +1998,8 @@ class AnalyticsQueryService:
         # Build the formatted record with all expected fields
         formatted = {
             'id': record_id,
-            'type': entity_type,
+            'entity_type': entity_type,  # ✅ FIXED: Use consistent field name
+            'type': entity_type,  # Keep for backwards compatibility
             'name': name,
             'campaign_name': record.get('campaign_name', ''),
             'adset_name': record.get('adset_name', ''),
@@ -2096,7 +2172,7 @@ class AnalyticsQueryService:
             return 0.0, 0.0, 0.0
 
     def get_chart_data(self, config: QueryConfig, entity_type: str, entity_id: str) -> Dict[str, Any]:
-        """Get detailed daily metrics for sparkline charts - ALWAYS returns exactly 14 days ending on config.end_date"""
+        """Get detailed daily metrics for sparkline charts using PRE-COMPUTED data - ALWAYS returns exactly 14 days ending on config.end_date"""
         try:
             # Check if this is a breakdown entity (format: "US_120217904661980178")
             is_breakdown_entity = '_' in entity_id and not entity_id.startswith(('campaign_', 'adset_', 'ad_'))
@@ -2107,139 +2183,29 @@ class AnalyticsQueryService:
                 logger.info(f"📊 BREAKDOWN CHART: {breakdown_value} breakdown for {entity_type} {parent_entity_id}")
                 return self._get_breakdown_chart_data(config, entity_type, parent_entity_id, breakdown_value)
             
-            # Regular entity chart data
-            table_name = self.get_table_name(config.breakdown)
+            logger.info(f"🔄 SPARKLINE: Using HYBRID approach for {entity_type} {entity_id}")
             
             # Calculate the exact 14-day period ending on config.end_date
             end_date = datetime.strptime(config.end_date, '%Y-%m-%d')
             display_start_date = end_date - timedelta(days=13)  # 13 days back + end date = 14 days total
             
-            # Calculate data fetch period: no additional days needed for 1-day rolling calculations
-            data_start_date = display_start_date  # Start from display period start
-            
-            # Calculate expanded date range for activity analysis (1 week before and after)
-            expanded_start_date = display_start_date - timedelta(days=7)  # 1 week before display period
-            expanded_end_date = end_date + timedelta(days=7)      # 1 week after display period
-            
             # Format dates for queries
-            chart_start_date = data_start_date.strftime('%Y-%m-%d')  # Fetch from display start
+            chart_start_date = display_start_date.strftime('%Y-%m-%d')  # 14 days start
             chart_end_date = config.end_date
-            display_start_str = display_start_date.strftime('%Y-%m-%d')  # Display period start
-            expanded_start_str = expanded_start_date.strftime('%Y-%m-%d')
-            expanded_end_str = expanded_end_date.strftime('%Y-%m-%d')
             
-            # Chart data configuration validated
+            # ✅ STEP 1: Get PRE-COMPUTED Mixpanel data from daily_mixpanel_metrics
+            mixpanel_data = self._get_precomputed_sparkline_data(entity_type, entity_id, chart_start_date, chart_end_date)
             
-            # Build WHERE clause for Meta data based on entity type
-            if entity_type == 'campaign':
-                meta_where = "campaign_id = ?"
-                mixpanel_attr_field = "abi_campaign_id"
-            elif entity_type == 'adset':
-                meta_where = "adset_id = ?"
-                mixpanel_attr_field = "abi_ad_set_id"
-            elif entity_type == 'ad':
-                meta_where = "ad_id = ?"
-                mixpanel_attr_field = "abi_ad_id"
-            else:
-                raise ValueError(f"Invalid entity_type: {entity_type}")
+            # ✅ STEP 2: Get real-time Meta data 
+            meta_data = self._get_meta_sparkline_data(entity_type, entity_id, chart_start_date, chart_end_date, config.breakdown)
             
-            # Get daily Meta data for the EXPANDED period to determine activity range
-            expanded_meta_query = f"""
-            SELECT date,
-                   SUM(spend) as daily_spend
-            FROM {table_name}
-            WHERE {meta_where} AND date BETWEEN ? AND ? AND spend > 0
-            GROUP BY date
-            ORDER BY date ASC
-            """
-            
-            expanded_meta_data = self._execute_meta_query(expanded_meta_query, [entity_id, expanded_start_str, expanded_end_str])
-            
-            # Determine first and last spend dates from expanded data
-            first_spend_date = None
-            last_spend_date = None
-            
-            if expanded_meta_data:
-                spend_dates = [row['date'] for row in expanded_meta_data if row['daily_spend'] > 0]
-                if spend_dates:
-                    first_spend_date = min(spend_dates)
-                    last_spend_date = max(spend_dates)
-            
-            # Activity period determined
-            
-            # Get daily Meta data for the 14-day display period
-            meta_query = f"""
-            SELECT date,
-                   SUM(spend) as daily_spend,
-                   SUM(impressions) as daily_impressions,
-                   SUM(clicks) as daily_clicks,
-                   SUM(meta_trials) as daily_meta_trials,
-                   SUM(meta_purchases) as daily_meta_purchases
-            FROM {table_name}
-            WHERE {meta_where} AND date BETWEEN ? AND ?
-            GROUP BY date
-            ORDER BY date ASC
-            """
-            
-            meta_data = self._execute_meta_query(meta_query, [entity_id, chart_start_date, chart_end_date])
-            
-            # Get daily Mixpanel data for the 14-day period (attributed to credited_date)
-            with sqlite3.connect(self.mixpanel_analytics_db_path) as mixpanel_conn:
-                mixpanel_conn.row_factory = sqlite3.Row
-                
-                mixpanel_query = f"""
-                SELECT 
-                    upm.credited_date as date,
-                    -- Trial metrics by credited date
-                    COUNT(CASE WHEN upm.current_status IN ('trial_pending', 'trial_cancelled', 'trial_converted') THEN 1 END) as daily_mixpanel_trials,
-                    
-                    -- Purchase metrics by credited date
-                    COUNT(CASE WHEN upm.current_status IN ('initial_purchase', 'trial_converted') THEN 1 END) as daily_mixpanel_purchases,
-                    COUNT(CASE WHEN upm.current_status = 'trial_converted' THEN 1 END) as daily_mixpanel_conversions,
-                    
-                    -- Revenue metrics by credited date (sum of current_value attributed to this date)
-                    SUM(CASE WHEN upm.current_status != 'refunded' THEN upm.current_value ELSE 0 END) as daily_mixpanel_revenue,
-                    SUM(CASE WHEN upm.current_status = 'refunded' THEN ABS(upm.current_value) ELSE 0 END) as daily_mixpanel_refunds,
-                    SUM(upm.current_value) as daily_estimated_revenue,
-                    
-                    -- User count for statistical significance
-                    COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
-                    
-                FROM user_product_metrics upm
-                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE u.{mixpanel_attr_field} = ? 
-                  AND upm.credited_date BETWEEN ? AND ?
-                GROUP BY upm.credited_date
-                ORDER BY upm.credited_date ASC
-                """
-                
-                cursor = mixpanel_conn.cursor()
-                cursor.execute(mixpanel_query, [entity_id, chart_start_date, chart_end_date])
-                mixpanel_data = [dict(row) for row in cursor.fetchall()]
-            
-            # Generate ALL data fetch days (14 total display days), filling missing days with zeros
+            # ✅ STEP 3: Generate 14-day framework and merge data
             daily_data = {}
-            current_date = data_start_date
+            current_date = display_start_date
             
-            # Initialize all 14 days with zero values and activity status
+            # Initialize all 14 days with zero values
             for i in range(14):
                 date_str = current_date.strftime('%Y-%m-%d')
-                
-                # Determine if this day should be grey (inactive)
-                is_inactive = False
-                if first_spend_date and last_spend_date:
-                    # Grey if before first spend or after last spend
-                    is_inactive = date_str < first_spend_date or date_str > last_spend_date
-                elif first_spend_date:
-                    # Only first spend found, grey before first spend
-                    is_inactive = date_str < first_spend_date
-                elif last_spend_date:
-                    # Only last spend found, grey after last spend
-                    is_inactive = date_str > last_spend_date
-                else:
-                    # No spend found in expanded period, all days are inactive
-                    is_inactive = True
-                
                 daily_data[date_str] = {
                     'date': date_str,
                     'daily_spend': 0.0,
@@ -2254,11 +2220,11 @@ class AnalyticsQueryService:
                     'daily_mixpanel_refunds': 0.0,
                     'daily_estimated_revenue': 0.0,
                     'daily_attributed_users': 0,
-                    'is_inactive': is_inactive  # New field for frontend styling
+                    'is_inactive': False  # Will be updated based on spend data
                 }
                 current_date += timedelta(days=1)
             
-            # Overlay actual Meta data where it exists
+            # ✅ STEP 4: Overlay Meta data
             for row in meta_data:
                 date = row['date']
                 if date in daily_data:
@@ -2267,113 +2233,108 @@ class AnalyticsQueryService:
                         'daily_impressions': int(row.get('daily_impressions', 0) or 0),
                         'daily_clicks': int(row.get('daily_clicks', 0) or 0),
                         'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
-                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0)
+                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0),
+                        'is_inactive': False  # Has activity
                     })
             
-            # Overlay actual Mixpanel data where it exists
+            # ✅ STEP 5: Overlay PRE-COMPUTED Mixpanel data
             for row in mixpanel_data:
                 date = row['date']
                 if date in daily_data:
                     daily_data[date].update({
-                        'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
-                        'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
-                        'daily_mixpanel_conversions': int(row.get('daily_mixpanel_conversions', 0) or 0),
-                        'daily_mixpanel_revenue': float(row.get('daily_mixpanel_revenue', 0) or 0),
-                        'daily_mixpanel_refunds': float(row.get('daily_mixpanel_refunds', 0) or 0),
-                        'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
-                        'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0)
+                        'daily_mixpanel_trials': int(row.get('trial_users_count', 0) or 0),
+                        'daily_mixpanel_purchases': int(row.get('purchase_users_count', 0) or 0),
+                        'daily_mixpanel_conversions': int(row.get('purchase_users_count', 0) or 0),  # Same as purchases
+                        'daily_mixpanel_revenue': float(row.get('estimated_revenue_usd', 0) or 0),  # ✅ FIX: Use correct column
+                        'daily_mixpanel_refunds': 0.0,  # TODO: Add to pre-computed data if needed
+                        'daily_estimated_revenue': float(row.get('estimated_revenue_usd', 0) or 0),
+                        'daily_attributed_users': int(row.get('trial_users_count', 0) or 0),  # Use trial users as base
+                        'is_inactive': False  # Has activity
                     })
             
-            # Calculate accuracy ratio for the entire period
-            total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
-            total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
-            total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
-            total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
+            logger.info(f"🔄 SPARKLINE HYBRID: Using pre-computed Mixpanel + real-time Meta for {entity_type} {entity_id}")
             
-            # Determine event priority and accuracy ratio
-            if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
-                event_priority = 'trials'
-                overall_accuracy_ratio = 0.0
-            elif total_mixpanel_trials > total_mixpanel_purchases:
-                event_priority = 'trials'
-                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
-            elif total_mixpanel_purchases > total_mixpanel_trials:
-                event_priority = 'purchases'
-                overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
-            else:
-                event_priority = 'equal'
-                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
-            
-            logger.info(f"📊 CHART ACCURACY: {event_priority} priority, {overall_accuracy_ratio:.3f} ratio")
-            
-            # Calculate daily metrics using the modular calculator system for ALL 16 days
+            # ✅ STEP 6: Calculate ADJUSTED revenue and ROAS for each day
             all_data = []
-            for date in sorted(daily_data.keys()):  # This will be exactly 16 days
+            for date in sorted(daily_data.keys()):  # This will be exactly 14 days
                 day_data = daily_data[date]
                 
-                # Map daily fields to standard calculator field names
-                calculator_record = {
-                    'spend': day_data['daily_spend'],
-                    'estimated_revenue_usd': day_data['daily_estimated_revenue'],
-                    'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
-                    'mixpanel_refunds_usd': day_data.get('daily_mixpanel_refunds', 0),
-                    'mixpanel_trials_started': day_data.get('daily_mixpanel_trials', 0),
-                    'meta_trials_started': day_data.get('daily_meta_trials', 0),
-                    'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
-                    'meta_purchases': day_data.get('daily_meta_purchases', 0),
-                    **day_data  # Keep original daily fields for reference
-                }
+                # Calculate accuracy ratios for THIS specific day
+                daily_mixpanel_trials = day_data['daily_mixpanel_trials']
+                daily_mixpanel_purchases = day_data['daily_mixpanel_purchases']
+                daily_meta_trials = day_data['daily_meta_trials']
+                daily_meta_purchases = day_data['daily_meta_purchases']
                 
-                # Use the modular calculator system for ROAS and profit calculations
-                calc_input = CalculationInput(raw_record=calculator_record)
-                day_data['daily_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
-                day_data['daily_profit'] = RevenueCalculators.calculate_profit(calc_input)
+                # Daily accuracy ratios
+                daily_trial_accuracy = (daily_mixpanel_trials / daily_meta_trials) if daily_meta_trials > 0 else 0.0
+                daily_purchase_accuracy = (daily_mixpanel_purchases / daily_meta_purchases) if daily_meta_purchases > 0 else 0.0
                 
-                # Store accuracy ratio and event priority for tooltips
-                day_data['period_accuracy_ratio'] = overall_accuracy_ratio
-                day_data['event_priority'] = event_priority
-                day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
+                # Determine which accuracy ratio to use for revenue adjustment
+                if daily_mixpanel_trials > daily_mixpanel_purchases:
+                    adjustment_ratio = daily_trial_accuracy
+                    event_priority = 'trials'
+                elif daily_mixpanel_purchases > daily_mixpanel_trials:
+                    adjustment_ratio = daily_purchase_accuracy
+                    event_priority = 'purchases'
+                else:
+                    adjustment_ratio = daily_trial_accuracy  # Default to trials
+                    event_priority = 'equal'
+                
+                # ✅ CALCULATE ADJUSTED REVENUE for this day
+                raw_revenue = day_data['daily_estimated_revenue']
+                adjusted_revenue = (raw_revenue / adjustment_ratio) if adjustment_ratio > 0 else raw_revenue
+                
+                # ✅ CALCULATE ROAS using ADJUSTED revenue
+                spend = day_data['daily_spend']
+                daily_roas = (adjusted_revenue / spend) if spend > 0 else 0.0
+                daily_profit = adjusted_revenue - spend
+                
+                # 🔍 DEBUG: Log daily calculation values
+                if date == sorted(daily_data.keys())[0]:  # Only log first day to avoid spam
+                    print(f"🔍 SPARKLINE DAILY CALC ({date}):")
+                    print(f"   💰 Raw Revenue: ${raw_revenue:.2f}")
+                    print(f"   📊 Adjustment Ratio: {adjustment_ratio:.3f}")
+                    print(f"   ✨ Adjusted Revenue: ${adjusted_revenue:.2f}")
+                    print(f"   💸 Spend: ${spend:.2f}")
+                    print(f"   📈 ROAS: {daily_roas:.2f}")
+                    print(f"   🎯 Mixpanel Trials: {daily_mixpanel_trials}, Meta Trials: {daily_meta_trials}")
+                
+                # Update day data with calculated values
+                day_data.update({
+                    'daily_roas': daily_roas,
+                    'daily_profit': daily_profit,
+                    'daily_adjusted_revenue': adjusted_revenue,  # Store both for debugging
+                    'daily_raw_revenue': raw_revenue,
+                    'daily_trial_accuracy': daily_trial_accuracy,
+                    'daily_purchase_accuracy': daily_purchase_accuracy,
+                    'daily_adjustment_ratio': adjustment_ratio,
+                    'daily_event_priority': event_priority,
+                    'conversions_for_coloring': day_data['daily_mixpanel_conversions']
+                })
                 
                 all_data.append(day_data)
             
-            # Calculate rolling 1-day ROAS for each day in the full dataset
+            # ✅ STEP 7: Calculate rolling metrics for sparkline display
             for i, day_data in enumerate(all_data):
-                # Calculate rolling window (current day only)
-                rolling_days = [day_data]  # Only current day
-                
-                # Sum spend and accuracy-adjusted revenue for the rolling window (just current day)
+                # For sparklines, we use 1-day rolling (just current day)
                 rolling_spend = day_data['daily_spend']
-                # Use accuracy-adjusted revenue from daily calculation for consistency
-                rolling_revenue = RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
-                    CalculationInput(raw_record={
-                        'estimated_revenue_usd': day_data['daily_estimated_revenue'],
-                        'mixpanel_trials_started': day_data['daily_mixpanel_trials'],
-                        'mixpanel_purchases': day_data['daily_mixpanel_purchases'],
-                        'meta_trials_started': day_data['daily_meta_trials'],
-                        'meta_purchases': day_data['daily_meta_purchases']
-                    })
-                )
+                rolling_revenue = day_data['daily_adjusted_revenue']  # Use our calculated adjusted revenue
+                rolling_roas = day_data['daily_roas']  # Use our calculated ROAS
                 rolling_conversions = day_data['daily_mixpanel_purchases']
                 rolling_trials = day_data['daily_mixpanel_trials']
                 rolling_meta_trials = day_data['daily_meta_trials']
                 
-                # Calculate rolling ROAS
-                if rolling_spend > 0:
-                    rolling_roas = rolling_revenue / rolling_spend
-                else:
-                    rolling_roas = 0.0
-                
-                # Add rolling metrics to day data
+                # Add rolling metrics to day data (required by frontend)
                 day_data['rolling_1d_roas'] = round(rolling_roas, 2)
                 day_data['rolling_1d_spend'] = rolling_spend
                 day_data['rolling_1d_revenue'] = rolling_revenue
                 day_data['rolling_1d_conversions'] = rolling_conversions
                 day_data['rolling_1d_trials'] = rolling_trials
                 day_data['rolling_1d_meta_trials'] = rolling_meta_trials
-                day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
+                day_data['rolling_window_days'] = 1  # Always 1 day for individual entity sparklines
             
-            # Extract only the 14-day display period (no need to skip days for 1-day rolling)
-            chart_data = all_data[-14:]  # Return only the last 14 days for display
+            # Return all 14 days for display
+            chart_data = all_data
             
             # Chart calculation completed
             
@@ -2382,15 +2343,16 @@ class AnalyticsQueryService:
                 'chart_data': chart_data,
                 'entity_type': entity_type,
                 'entity_id': entity_id,
-                'date_range': f"{display_start_str} to {chart_end_date}",
+                'date_range': f"{chart_start_date} to {chart_end_date}",
                 'total_days': len(chart_data),
-                'period_info': f"14-day period ending {chart_end_date}",
-                'rolling_calculation_info': f"Used {len(all_data)}-day dataset for 1-day rolling averages",
-                'activity_analysis': {
-                    'expanded_range': f"{expanded_start_str} to {expanded_end_str}",
-                    'first_spend_date': first_spend_date,
-                    'last_spend_date': last_spend_date,
-                    'inactive_days_count': sum(1 for d in chart_data if d.get('is_inactive', False))
+                'period_info': f"14-day period ending {chart_end_date} using HYBRID approach",
+                'rolling_calculation_info': f"1-day rolling averages with adjusted revenue calculations",
+                'metadata': {
+                    'approach': 'hybrid_precomputed_mixpanel_plus_realtime_meta',
+                    'mixpanel_source': 'daily_mixpanel_metrics',
+                    'meta_source': config.breakdown,
+                    'adjustment_method': 'daily_accuracy_ratio_per_day',
+                    'generated_at': now_in_timezone().isoformat()
                 }
             }
             
@@ -3413,10 +3375,10 @@ class AnalyticsQueryService:
             # Return all the data (no need to limit since we only generate the requested range)
             chart_data = all_data
             
-            # Summary logging
+            # Summary logging - ✅ FIXED: Use ADJUSTED revenue for totals
             total_days_with_data = sum(1 for d in chart_data if not d.get('is_inactive', False))
             total_spend = sum(d['daily_spend'] for d in chart_data)
-            total_revenue = sum(d['daily_estimated_revenue'] for d in chart_data)
+            total_revenue = sum(d['rolling_1d_revenue'] for d in chart_data)  # ✅ Use adjusted revenue
             avg_daily_roas = sum(d['rolling_1d_roas'] for d in chart_data) / len(chart_data) if chart_data else 0
             
                     # Overview chart data completed
