@@ -718,8 +718,8 @@ def process_events_incrementally(raw_data_conn, raw_db_type: str, sqlite_conn: s
                     metrics.events_skipped_invalid += 1
             
             # Process remaining batch
-                            if event_batch:
-                    events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics, is_refresh_date, global_user_mappings)
+            if event_batch:
+                events_inserted = insert_event_batch(sqlite_cursor, event_batch, metrics, is_refresh_date, global_user_mappings)
                 date_events += events_inserted
             
             # Mark date as processed
