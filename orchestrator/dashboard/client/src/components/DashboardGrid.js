@@ -2106,7 +2106,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               <th 
                 scope="col" 
                 style={getColumnStyle('name')}
-                className={`sticky left-0 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 transition-colors group relative
+                className={`sticky left-0 text-right text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 transition-colors group relative
                   ${sortConfig.column === 'name' ? 'border-b-2 border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
               >
                 {/* 🎯 RESTRUCTURED: Name column sorting zone */}
@@ -2160,7 +2160,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
                     onDragEnter={(e) => handleColumnDragEnter(e, column.key)}
                     onDragLeave={handleColumnDragLeave}
                     onDrop={(e) => handleColumnDrop(e, column.key)}
-                    className={`text-${column.key === 'campaign_name' || column.key === 'adset_name' ? 'left' : 'right'} text-xs font-medium uppercase tracking-wider ${getHeaderColor(column.key)} ${backgroundClass}
+                    className={`text-right text-xs font-medium uppercase tracking-wider ${getHeaderColor(column.key)} ${backgroundClass}
                       transition-colors duration-150 group relative
                       ${sortConfig.column === column.key ? 'bg-blue-50 dark:bg-blue-900/20 border-b-2 border-blue-500 dark:border-blue-400' : ''}
                       ${dragOverColumn === column.key && draggedColumn !== column.key ? 'bg-blue-100 dark:bg-blue-900 border-2 border-blue-300 dark:border-blue-600' : ''}`}
