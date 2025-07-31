@@ -20,7 +20,7 @@ COPY orchestrator/dashboard/client/package*.json ./orchestrator/dashboard/client
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Node.js dependencies (including dev deps needed for build)
-RUN cd orchestrator/dashboard/client && npm ci
+RUN cd orchestrator/dashboard/client && npm install
 
 # Copy application code
 COPY . .
