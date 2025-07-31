@@ -14,16 +14,15 @@ RUN apt-get update && apt-get install -y \
 
 # Copy package files first for better Docker layer caching
 COPY requirements.txt .
-COPY orchestrator/dashboard/client/package*.json ./orchestrator/dashboard/client/
 
 # Install Python dependencies with exact versions
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Node.js dependencies (including dev deps needed for build)
-RUN cd orchestrator/dashboard/client && npm install
-
 # Copy application code
 COPY . .
+
+# Install Node.js dependencies (including dev deps needed for build)
+RUN cd orchestrator/dashboard/client && npm install
 
 # Build React frontend
 RUN cd orchestrator/dashboard/client && \
