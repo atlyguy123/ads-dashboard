@@ -18,16 +18,12 @@ COPY requirements.txt .
 # Install Python dependencies with exact versions
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
-
-# Install Node.js dependencies (including dev deps needed for build)
+# Copy package.json files and install Node.js deps for better caching  
+COPY orchestrator/dashboard/client/package*.json ./orchestrator/dashboard/client/
 RUN cd orchestrator/dashboard/client && npm install
 
-# Debug: Check what files are actually copied
-RUN echo "=== Checking orchestrator/dashboard/client directory ===" && ls -la orchestrator/dashboard/client/
-RUN echo "=== Checking orchestrator/dashboard/client/public directory ===" && ls -la orchestrator/dashboard/client/public/ || echo "public directory not found"
-RUN echo "=== Checking orchestrator/dashboard/client/src directory ===" && ls -la orchestrator/dashboard/client/src/ || echo "src directory not found"
+# Copy all application code (including React src and public)
+COPY . .
 
 # Build React frontend
 RUN cd orchestrator/dashboard/client && \
