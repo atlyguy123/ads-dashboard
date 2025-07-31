@@ -806,8 +806,9 @@ class AnalyticsQueryService:
                             if mixpanel_revenue > 0:
                                 fallback_roas = mixpanel_revenue / spend
                                 capped_fallback_roas = min(fallback_roas, 4.0)
+                                # SIMPLIFIED: Just spend × ROAS² (no time scaling)
                                 performance_impact_score = spend * (capped_fallback_roas ** 2)
-                                logger.info(f"🔄 FALLBACK: Using mixpanel_revenue ${mixpanel_revenue} for performance impact score: {performance_impact_score}")
+                                logger.info(f"🔄 FALLBACK: spend=${spend} × (ROAS={fallback_roas:.4f})² = ${performance_impact_score:.2f}")
                         
                         # Final debug log if still zero
                         if performance_impact_score == 0.0:

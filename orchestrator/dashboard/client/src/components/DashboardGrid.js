@@ -522,7 +522,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
 
   return (
     <>
-      <div className="flex items-center space-x-1 justify-end">
+      <div className="flex items-center space-x-1">
         <span
           className={`${colorClass} cursor-pointer hover:underline`}
           onMouseEnter={(e) => handleMouseEnter(e, 'estimated')}
@@ -2021,7 +2021,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           // Special handling for campaign/adset name columns based on level
           if (column.key === 'campaign_name') {
             if (level > 0) {
-              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300 text-right">{row.campaign_name}</td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.campaign_name}</td>;
             } else {
               return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2"></td>;
             }
@@ -2029,7 +2029,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           
           if (column.key === 'adset_name') {
             if (level > 1) {
-              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300 text-right">{row.adset_name}</td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.adset_name}</td>;
             } else {
               return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2"></td>;
             }
