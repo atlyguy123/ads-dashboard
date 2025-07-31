@@ -447,6 +447,7 @@ def get_user_details_for_tooltip():
     - end_date: End date (YYYY-MM-DD)
     - breakdown: Breakdown type ('all', 'country', 'device', etc.)
     - breakdown_value: Specific breakdown value if applicable (e.g., 'US', 'mobile')
+    - metric_type: Type of metric ('trial_conversion_rate', 'avg_trial_refund_rate', 'purchase_refund_rate')
     """
     try:
         # Get query parameters
@@ -456,9 +457,10 @@ def get_user_details_for_tooltip():
         end_date = request.args.get('end_date')
         breakdown = request.args.get('breakdown', 'all')
         breakdown_value = request.args.get('breakdown_value')
+        metric_type = request.args.get('metric_type', 'trial_conversion_rate')
         
         # Debug logging
-        logger.info(f"User details request: entity_type={entity_type}, entity_id={entity_id}, start_date={start_date}, end_date={end_date}, breakdown={breakdown}, breakdown_value={breakdown_value}")
+        logger.info(f"User details request: entity_type={entity_type}, entity_id={entity_id}, start_date={start_date}, end_date={end_date}, breakdown={breakdown}, breakdown_value={breakdown_value}, metric_type={metric_type}")
         
         # Validate required parameters
         required_params = {
@@ -506,7 +508,8 @@ def get_user_details_for_tooltip():
                     start_date=start_date,
                     end_date=end_date,
                     breakdown=breakdown,
-                    breakdown_value=breakdown_value
+                    breakdown_value=breakdown_value,
+                    metric_type=metric_type
                 )
             
             if result.get('success'):

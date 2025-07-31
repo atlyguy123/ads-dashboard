@@ -227,6 +227,8 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
   const [showModal, setShowModal] = useState(false);
   const [allUsers, setAllUsers] = useState([]);
   const [copiedUserId, setCopiedUserId] = useState(null);
+  const [currentMode, setCurrentMode] = useState('estimated'); // 'estimated' or 'actual'
+  const [dualData, setDualData] = useState(null); // Store both estimated and actual data
   
   // Filter states for modal
   const [filters, setFilters] = useState({
@@ -237,7 +239,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     product_id: ''
   });
 
-  const handleMouseEnter = async (e) => {
+  const handleMouseEnter = async (e, mode = 'estimated') => {
     const rect = e.currentTarget.getBoundingClientRect();
     const windowWidth = window.innerWidth;
     const windowHeight = window.innerHeight;
@@ -259,9 +261,21 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     }
     
     setTooltipPosition({ x, y });
+    setCurrentMode(mode);
     setShowTooltip(true);
-    setLoading(true);
     setError(null);
+    
+    // If we already have dual data, just switch mode without API call
+    if (dualData) {
+      setLoading(false);
+      const modeData = dualData[mode];
+      setUserDetails(modeData);
+      setAllUsers(modeData.users || []);
+      return;
+    }
+    
+    // Otherwise, fetch data from API
+    setLoading(true);
     
     try {
       // Extract entity information from row
@@ -316,7 +330,8 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
         entity_id: apiEntityId,
         start_date: dashboardParams?.start_date || '2025-01-01',
         end_date: dashboardParams?.end_date || '2025-12-31',
-        breakdown: dashboardParams?.breakdown || 'all'
+        breakdown: dashboardParams?.breakdown || 'all',
+        metric_type: columnKey // Pass columnKey to determine trial vs purchase users
       });
       
       // Add breakdown_value if this is a breakdown row
@@ -328,10 +343,14 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
       const result = await response.json();
       
       if (result.success) {
-        // API returns data directly, not nested under 'data' property
-        setUserDetails(result);
-        // Store all users for modal (API returns up to 100)
-        setAllUsers(result.users || []);
+        // Store the full dual data structure
+        setDualData(result);
+        
+        // Set current view to the requested mode
+        const modeData = result[mode]; // Get either 'estimated' or 'actual' data
+        setUserDetails(modeData);
+        // Store all users for modal
+        setAllUsers(modeData.users || []);
       } else {
         setError(result.error || 'Failed to load user details');
       }
@@ -349,8 +368,9 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     setError(null);
   };
 
-  const handleClick = () => {
+  const handleClick = (mode = 'estimated') => {
     if (userDetails && allUsers.length > 0) {
+      setCurrentMode(mode);
       setShowModal(true);
       setShowTooltip(false);
       // Reset filters when opening modal
@@ -410,16 +430,20 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
 
   // Helper function to get rate label
   const getRateLabel = () => {
-    switch (columnKey) {
-      case 'trial_conversion_rate':
-        return 'Trial Conversion Rate';
-      case 'avg_trial_refund_rate':
-        return 'Trial Refund Rate';
-      case 'purchase_refund_rate':
-        return 'Purchase Refund Rate';
-      default:
-        return 'Rate';
-    }
+    const baseLabel = (() => {
+      switch (columnKey) {
+        case 'trial_conversion_rate':
+          return 'Trial Conversion Rate';
+        case 'avg_trial_refund_rate':
+          return 'Trial Refund Rate';
+        case 'purchase_refund_rate':
+          return 'Purchase Refund Rate';
+        default:
+          return 'Rate';
+      }
+    })();
+    
+    return `${baseLabel} (${currentMode === 'estimated' ? 'Estimated' : 'Actual'})`;
   };
 
   // Copy user ID to clipboard
@@ -435,15 +459,37 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
 
   return (
     <>
-      <span
-        className={`${colorClass} cursor-pointer hover:underline`}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={handleClick}
-        title="Click to see all users"
-      >
-        {value !== undefined && value !== null ? `${formatNumber(value, 2)}%` : 'N/A'}
-      </span>
+      <div className="flex items-center space-x-1">
+        <span
+          className={`${colorClass} cursor-pointer hover:underline`}
+          onMouseEnter={(e) => handleMouseEnter(e, 'estimated')}
+          onMouseLeave={handleMouseLeave}
+          onClick={(e) => handleClick('estimated')}
+          title="Estimated rate - click to see all users"
+        >
+          {value !== undefined && value !== null ? `${formatNumber(value, 1)}%` : 'N/A'}
+        </span>
+        <span className="text-gray-400">|</span>
+        <span
+          className={`${colorClass} cursor-pointer hover:underline`}
+          onMouseEnter={(e) => handleMouseEnter(e, 'actual')}
+          onMouseLeave={handleMouseLeave}
+          onClick={(e) => handleClick('actual')}
+          title="Actual rate - click to see converted users"
+        >
+          {dualData?.actual ? 
+            (() => {
+              const rate = columnKey === 'trial_conversion_rate' ? dualData.actual.summary.avg_trial_conversion_rate :
+                          columnKey === 'avg_trial_refund_rate' ? dualData.actual.summary.avg_trial_refund_rate :
+                          dualData.actual.summary.avg_purchase_refund_rate;
+              return `${formatNumber(rate, 1)}%`;
+            })() : '--.--%'
+          }
+        </span>
+        <span className="text-xs text-gray-400 ml-1">
+          ({dualData?.actual?.summary?.total_users || '-'})
+        </span>
+      </div>
       {showTooltip && (
         <div
           className="fixed z-50 bg-gray-900 text-white text-xs rounded-lg shadow-lg border border-gray-700 max-w-lg"

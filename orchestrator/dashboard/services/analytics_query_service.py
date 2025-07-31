@@ -2656,15 +2656,16 @@ class AnalyticsQueryService:
             } 
 
     def get_user_details_for_tooltip(self, entity_type: str, entity_id: str, start_date: str, end_date: str, 
-                                    breakdown: str = 'all', breakdown_value: str = None) -> Dict[str, Any]:
+                                    breakdown: str = 'all', breakdown_value: str = None, metric_type: str = 'trial_conversion_rate') -> Dict[str, Any]:
         """
-        Get individual user details for tooltip display on conversion rates
+        Get individual user details for tooltip display on conversion rates using daily_mixpanel_metrics as source of truth
         
-        Returns user-level breakdown of trial conversion rates, trial refund rates, and purchase refund rates
-        for the specified entity and date range.
+        Returns BOTH estimated and actual user-level breakdowns:
+        - Estimated: All users from trial_users_list/purchase_users_list (current logic)
+        - Actual: Users who had time to convert (8+ days for trials, 31+ days for purchases) and current_value > 0
         """
         try:
-            logger.info(f"🔍 Getting user details for tooltip: {entity_type} {entity_id}, {start_date} to {end_date}, breakdown={breakdown}")
+            logger.info(f"🔍 Getting DUAL user details for tooltip: {entity_type} {entity_id}, {start_date} to {end_date}, breakdown={breakdown}, metric_type={metric_type}")
             
             # Extract the actual entity ID from the prefixed ID format (e.g., "campaign_123" -> "123")
             if entity_id.startswith(f"{entity_type}_"):
@@ -2672,18 +2673,101 @@ class AnalyticsQueryService:
             else:
                 actual_entity_id = entity_id
             
-            # Build the query based on entity type and breakdown
+            # Determine which user list to use based on metric type
+            if metric_type in ['trial_conversion_rate', 'avg_trial_refund_rate']:
+                user_list_column = 'trial_users_list'
+                is_trial_metric = True
+                logger.info(f"📊 Using trial users for metric type: {metric_type}")
+            elif metric_type == 'purchase_refund_rate':
+                user_list_column = 'purchase_users_list'
+                is_trial_metric = False
+                logger.info(f"📊 Using purchase users for metric type: {metric_type}")
+            else:
+                # Default to trial users for unknown metric types
+                user_list_column = 'trial_users_list'
+                is_trial_metric = True
+                logger.warning(f"⚠️ Unknown metric type '{metric_type}', defaulting to trial users")
+            
             with sqlite3.connect(self.mixpanel_db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                # Base query to get user-level rate data
-                if entity_type == 'campaign':
-                    entity_field = 'u.abi_campaign_id'
-                elif entity_type == 'adset':
-                    entity_field = 'u.abi_ad_set_id'
-                else:  # ad
-                    entity_field = 'u.abi_ad_id'
+                # STEP 1: Get distinct_ids from daily_mixpanel_metrics (source of truth)
+                logger.info(f"🔍 Querying daily_mixpanel_metrics for {entity_type} {actual_entity_id}")
+                
+                daily_metrics_query = f"""
+                SELECT date, {user_list_column} 
+                FROM daily_mixpanel_metrics 
+                WHERE entity_type = ? 
+                  AND entity_id = ?
+                  AND date BETWEEN ? AND ?
+                  AND {user_list_column} IS NOT NULL
+                  AND {user_list_column} != ''
+                  AND {user_list_column} != '[]'
+                ORDER BY date
+                """
+                
+                cursor.execute(daily_metrics_query, [entity_type, actual_entity_id, start_date, end_date])
+                daily_records = [dict(row) for row in cursor.fetchall()]
+                
+                logger.info(f"📅 Found {len(daily_records)} days with {user_list_column} data")
+                
+                # STEP 2: Extract and deduplicate distinct_ids from JSON arrays
+                all_distinct_ids = set()
+                for record in daily_records:
+                    user_list_json = record[user_list_column]
+                    if user_list_json:
+                        try:
+                            user_list = json.loads(user_list_json)
+                            if isinstance(user_list, list):
+                                all_distinct_ids.update(user_list)
+                                logger.debug(f"📋 Date {record['date']}: {len(user_list)} users, running total: {len(all_distinct_ids)}")
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.warning(f"⚠️ Failed to parse {user_list_column} for date {record['date']}: {e}")
+                
+                logger.info(f"✅ Deduplicated to {len(all_distinct_ids)} unique users from daily_mixpanel_metrics")
+                
+                if not all_distinct_ids:
+                    logger.warning(f"⚠️ No users found in {user_list_column} for {entity_type} {actual_entity_id}")
+                    empty_result = {
+                        'success': True,
+                        'estimated': {
+                            'summary': {
+                                'total_users': 0,
+                                'avg_trial_conversion_rate': 0,
+                                'avg_trial_refund_rate': 0,
+                                'avg_purchase_refund_rate': 0,
+                                'total_estimated_revenue': 0,
+                                'breakdown_applied': breakdown,
+                                'breakdown_value': breakdown_value
+                            },
+                            'users': []
+                        },
+                        'actual': {
+                            'summary': {
+                                'total_users': 0,
+                                'avg_trial_conversion_rate': 0,
+                                'avg_trial_refund_rate': 0,
+                                'avg_purchase_refund_rate': 0,
+                                'total_estimated_revenue': 0,
+                                'breakdown_applied': breakdown,
+                                'breakdown_value': breakdown_value
+                            },
+                            'users': []
+                        },
+                        'entity_info': {
+                            'entity_type': entity_type,
+                            'entity_id': entity_id,
+                            'actual_entity_id': actual_entity_id
+                        },
+                        'date_range': f"{start_date} to {end_date}",
+                        'generated_at': now_in_timezone().isoformat()
+                    }
+                    return empty_result
+                
+                # STEP 3: Query user_product_metrics for only these specific users
+                distinct_ids_list = list(all_distinct_ids)
+                placeholders = ','.join(['?' for _ in distinct_ids_list])
                 
                 # Add breakdown filter if specified
                 breakdown_filter = ""
@@ -2692,97 +2776,210 @@ class AnalyticsQueryService:
                     breakdown_filter = "AND u.country = ?"
                     breakdown_params.append(breakdown_value)
                 
-                # Query for individual user rate data - ENHANCED: Include accuracy score and product_id, NO LIMIT
                 user_details_query = f"""
+                WITH most_recent_trials AS (
+                    SELECT 
+                        upm.distinct_id,
+                        upm.country,
+                        upm.region,
+                        upm.store as device_category,
+                        upm.current_status,
+                        upm.trial_conversion_rate,
+                        upm.trial_converted_to_refund_rate,
+                        upm.initial_purchase_to_refund_rate,
+                        upm.current_value,
+                        upm.value_status,
+                        upm.credited_date,
+                        upm.price_bucket,
+                        upm.accuracy_score,
+                        upm.product_id,
+                        ROW_NUMBER() OVER (PARTITION BY upm.distinct_id ORDER BY upm.credited_date DESC) as row_num
+                    FROM user_product_metrics upm
+                    WHERE upm.distinct_id IN ({placeholders})
+                      AND upm.trial_conversion_rate IS NOT NULL
+                      AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                      AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                )
                 SELECT 
-                    upm.distinct_id,
+                    mrt.distinct_id,
                     u.country,
                     u.region,
-                    upm.store as device_category,
-                    upm.current_status,
-                    upm.trial_conversion_rate,
-                    upm.trial_converted_to_refund_rate,
-                    upm.initial_purchase_to_refund_rate,
-                    upm.current_value,
-                    upm.value_status,
-                    upm.credited_date,
-                    upm.price_bucket,
+                    mrt.device_category,
+                    mrt.current_status,
+                    mrt.trial_conversion_rate,
+                    mrt.trial_converted_to_refund_rate,
+                    mrt.initial_purchase_to_refund_rate,
+                    mrt.current_value,
+                    mrt.value_status,
+                    mrt.credited_date,
+                    mrt.price_bucket,
                     u.economic_tier,
-                    upm.accuracy_score,
-                    upm.product_id
-                FROM user_product_metrics upm
-                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE {entity_field} = ?
+                    mrt.accuracy_score,
+                    mrt.product_id
+                FROM most_recent_trials mrt
+                JOIN mixpanel_user u ON mrt.distinct_id = u.distinct_id
+                WHERE mrt.row_num = 1
                   {breakdown_filter}
-                  AND upm.trial_conversion_rate IS NOT NULL
-                  AND upm.trial_converted_to_refund_rate IS NOT NULL  
-                  AND upm.initial_purchase_to_refund_rate IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM mixpanel_event e 
-                      WHERE e.distinct_id = upm.distinct_id 
-                      AND e.event_name = 'RC Trial started'
-                      AND DATE(e.event_time) BETWEEN ? AND ?
-                  )
-                ORDER BY upm.trial_conversion_rate DESC
+                ORDER BY mrt.trial_conversion_rate DESC
                 """
                 
-                query_params = [actual_entity_id] + breakdown_params + [start_date, end_date]
+                query_params = distinct_ids_list + breakdown_params
+                
                 cursor.execute(user_details_query, query_params)
                 user_records = [dict(row) for row in cursor.fetchall()]
                 
-                # Calculate summary statistics
-                if user_records:
-                    trial_conversion_rates = [r['trial_conversion_rate'] for r in user_records if r['trial_conversion_rate'] is not None]
-                    trial_refund_rates = [r['trial_converted_to_refund_rate'] for r in user_records if r['trial_converted_to_refund_rate'] is not None]
-                    purchase_refund_rates = [r['initial_purchase_to_refund_rate'] for r in user_records if r['initial_purchase_to_refund_rate'] is not None]
+                logger.info(f"📊 Retrieved {len(user_records)} users (most recent trial per user) from user_product_metrics")
+                
+                # ========================================
+                # STEP 4: SEPARATE INTO ESTIMATED vs ACTUAL 
+                # ========================================
+                from datetime import datetime, timedelta
+                today = now_in_timezone().date()
+                
+                estimated_users = user_records  # All users for estimated calculation
+                actual_users = []  # Filtered users for actual calculation
+                
+                # Filter for actual users based on time and conversion status
+                for record in user_records:
+                    credited_date_str = record.get('credited_date')
+                    current_value = record.get('current_value', 0)
                     
-                    summary_stats = {
-                        'total_users': len(user_records),
-                        'avg_trial_conversion_rate': (sum(trial_conversion_rates) / len(trial_conversion_rates) * 100) if trial_conversion_rates else 0,
-                        'avg_trial_refund_rate': (sum(trial_refund_rates) / len(trial_refund_rates) * 100) if trial_refund_rates else 0,
-                        'avg_purchase_refund_rate': (sum(purchase_refund_rates) / len(purchase_refund_rates) * 100) if purchase_refund_rates else 0,
-                        'total_estimated_revenue': sum(r['current_value'] for r in user_records if r['current_value']),
-                        'breakdown_applied': breakdown,
-                        'breakdown_value': breakdown_value
-                    }
-                else:
-                    summary_stats = {
-                        'total_users': 0,
-                        'avg_trial_conversion_rate': 0,
-                        'avg_trial_refund_rate': 0,
-                        'avg_purchase_refund_rate': 0,
-                        'total_estimated_revenue': 0,
-                        'breakdown_applied': breakdown,
-                        'breakdown_value': breakdown_value
-                    }
+                    if not credited_date_str or credited_date_str == 'PLACEHOLDER_DATE':
+                        continue
+                    
+                    try:
+                        credited_date = datetime.strptime(credited_date_str, '%Y-%m-%d').date()
+                        days_since = (today - credited_date).days
+                        
+                        # Apply time filters and conversion criteria
+                        if is_trial_metric:
+                            # Trial users: need 8+ days to convert, current_value > 0 means converted
+                            if days_since >= 8:
+                                actual_users.append(record)
+                        else:
+                            # Purchase users: need 31+ days to potentially refund, current_value > 0 means not refunded
+                            if days_since >= 31:
+                                actual_users.append(record)
+                    except (ValueError, TypeError):
+                        continue
                 
-                # Format user records for display (convert rates to percentages) - ENHANCED: Include accuracy score and product_id
-                formatted_users = []
-                for record in user_records:  # Return ALL users (no limit)
-                    formatted_users.append({
-                        'distinct_id': record['distinct_id'],  # Full ID for copy functionality
-                        'country': record['country'] or 'N/A',
-                        'region': record['region'] or 'N/A',
-                        'device_category': record['device_category'] or 'N/A',
-                        'status': record['current_status'],
-                        'trial_conversion_rate': round(record['trial_conversion_rate'] * 100, 1) if record['trial_conversion_rate'] else 0,
-                        'trial_refund_rate': round(record['trial_converted_to_refund_rate'] * 100, 1) if record['trial_converted_to_refund_rate'] else 0,
-                        'purchase_refund_rate': round(record['initial_purchase_to_refund_rate'] * 100, 1) if record['initial_purchase_to_refund_rate'] else 0,
-                        'estimated_value': round(record['current_value'], 2) if record['current_value'] else 0,
-                        'value_status': record['value_status'] or 'N/A',
-                        'credited_date': record['credited_date'],
-                        'price_bucket': f"${record['price_bucket']:.2f}" if record['price_bucket'] else 'N/A',
-                        'economic_tier': record['economic_tier'] or 'N/A',
-                        'accuracy_score': record['accuracy_score'] or 'N/A',
-                        'product_id': record['product_id'] or 'N/A'
-                    })
+                logger.info(f"🔍 FILTERING RESULTS:")
+                logger.info(f"   📊 Estimated users (all): {len(estimated_users)}")
+                logger.info(f"   📊 Actual users (time-filtered): {len(actual_users)}")
                 
-                logger.info(f"✅ Retrieved user details: {summary_stats['total_users']} users, avg rates: {summary_stats['avg_trial_conversion_rate']:.1f}%/{summary_stats['avg_trial_refund_rate']:.1f}%/{summary_stats['avg_purchase_refund_rate']:.1f}%")
+                # Calculate summary statistics for ESTIMATED users
+                def calculate_summary_stats(users_list):
+                    if users_list:
+                        trial_conversion_rates = [r['trial_conversion_rate'] for r in users_list if r['trial_conversion_rate'] is not None]
+                        trial_refund_rates = [r['trial_converted_to_refund_rate'] for r in users_list if r['trial_converted_to_refund_rate'] is not None]
+                        purchase_refund_rates = [r['initial_purchase_to_refund_rate'] for r in users_list if r['initial_purchase_to_refund_rate'] is not None]
+                        
+                        return {
+                            'total_users': len(users_list),
+                            'avg_trial_conversion_rate': (sum(trial_conversion_rates) / len(trial_conversion_rates) * 100) if trial_conversion_rates else 0,
+                            'avg_trial_refund_rate': (sum(trial_refund_rates) / len(trial_refund_rates) * 100) if trial_refund_rates else 0,
+                            'avg_purchase_refund_rate': (sum(purchase_refund_rates) / len(purchase_refund_rates) * 100) if purchase_refund_rates else 0,
+                            'total_estimated_revenue': sum(r['current_value'] for r in users_list if r['current_value']),
+                            'breakdown_applied': breakdown,
+                            'breakdown_value': breakdown_value
+                        }
+                    else:
+                        return {
+                            'total_users': 0,
+                            'avg_trial_conversion_rate': 0,
+                            'avg_trial_refund_rate': 0,
+                            'avg_purchase_refund_rate': 0,
+                            'total_estimated_revenue': 0,
+                            'breakdown_applied': breakdown,
+                            'breakdown_value': breakdown_value
+                        }
+                
+                # Calculate summary for actual conversions (current_value > 0 users only)
+                def calculate_actual_conversion_stats(users_list):
+                    if users_list:
+                        # For actual conversions, only count users with current_value > 0 as "converted"
+                        converted_users = [r for r in users_list if r.get('current_value', 0) > 0]
+                        total_eligible = len(users_list)
+                        converted_count = len(converted_users)
+                        
+                        # Calculate actual conversion rates
+                        actual_conversion_rate = (converted_count / total_eligible * 100) if total_eligible > 0 else 0
+                        
+                        # For converted users, get their refund rates
+                        if converted_users:
+                            trial_refund_rates = [r['trial_converted_to_refund_rate'] for r in converted_users if r['trial_converted_to_refund_rate'] is not None]
+                            purchase_refund_rates = [r['initial_purchase_to_refund_rate'] for r in converted_users if r['initial_purchase_to_refund_rate'] is not None]
+                            
+                            avg_trial_refund = (sum(trial_refund_rates) / len(trial_refund_rates) * 100) if trial_refund_rates else 0
+                            avg_purchase_refund = (sum(purchase_refund_rates) / len(purchase_refund_rates) * 100) if purchase_refund_rates else 0
+                        else:
+                            avg_trial_refund = 0
+                            avg_purchase_refund = 0
+                        
+                        return {
+                            'total_users': converted_count,  # Only show converted users in actual
+                            'total_eligible': total_eligible,  # Track how many had time to convert
+                            'avg_trial_conversion_rate': actual_conversion_rate,
+                            'avg_trial_refund_rate': avg_trial_refund,
+                            'avg_purchase_refund_rate': avg_purchase_refund,
+                            'total_estimated_revenue': sum(r['current_value'] for r in converted_users if r['current_value']),
+                            'breakdown_applied': breakdown,
+                            'breakdown_value': breakdown_value
+                        }
+                    else:
+                        return {
+                            'total_users': 0,
+                            'total_eligible': 0,
+                            'avg_trial_conversion_rate': 0,
+                            'avg_trial_refund_rate': 0,
+                            'avg_purchase_refund_rate': 0,
+                            'total_estimated_revenue': 0,
+                            'breakdown_applied': breakdown,
+                            'breakdown_value': breakdown_value
+                        }
+                
+                estimated_summary = calculate_summary_stats(estimated_users)
+                actual_summary = calculate_actual_conversion_stats(actual_users)
+                
+                # Format user records for display (convert rates to percentages)
+                def format_user_records(users_list):
+                    formatted_users = []
+                    for record in users_list:
+                        formatted_users.append({
+                            'distinct_id': record['distinct_id'],
+                            'country': record['country'] or 'N/A',
+                            'region': record['region'] or 'N/A',
+                            'device_category': record['device_category'] or 'N/A',
+                            'status': record['current_status'],
+                            'trial_conversion_rate': round(record['trial_conversion_rate'] * 100, 1) if record['trial_conversion_rate'] else 0,
+                            'trial_refund_rate': round(record['trial_converted_to_refund_rate'] * 100, 1) if record['trial_converted_to_refund_rate'] else 0,
+                            'purchase_refund_rate': round(record['initial_purchase_to_refund_rate'] * 100, 1) if record['initial_purchase_to_refund_rate'] else 0,
+                            'estimated_value': round(record['current_value'], 2) if record['current_value'] else 0,
+                            'value_status': record['value_status'] or 'N/A',
+                            'credited_date': record['credited_date'],
+                            'price_bucket': f"${record['price_bucket']:.2f}" if record['price_bucket'] else 'N/A',
+                            'economic_tier': record['economic_tier'] or 'N/A',
+                            'accuracy_score': record['accuracy_score'] or 'N/A',
+                            'product_id': record['product_id'] or 'N/A'
+                        })
+                    return formatted_users
+                
+                # For actual metrics, only show users who converted (current_value > 0)
+                actual_converted_users = [r for r in actual_users if r.get('current_value', 0) > 0]
+                
+                logger.info(f"✅ ESTIMATED: {estimated_summary['total_users']} users, avg rates: {estimated_summary['avg_trial_conversion_rate']:.1f}%/{estimated_summary['avg_trial_refund_rate']:.1f}%/{estimated_summary['avg_purchase_refund_rate']:.1f}%")
+                logger.info(f"✅ ACTUAL: {actual_summary['total_eligible']} eligible, {actual_summary['total_users']} converted ({actual_summary['avg_trial_conversion_rate']:.1f}%), rates: {actual_summary['avg_trial_refund_rate']:.1f}%/{actual_summary['avg_purchase_refund_rate']:.1f}%")
                 
                 return {
                     'success': True,
-                    'summary': summary_stats,
-                    'users': formatted_users,
+                    'estimated': {
+                        'summary': estimated_summary,
+                        'users': format_user_records(estimated_users)
+                    },
+                    'actual': {
+                        'summary': actual_summary,
+                        'users': format_user_records(actual_converted_users)  # Only converted users for actual
+                    },
                     'entity_info': {
                         'entity_type': entity_type,
                         'entity_id': entity_id,
