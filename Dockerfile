@@ -18,8 +18,13 @@ COPY requirements.txt .
 # Install Python dependencies with exact versions
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy Python application code
 COPY . .
+
+# Copy React application files explicitly (ensuring they exist)
+COPY orchestrator/dashboard/client/package*.json /app/orchestrator/dashboard/client/
+COPY orchestrator/dashboard/client/src /app/orchestrator/dashboard/client/src
+COPY orchestrator/dashboard/client/public /app/orchestrator/dashboard/client/public
 
 # Install Node.js dependencies (including dev deps needed for build)
 RUN cd orchestrator/dashboard/client && npm install
