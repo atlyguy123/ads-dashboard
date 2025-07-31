@@ -1472,20 +1472,24 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       case 'purchase_refund_rate':
         if (value !== undefined && value !== null) {
           const hasMinimumFlag = Math.abs(value - 15.0) < 0.01;
+          const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+          const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
+          const refundIconColor = shouldBeGrayed ? 'text-gray-500' : 'text-orange-500';
+          
           formattedValue = (
-            <span>
+            <span className={shouldBeGrayed ? 'text-gray-500' : ''}>
               <ConversionRateTooltip 
                 row={row}
                 columnKey={columnKey}
                 value={value} // Already in percentage
-                colorClass=""
+                colorClass={tooltipColorClass}
                 dashboardParams={dashboardParams}
               />
               {hasMinimumFlag && (
                 <RefundRateTooltip 
                   value={value} 
                   type="purchase" 
-                  colorClass="text-orange-500" 
+                  colorClass={refundIconColor} 
                   pipelineUpdatedClass="" 
                 />
               )}
@@ -1827,7 +1831,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         
         breakdownNodes.push(
           <tr key={`${row.id}-${breakdown.type}-${index}`} className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-900/30 text-xs hover:bg-blue-50/20 dark:hover:bg-blue-900/20">
-            <td style={getColumnStyle('name')} className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/30 dark:bg-gray-900/30 z-10">
+            <td style={getColumnStyle('name')} className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/30 dark:bg-gray-900/30 z-10 text-left">
               <div className="flex items-center">
                 <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
                 <div style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="flex items-center space-x-2">
@@ -1902,7 +1906,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       } ${draggedRowId === row.id ? 'opacity-50' : ''} ${dragOverRowId === row.id && draggedRowId !== row.id ? 'ring-2 ring-blue-400' : ''}`}>
         
         {/* Name column - always visible */}
-        <td style={getColumnStyle('name')} className={`sticky left-0 px-3 py-2 whitespace-nowrap z-10 ${
+        <td style={getColumnStyle('name')} className={`sticky left-0 px-3 py-2 whitespace-nowrap z-10 text-left ${
           level === 0 
             ? 'bg-gray-50 dark:bg-gray-800'
             : level === 1 
@@ -2116,7 +2120,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               <th 
                 scope="col" 
                 style={getColumnStyle('name')}
-                className={`sticky left-0 text-right text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 transition-colors group relative
+                className={`sticky left-0 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 transition-colors group relative
                   ${sortConfig.column === 'name' ? 'border-b-2 border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
               >
                 {/* 🎯 RESTRUCTURED: Name column sorting zone */}
