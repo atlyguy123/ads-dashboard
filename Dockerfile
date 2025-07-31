@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY orchestrator/dashboard/client/package*.json ./orchestrator/dashboard/client/
 RUN cd orchestrator/dashboard/client && npm install
 
-# Copy all application code (including React src and public)
+# Copy all application code (including React src and public) - Force rebuild
 COPY . .
 
 # Build React frontend
