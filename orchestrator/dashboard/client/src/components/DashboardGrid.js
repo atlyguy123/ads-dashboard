@@ -515,6 +515,11 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     }
   };
 
+  // Determine if the column is grayed out based on colorClass
+  const isGrayedOut = colorClass && colorClass.includes('text-gray-500');
+  const separatorClass = isGrayedOut ? 'text-gray-500' : 'text-gray-400';
+  const userCountClass = isGrayedOut ? 'text-xs text-gray-500 ml-1' : 'text-xs text-gray-400 ml-1';
+
   return (
     <>
       <div className="flex items-center space-x-1">
@@ -534,7 +539,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
             })() : (value !== undefined && value !== null ? `${formatNumber(value, 1)}%` : '--.--%')
           }
         </span>
-        <span className="text-gray-400">|</span>
+        <span className={separatorClass}>|</span>
         <span
           className={`${colorClass} cursor-pointer hover:underline`}
           onMouseEnter={(e) => handleMouseEnter(e, 'actual')}
@@ -551,7 +556,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
             })() : '--.--%'
           }
         </span>
-        <span className="text-xs text-gray-400 ml-1">
+        <span className={userCountClass}>
           ({dualData?.actual?.summary?.total_users || '-'})
         </span>
       </div>
@@ -1430,14 +1435,19 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         if (value !== undefined && value !== null) {
           // Use the new ConversionRateTooltip for trial conversion rate
           // Backend already returns percentage (0-100), no need to multiply by 100
+          const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+          const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
+          
           formattedValue = (
-            <ConversionRateTooltip 
-              row={row}
-              columnKey={columnKey}
-              value={value} // Already in percentage
-              colorClass=""
-              dashboardParams={dashboardParams}
-            />
+            <span className={shouldBeGrayed ? 'text-gray-500' : ''}>
+              <ConversionRateTooltip 
+                row={row}
+                columnKey={columnKey}
+                value={value} // Already in percentage
+                colorClass={tooltipColorClass}
+                dashboardParams={dashboardParams}
+              />
+            </span>
           );
         } else {
           formattedValue = 'N/A';
@@ -1446,20 +1456,24 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       case 'avg_trial_refund_rate':
         if (value !== undefined && value !== null) {
           const hasMinimumFlag = Math.abs(value - 5.0) < 0.01;
+          const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+          const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
+          const refundIconColor = shouldBeGrayed ? 'text-gray-500' : 'text-blue-500';
+          
           formattedValue = (
-            <span>
+            <span className={shouldBeGrayed ? 'text-gray-500' : ''}>
               <ConversionRateTooltip 
                 row={row}
                 columnKey={columnKey}
                 value={value} // Already in percentage
-                colorClass=""
+                colorClass={tooltipColorClass}
                 dashboardParams={dashboardParams}
               />
               {hasMinimumFlag && (
                 <RefundRateTooltip 
                   value={value} 
                   type="trial" 
-                  colorClass="text-blue-500" 
+                  colorClass={refundIconColor} 
                   pipelineUpdatedClass="" 
                 />
               )}
