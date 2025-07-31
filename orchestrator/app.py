@@ -83,20 +83,41 @@ CORS(app, origins=allowed_origins,
 
 # Initialize SQLite database
 def init_db():
-    conn = sqlite3.connect('db.sqlite')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pipeline_name TEXT,
-            status TEXT,
-            started_at TIMESTAMP,
-            completed_at TIMESTAMP,
-            error_message TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        # Import here to avoid circular imports
+        from utils.database_utils import get_database_connection
+        
+        with get_database_connection('pipeline_runs') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pipeline_name TEXT,
+                    status TEXT,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    error_message TEXT
+                )
+            ''')
+            conn.commit()
+            logger.info("✅ Pipeline runs database initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize pipeline runs database: {e}")
+        # Fallback to local db.sqlite for development
+        conn = sqlite3.connect('db.sqlite')
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_name TEXT,
+                status TEXT,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                error_message TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
 
 class PipelineRunner:
     def __init__(self):
@@ -292,15 +313,38 @@ class PipelineRunner:
                     return False, f"Step {step['id']} not marked as tested"
         
         # Record run start
-        conn = sqlite3.connect('db.sqlite')
-        cursor = conn.cursor()
-        cursor.execute(
-            'INSERT INTO runs (pipeline_name, status, started_at) VALUES (?, ?, ?)',
-            (pipeline_name, 'running', now_in_timezone())
-        )
-        run_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        try:
+            from utils.database_utils import get_database_connection
+            with get_database_connection('pipeline_runs') as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO runs (pipeline_name, status, started_at) VALUES (?, ?, ?)',
+                    (pipeline_name, 'running', now_in_timezone())
+                )
+                run_id = cursor.lastrowid
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to use database utils, falling back to local db: {e}")
+            conn = sqlite3.connect('db.sqlite')
+            cursor = conn.cursor()
+            # Ensure table exists before inserting
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pipeline_name TEXT,
+                    status TEXT,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    error_message TEXT
+                )
+            ''')
+            cursor.execute(
+                'INSERT INTO runs (pipeline_name, status, started_at) VALUES (?, ?, ?)',
+                (pipeline_name, 'running', now_in_timezone())
+            )
+            run_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
         
         def run_in_background():
             success = True
@@ -393,14 +437,36 @@ class PipelineRunner:
                 print(f"   Error: {error_message}")
             
             # Update run record
-            conn = sqlite3.connect('db.sqlite')
-            cursor = conn.cursor()
-            cursor.execute(
-                'UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?',
-                ('success' if success else 'failed', now_in_timezone(), error_message, run_id)
-            )
-            conn.commit()
-            conn.close()
+            try:
+                from utils.database_utils import get_database_connection
+                with get_database_connection('pipeline_runs') as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        'UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?',
+                        ('success' if success else 'failed', now_in_timezone(), error_message, run_id)
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Failed to use database utils, falling back to local db: {e}")
+                conn = sqlite3.connect('db.sqlite')
+                cursor = conn.cursor()
+                # Ensure table exists before updating
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pipeline_name TEXT,
+                        status TEXT,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        error_message TEXT
+                    )
+                ''')
+                cursor.execute(
+                    'UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?',
+                    ('success' if success else 'failed', now_in_timezone(), error_message, run_id)
+                )
+                conn.commit()
+                conn.close()
         
         # Run in background thread
         thread = threading.Thread(target=run_in_background)
@@ -1584,8 +1650,7 @@ def mixpanel_debug_database_reset():
     """Reset Mixpanel raw data tables"""
     try:
         # Import database utilities
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-        from database_utils import get_database_path
+        from utils.database_utils import get_database_path
         
         # Connect to raw data database
         raw_db_path = get_database_path('raw_data')

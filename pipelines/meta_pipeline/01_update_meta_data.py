@@ -43,7 +43,7 @@ sys.path.append(str(current_dir.parent.parent / "orchestrator"))  # Add orchestr
 try:
     # Import specific Meta API functions using full orchestrator paths
     from orchestrator.meta.services.meta_service import fetch_meta_data, check_async_job_status, get_async_job_results
-    from orchestrator.utils.database_utils import get_database_path
+    from utils.database_utils import get_database_path
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     logger.error("Ensure meta_service and utils modules are available")
