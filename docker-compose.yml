@@ -16,6 +16,11 @@ services:
       - DEFAULT_TIMEZONE=America/New_York
       - DISPLAY_TIMEZONE=America/New_York
       - USE_UTC_STORAGE=true
+      # Authentication credentials for local testing
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      - TEAM_USERNAME=team
+      - TEAM_PASSWORD=team123
     volumes:
       - ./database:/app/database
       - ./data:/app/data

@@ -81,16 +81,18 @@ class ROASCalculators(BaseCalculator):
         # Cap ROAS at 4.0 before squaring to prevent over-weighting
         capped_roas = min(roas, 4.0)
         
-        # Calculate base impact score
-        base_impact_score = spend * (capped_roas ** 2)
+        # Calculate impact score: spend × ROAS²
+        # SIMPLIFIED: Removed time scaling as requested - just spend × ROAS²
+        impact_score = spend * (capped_roas ** 2)
         
-        # Calculate time frame scaling factor
-        time_scale_factor = ROASCalculators._calculate_time_scale_factor(calc_input)
+        # DEBUG: Log the simplified calculation
+        logger.info(f"🧮 PERFORMANCE IMPACT CALCULATOR (SIMPLIFIED):")
+        logger.info(f"   💰 Spend: ${spend}")
+        logger.info(f"   📈 ROAS: {roas:.4f}")
+        logger.info(f"   📈 Capped ROAS: {capped_roas:.4f}")
+        logger.info(f"   🎯 Final score (spend × capped_roas²): ${spend} × {capped_roas:.4f}² = ${impact_score:.2f}")
         
-        # Apply time scaling
-        scaled_impact_score = base_impact_score * time_scale_factor
-        
-        return ROASCalculators.safe_round(scaled_impact_score, 2)
+        return ROASCalculators.safe_round(impact_score, 2)
     
     @staticmethod
     def _calculate_time_scale_factor(calc_input: CalculationInput) -> float:
@@ -105,6 +107,7 @@ class ROASCalculators(BaseCalculator):
         """
         try:
             if not calc_input.start_date or not calc_input.end_date:
+                logger.info(f"⏰ TIME SCALE DEBUG: No dates provided, defaulting to 1.0")
                 return 1.0  # Default to 7-day baseline if dates not available
             
             from datetime import datetime
@@ -119,6 +122,13 @@ class ROASCalculators(BaseCalculator):
             # Scale factor: 7 days is baseline (scale = 1.0)
             # Inverse scaling: More days = lower scale factor (normalize down)
             scale_factor = 7.0 / days
+            
+            logger.info(f"⏰ TIME SCALE DEBUG:")
+            logger.info(f"   📅 Start date: {calc_input.start_date}")
+            logger.info(f"   📅 End date: {calc_input.end_date}")
+            logger.info(f"   📅 Days difference: {days_diff}")
+            logger.info(f"   📅 Final days: {days}")
+            logger.info(f"   🔢 Scale factor: 7 / {days} = {scale_factor:.4f}")
             
             return scale_factor
             

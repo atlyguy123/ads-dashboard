@@ -774,7 +774,44 @@ class AnalyticsQueryService:
                             start_date=config.start_date if config else None,
                             end_date=config.end_date if config else None
                         )
+                        
+                        # Calculate performance impact score 
                         performance_impact_score = ROASCalculators.calculate_performance_impact_score(calc_input)
+                        
+                        # DETAILED DEBUG: Let's see what's happening with the calculation
+                        logger.info(f"🔍 DETAILED DEBUG for adset {adset_id}:")
+                        logger.info(f"   💰 Raw spend from meta_info: ${meta_info.get('spend', 0.0)}")
+                        logger.info(f"   💰 Final spend variable: ${spend}")
+                        logger.info(f"   💵 Raw estimated_revenue_usd from row: ${row['estimated_revenue_usd']}")
+                        logger.info(f"   💵 Calculated estimated_revenue_adjusted: ${estimated_revenue_adjusted}")
+                        logger.info(f"   💵 Raw mixpanel_revenue_usd from row: ${row['mixpanel_revenue_usd']}")
+                        logger.info(f"   📊 Trial accuracy ratio: {trial_accuracy_ratio}")
+                        logger.info(f"   📈 Manual ROAS calculation: ${estimated_revenue_adjusted} / ${spend} = {estimated_roas}")
+                        logger.info(f"   🎯 Performance impact score from calculator: {performance_impact_score}")
+                        logger.info(f"   📅 Date range: {config.start_date} to {config.end_date}")
+                        
+                        # MANUAL VERIFICATION: Calculate what it SHOULD be
+                        if spend > 0 and estimated_revenue_adjusted > 0:
+                            manual_roas = estimated_revenue_adjusted / spend
+                            manual_capped_roas = min(manual_roas, 4.0)
+                            manual_base_score = spend * (manual_capped_roas ** 2)
+                            logger.info(f"   ✅ MANUAL CALCULATION CHECK:")
+                            logger.info(f"      ROAS: {manual_roas:.4f}")
+                            logger.info(f"      Capped ROAS: {manual_capped_roas:.4f}")
+                            logger.info(f"      Base score (spend × capped_roas²): ${spend} × {manual_capped_roas:.4f}² = ${manual_base_score:.2f}")
+                        
+                        # FALLBACK: If estimated revenue is zero but we have actual Mixpanel revenue, use that for ROAS calculation
+                        if performance_impact_score == 0.0 and estimated_revenue_adjusted == 0.0 and spend > 0:
+                            mixpanel_revenue = float(row['mixpanel_revenue_usd'])
+                            if mixpanel_revenue > 0:
+                                fallback_roas = mixpanel_revenue / spend
+                                capped_fallback_roas = min(fallback_roas, 4.0)
+                                performance_impact_score = spend * (capped_fallback_roas ** 2)
+                                logger.info(f"🔄 FALLBACK: Using mixpanel_revenue ${mixpanel_revenue} for performance impact score: {performance_impact_score}")
+                        
+                        # Final debug log if still zero
+                        if performance_impact_score == 0.0:
+                            logger.warning(f"⚠️ ZERO PERFORMANCE IMPACT for adset {adset_id}: spend=${spend}, est_rev=${estimated_revenue_adjusted}, mp_rev=${row['mixpanel_revenue_usd']}")
                         
                         # Refund rates (placeholder for now)
                         trial_refund_rate = 0.0  # TODO: Calculate from actual refund data
