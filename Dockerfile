@@ -24,6 +24,11 @@ COPY . .
 # Install Node.js dependencies (including dev deps needed for build)
 RUN cd orchestrator/dashboard/client && npm install
 
+# Debug: Check what files are actually copied
+RUN echo "=== Checking orchestrator/dashboard/client directory ===" && ls -la orchestrator/dashboard/client/
+RUN echo "=== Checking orchestrator/dashboard/client/public directory ===" && ls -la orchestrator/dashboard/client/public/ || echo "public directory not found"
+RUN echo "=== Checking orchestrator/dashboard/client/src directory ===" && ls -la orchestrator/dashboard/client/src/ || echo "src directory not found"
+
 # Build React frontend
 RUN cd orchestrator/dashboard/client && \
     REACT_APP_API_URL='' npm run build && \
