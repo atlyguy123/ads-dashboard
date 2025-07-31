@@ -1513,9 +1513,14 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           const mixpanelTrials = calculatedRow.mixpanel_trials_started || 0;
           const metaTrials = calculatedRow.meta_trials_started || 0;
           const accuracyRatio = calculatedRow.trial_accuracy_ratio || 0;
+          const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+          const numberColor = shouldBeGrayed ? 'text-gray-500' : '';
+          const dividerColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
+          const percentageColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
+          
           formattedValue = (
-            <span>
-              {formatNumber(mixpanelTrials)} | {formatNumber(metaTrials)} <span className="text-gray-400 text-xs">({formatNumber(accuracyRatio * 100, 1)}%)</span>
+            <span className={numberColor}>
+              {formatNumber(mixpanelTrials)} <span className={`${dividerColor}`}>|</span> {formatNumber(metaTrials)} <span className={`${percentageColor} text-xs`}>({formatNumber(accuracyRatio * 100, 1)}%)</span>
             </span>
           );
         }
@@ -1525,9 +1530,14 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           const mixpanelPurchases = calculatedRow.mixpanel_purchases || 0;
           const metaPurchases = calculatedRow.meta_purchases || 0;
           const accuracyRatio = calculatedRow.purchase_accuracy_ratio || 0;
+          const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
+          const numberColor = shouldBeGrayed ? 'text-gray-500' : '';
+          const dividerColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
+          const percentageColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
+          
           formattedValue = (
-            <span>
-              {formatNumber(mixpanelPurchases)} | {formatNumber(metaPurchases)} <span className="text-gray-400 text-xs">({formatNumber(accuracyRatio * 100, 1)}%)</span>
+            <span className={numberColor}>
+              {formatNumber(mixpanelPurchases)} <span className={`${dividerColor}`}>|</span> {formatNumber(metaPurchases)} <span className={`${percentageColor} text-xs`}>({formatNumber(accuracyRatio * 100, 1)}%)</span>
             </span>
           );
         }
