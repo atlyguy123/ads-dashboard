@@ -317,6 +317,17 @@ class PipelineRunner:
             from utils.database_utils import get_database_connection
             with get_database_connection('pipeline_runs') as conn:
                 cursor = conn.cursor()
+                # Ensure runs table exists (in case database was created after init_db())
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pipeline_name TEXT,
+                        status TEXT,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        error_message TEXT
+                    )
+                ''')
                 cursor.execute(
                     'INSERT INTO runs (pipeline_name, status, started_at) VALUES (?, ?, ?)',
                     (pipeline_name, 'running', now_in_timezone())
@@ -441,6 +452,17 @@ class PipelineRunner:
                 from utils.database_utils import get_database_connection
                 with get_database_connection('pipeline_runs') as conn:
                     cursor = conn.cursor()
+                    # Ensure runs table exists (in case database was created after init_db())
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS runs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            pipeline_name TEXT,
+                            status TEXT,
+                            started_at TIMESTAMP,
+                            completed_at TIMESTAMP,
+                            error_message TEXT
+                        )
+                    ''')
                     cursor.execute(
                         'UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?',
                         ('success' if success else 'failed', now_in_timezone(), error_message, run_id)
