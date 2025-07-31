@@ -309,8 +309,8 @@ export const Dashboard = () => {
       } else {
         // New column - default to descending for numeric columns, ascending for text
         const numericColumns = [
-          'impressions', 'clicks', 'spend', 'meta_trials_started', 'mixpanel_trials_started',
-          'meta_purchases', 'mixpanel_purchases', 'trial_accuracy_ratio', 'mixpanel_trials_ended',
+          'impressions', 'clicks', 'spend', 'trials_combined', 'purchases_combined',
+          'meta_trials_started', 'mixpanel_trials_started', 'meta_purchases', 'mixpanel_purchases', 'trial_accuracy_ratio', 'mixpanel_trials_ended',
           'mixpanel_trials_in_progress', 'mixpanel_refunds_usd', 'mixpanel_revenue_usd',
           'mixpanel_revenue_net', 'mixpanel_conversions_net_refunds', 'mixpanel_cost_per_trial', 'mixpanel_cost_per_purchase',
           'meta_cost_per_trial', 'meta_cost_per_purchase', 'click_to_trial_rate',

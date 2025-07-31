@@ -1,4 +1,8 @@
-// Dashboard Controls Component
+// ⚠️  DEPRECATED Dashboard Controls Component
+// 
+// ⚠️  STATUS: This component is DEPRECATED and only used in RefreshPipelineControls.jsx
+// 📋 PREFERRED: Use ImprovedDashboardControls instead (used in main Dashboard.js)
+// 🔄 MIGRATION: Consider migrating RefreshPipelineControls to use ImprovedDashboardControls
 // 
 // Provides the main controls for the dashboard including date range selection,
 // configuration dropdown, and data refresh functionality.
@@ -6,41 +10,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, RefreshCw, Settings, Database, Clock, Eye, ChevronDown, ChevronUp, ArrowUp, ArrowDown } from 'lucide-react';
 
-// ⚠️  DEPRECATED: This column definition is outdated!
-// 📋 USE INSTEAD: src/config/columns.js - Read: src/config/Column README.md for instructions
-// TODO: Remove this old definition and import from config/columns.js
-const AVAILABLE_COLUMNS = [
-  { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true }, // Always visible
-  { key: 'campaign_name', label: 'Campaign', defaultVisible: true },
-  { key: 'adset_name', label: 'Ad Set', defaultVisible: true },
-  { key: 'impressions', label: 'Impressions', defaultVisible: true },
-  { key: 'clicks', label: 'Clicks', defaultVisible: true },
-  { key: 'spend', label: 'Spend', defaultVisible: true },
-  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
-  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
-  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
-  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
-  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
-  { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_trials_in_progress', label: 'Trials In Progress (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_refunds_usd', label: 'Refunds (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_revenue_usd', label: 'Revenue (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_conversions_net_refunds', label: 'Net Conversions (Mixpanel)', defaultVisible: false },
-  { key: 'mixpanel_cost_per_trial', label: 'Cost per Trial (Mixpanel)', defaultVisible: true },
-  { key: 'mixpanel_cost_per_purchase', label: 'Cost per Purchase (Mixpanel)', defaultVisible: true },
-  { key: 'meta_cost_per_trial', label: 'Cost per Trial (Meta)', defaultVisible: false },
-  { key: 'meta_cost_per_purchase', label: 'Cost per Purchase (Meta)', defaultVisible: false },
-  { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: true },
-  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
-  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
-  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
-  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
-  { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
-  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
-  { key: 'profit', label: 'Profit', defaultVisible: true },
-  { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
-  { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: true }
-];
+// ✅ FIXED: Now imports from centralized column configuration
+// 📋 SINGLE SOURCE OF TRUTH: src/config/columns.js
+import { AVAILABLE_COLUMNS } from '../../config/columns';
 
 // Date range presets based on yesterday (not today)
 const getDatePresets = () => {

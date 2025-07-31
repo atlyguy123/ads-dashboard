@@ -1,5 +1,5 @@
-import React, { useState, Fragment, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Layers, Table2, Search, AlignJustify, ChevronUp, ArrowUpDown } from 'lucide-react';
+import React, { useState, Fragment, useRef, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronRight, Layers, Table2, Search, AlignJustify, ChevronUp, ArrowUpDown, Copy } from 'lucide-react';
 // 📋 ADDING NEW COLUMNS? Read: src/config/Column README.md for complete instructions
 import { AVAILABLE_COLUMNS } from '../config/columns';
 import ROASSparkline from './dashboard/ROASSparkline';
@@ -229,6 +229,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
   const [copiedUserId, setCopiedUserId] = useState(null);
   const [currentMode, setCurrentMode] = useState('estimated'); // 'estimated' or 'actual'
   const [dualData, setDualData] = useState(null); // Store both estimated and actual data
+  const [initialLoad, setInitialLoad] = useState(false); // Track if initial API call completed
   
   // Filter states for modal
   const [filters, setFilters] = useState({
@@ -238,6 +239,63 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     economic_tier: '',
     product_id: ''
   });
+
+  // Load data immediately on component mount
+  useEffect(() => {
+    const loadInitialData = async () => {
+      if (initialLoad) return; // Already loaded
+      
+      try {
+        setInitialLoad(true);
+        
+        // Extract entity information from row (same logic as handleMouseEnter)
+        let entityType = row.entity_type || row.type;
+        const entityId = row.id;
+        
+        if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
+          entityType = row.entity_type || row.type || 'campaign';
+        }
+        
+        if (!entityType) {
+          console.error('❌ ConversionRateTooltip: Unable to determine entity type for initial load');
+          return;
+        }
+        
+        let apiEntityId = entityId;
+        let breakdownValue = null;
+        
+        if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
+          const parts = entityId.split('_');
+          breakdownValue = parts[0];
+          apiEntityId = parts.slice(1).join('_');
+        }
+        
+        const params = new URLSearchParams({
+          entity_type: entityType,
+          entity_id: apiEntityId,
+          start_date: dashboardParams?.start_date || '2025-01-01',
+          end_date: dashboardParams?.end_date || '2025-12-31',
+          breakdown: dashboardParams?.breakdown || 'all',
+          metric_type: columnKey
+        });
+        
+        if (breakdownValue) {
+          params.append('breakdown_value', breakdownValue);
+        }
+        
+        const response = await apiRequest(`/api/dashboard/analytics/user-details?${params.toString()}`);
+        const result = await response.json();
+        
+        if (result.success) {
+          setDualData(result);
+        }
+      } catch (err) {
+        console.error('Error loading initial conversion rate data:', err);
+      }
+    };
+    
+    loadInitialData();
+  }, [row.id, columnKey, dashboardParams, initialLoad]);
 
   const handleMouseEnter = async (e, mode = 'estimated') => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -467,7 +525,14 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
           onClick={(e) => handleClick('estimated')}
           title="Estimated rate - click to see all users"
         >
-          {value !== undefined && value !== null ? `${formatNumber(value, 1)}%` : 'N/A'}
+          {dualData?.estimated ? 
+            (() => {
+              const rate = columnKey === 'trial_conversion_rate' ? dualData.estimated.summary.avg_trial_conversion_rate :
+                          columnKey === 'avg_trial_refund_rate' ? dualData.estimated.summary.avg_trial_refund_rate :
+                          dualData.estimated.summary.avg_purchase_refund_rate;
+              return `${formatNumber(rate, 1)}%`;
+            })() : (value !== undefined && value !== null ? `${formatNumber(value, 1)}%` : '--.--%')
+          }
         </span>
         <span className="text-gray-400">|</span>
         <span
@@ -859,6 +924,7 @@ const formatPercentage = (num, digits = 2) => {
 // Column categorization for event priority styling based on actual dashboard columns:
 // TRIAL columns: "Trials (Meta)", "Trials (Mixpanel)", etc.
 const TRIAL_RELATED_COLUMNS = [
+  'trials_combined',            // "Trials (Mixpanel | Meta)" - new combined column
   'mixpanel_trials_started',    // "Trials (Mixpanel)" 
   'meta_trials_started',        // "Trials (Meta)"
   'mixpanel_trials_ended',      // "Trials Ended (Mixpanel)"
@@ -875,6 +941,7 @@ const TRIAL_RELATED_COLUMNS = [
 // Note: estimated_revenue_usd, profit, and estimated_roas are excluded from graying 
 // because they should always remain visible as key metrics
 const PURCHASE_RELATED_COLUMNS = [
+  'purchases_combined',         // "Purchases (Mixpanel | Meta)" - new combined column
   'mixpanel_purchases',         // "Purchases (Mixpanel)"
   'meta_purchases',             // "Purchases (Meta)"  
   'mixpanel_cost_per_purchase', // "Cost per Purchase (Mixpanel)"
@@ -957,6 +1024,8 @@ const getColumnBackgroundClass = (columnKey, isHovered = false) => {
 const calculateDerivedValues = (row) => {
   // Frontend should NOT calculate values - all calculations should come from backend
   // Simply return the row as-is since backend provides all calculated fields
+  // The combined columns (trials_combined, purchases_combined) are display-only
+  // and get their data from individual fields in renderCellValue()
   return { ...row };
 };
 
@@ -1118,11 +1187,108 @@ export const DashboardGrid = ({
   const [draggedRow, setDraggedRow] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Handle column header click for sorting (only if not dragging)
-  const handleColumnHeaderClick = (columnKey) => {
-    if (!isDragging && onSort) {
+  // 🎯 Column resizing state and functionality
+  const [columnWidths, setColumnWidths] = useState(() => {
+    const saved = localStorage.getItem('dashboard_column_widths');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved column widths:', e);
+      }
+    }
+    return {}; // Default: auto-width for all columns
+  });
+  
+  const [isResizing, setIsResizing] = useState(false);
+  
+  // 🎯 Refs for resize functionality (prevents stale closures)
+  const resizingColumnRef = useRef(null);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(0);
+
+  // Handle column header click for sorting (only if not dragging or resizing)
+  const handleColumnHeaderClick = useCallback((columnKey) => {
+    if (!isDragging && !isResizing && onSort) {
       onSort(columnKey);
     }
+  }, [isDragging, isResizing, onSort]);
+
+  // 🎯 Column resizing handlers - Fixed stale closures with useCallback + useRef
+  const handleResizeMove = useCallback((e) => {
+    const column = resizingColumnRef.current;
+    if (!column) return;
+
+    const deltaX = e.clientX - resizeStartXRef.current;
+    const newWidth = Math.max(80, resizeStartWidthRef.current + deltaX); // Min width 80px
+
+    setColumnWidths(prev => ({
+      ...prev,
+      [column]: newWidth
+    }));
+  }, []); // No deps needed—reads from refs and stable setColumnWidths
+
+  const handleResizeEnd = useCallback(() => {
+    setIsResizing(false);
+    resizingColumnRef.current = null;
+
+    document.removeEventListener('mousemove', handleResizeMove);
+    document.removeEventListener('mouseup', handleResizeEnd);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, [handleResizeMove]); // Dep on handleResizeMove since we remove it
+
+  const handleResizeStart = useCallback((e, columnKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    setIsResizing(true);
+    resizingColumnRef.current = columnKey;
+    resizeStartXRef.current = e.clientX;
+
+    // Get current width or default minimum
+    const currentWidth = columnWidths[columnKey] || 120;
+    resizeStartWidthRef.current = currentWidth;
+
+    // Add global mouse event listeners
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [columnWidths, handleResizeMove, handleResizeEnd]); // Deps on columnWidths and the handlers
+
+  // 🎯 Double-click to auto-size column
+  const handleResizeDoubleClick = useCallback((e, columnKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Reset column to auto-width by removing it from columnWidths
+    setColumnWidths(prev => {
+      const newWidths = { ...prev };
+      delete newWidths[columnKey];
+      return newWidths;
+    });
+  }, []);
+
+  // Save column widths to localStorage
+  useEffect(() => {
+    localStorage.setItem('dashboard_column_widths', JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  // Cleanup event listeners on unmount
+  useEffect(() => {
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
+  // Get column style with width
+  const getColumnStyle = (columnKey) => {
+    const width = columnWidths[columnKey];
+    return width ? { width: `${width}px`, minWidth: `${width}px` } : {};
   };
 
   // Row drag state
@@ -1150,18 +1316,6 @@ export const DashboardGrid = ({
   };
 
   const visibleColumns = getOrderedVisibleColumns();
-  
-  // Column visibility configured
-
-  // Helper function to check if a column should be visible
-  const isColumnVisible = (columnKey) => {
-    if (Object.keys(columnVisibility).length === 0) {
-      // If no visibility settings loaded yet, check default
-      const column = AVAILABLE_COLUMNS.find(col => col.key === columnKey);
-      return column ? column.defaultVisible : false;
-    }
-    return columnVisibility[columnKey] !== false;
-  };
 
 
 
@@ -1354,6 +1508,30 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       case 'segment_accuracy_average':
         formattedValue = value || 'N/A';
         break;
+      case 'trials_combined':
+        {
+          const mixpanelTrials = calculatedRow.mixpanel_trials_started || 0;
+          const metaTrials = calculatedRow.meta_trials_started || 0;
+          const accuracyRatio = calculatedRow.trial_accuracy_ratio || 0;
+          formattedValue = (
+            <span>
+              {formatNumber(mixpanelTrials)} | {formatNumber(metaTrials)} <span className="text-gray-400 text-xs">({formatNumber(accuracyRatio * 100, 1)}%)</span>
+            </span>
+          );
+        }
+        break;
+      case 'purchases_combined':
+        {
+          const mixpanelPurchases = calculatedRow.mixpanel_purchases || 0;
+          const metaPurchases = calculatedRow.meta_purchases || 0;
+          const accuracyRatio = calculatedRow.purchase_accuracy_ratio || 0;
+          formattedValue = (
+            <span>
+              {formatNumber(mixpanelPurchases)} | {formatNumber(metaPurchases)} <span className="text-gray-400 text-xs">({formatNumber(accuracyRatio * 100, 1)}%)</span>
+            </span>
+          );
+        }
+                    break;
       default:
         formattedValue = value || 'N/A';
     }
@@ -1486,64 +1664,63 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
     );
   };
 
-  // Simple column drag handlers
-  const handleColumnDragStart = (e, columnKey) => {
+  // 🎯 Column drag handlers - Fixed stale closures with useCallback
+  const handleColumnDragStart = useCallback((e, columnKey) => {
     setDraggedColumn(columnKey);
     setIsDragging(true);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', columnKey);
-  };
+  }, []);
 
-  const handleColumnDragOver = (e) => {
+  const handleColumnDragOver = useCallback((e) => {
     e.preventDefault();
-  };
+  }, []);
 
-  const handleColumnDragEnter = (e, columnKey) => {
+  const handleColumnDragEnter = useCallback((e, columnKey) => {
     if (draggedColumn && draggedColumn !== columnKey) {
       setDragOverColumn(columnKey);
     }
-  };
+  }, [draggedColumn]);
 
-  const handleColumnDragLeave = (e) => {
+  const handleColumnDragLeave = useCallback((e) => {
     // Only clear if we're leaving the th element itself
     if (!e.currentTarget.contains(e.relatedTarget)) {
       setDragOverColumn(null);
     }
-  };
+  }, []);
 
-  const handleColumnDrop = (e, targetColumnKey) => {
+  const handleColumnDrop = useCallback((e, targetColumnKey) => {
     e.preventDefault();
     
-    if (draggedColumn && draggedColumn !== targetColumnKey && onColumnOrderChange) {
-      const currentOrder = [...columnOrder];
-      const draggedIndex = currentOrder.indexOf(draggedColumn);
-      const targetIndex = currentOrder.indexOf(targetColumnKey);
-      
-      if (draggedIndex !== -1 && targetIndex !== -1) {
-        // Remove dragged column
-        const [draggedCol] = currentOrder.splice(draggedIndex, 1);
+    // Get dragged column from dataTransfer (more reliable)
+    const draggedColumnKey = e.dataTransfer.getData('text/plain');
+    
+    if (draggedColumnKey && draggedColumnKey !== targetColumnKey && onColumnOrderChange) {
+      let currentOrder = [...(columnOrder.length > 0 ? columnOrder : AVAILABLE_COLUMNS.map(c => c.key))];
+      const draggedIndex = currentOrder.indexOf(draggedColumnKey);
+      let targetIndex = currentOrder.indexOf(targetColumnKey);
+
+      if (draggedIndex > -1 && targetIndex > -1) {
+        // Remove the dragged item from its original position
+        const [draggedItem] = currentOrder.splice(draggedIndex, 1);
+        // Insert it at the target position (simplified logic)
+        currentOrder.splice(targetIndex, 0, draggedItem);
         
-        // Insert at target position
-        const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
-        currentOrder.splice(newTargetIndex, 0, draggedCol);
-        
-        console.log(`🔄 Column reordered: '${draggedColumn}' moved from position ${draggedIndex} to ${newTargetIndex}`);
+        console.log(`🔄 Column reordered: '${draggedColumnKey}' moved.`);
         onColumnOrderChange(currentOrder);
       }
     }
     
     setDraggedColumn(null);
     setDragOverColumn(null);
-    // Add delay to prevent accidental sorting after drag
     setTimeout(() => setIsDragging(false), 100);
-  };
+  }, [columnOrder, onColumnOrderChange]);
 
-  const handleColumnDragEnd = (e) => {
+  const handleColumnDragEnd = useCallback((e) => {
     setDraggedColumn(null);
     setDragOverColumn(null);
-    // Add delay to prevent accidental sorting after drag
     setTimeout(() => setIsDragging(false), 100);
-  };
+  }, []);
 
   // Row drag handlers
   const handleRowDragStart = (e, id) => {
@@ -1640,7 +1817,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         
         breakdownNodes.push(
           <tr key={`${row.id}-${breakdown.type}-${index}`} className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-900/30 text-xs hover:bg-blue-50/20 dark:hover:bg-blue-900/20">
-            <td className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/30 dark:bg-gray-900/30 z-10">
+            <td style={getColumnStyle('name')} className="sticky left-0 px-3 py-1 whitespace-nowrap bg-gray-50/30 dark:bg-gray-900/30 z-10">
               <div className="flex items-center">
                 <span className="opacity-0 w-8"></span> {/* Space for chart/info icons */}
                 <div style={{ paddingLeft: `${(level + 1) * 20 + 12}px` }} className="flex items-center space-x-2">
@@ -1663,12 +1840,12 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
             </td>
             {visibleColumns.slice(1).map((column) => {
               if (column.key === 'campaign_name' || column.key === 'adset_name') {
-                return <td key={column.key} className="px-3 py-1"></td>;
+                return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-1"></td>;
               }
               
               // Enhanced breakdown value rendering with mapping awareness
               return (
-                <td key={column.key} className="px-3 py-1 whitespace-nowrap text-right">
+                <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-1 whitespace-nowrap text-right">
                   <span className={`${getFieldColor(column.key, calculatedValue[column.key])}`}>
                     {renderCellValue(calculatedValue, column.key, false, getEventPriority(calculatedValue), dashboardParams)}
                   </span>
@@ -1715,7 +1892,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       } ${draggedRowId === row.id ? 'opacity-50' : ''} ${dragOverRowId === row.id && draggedRowId !== row.id ? 'ring-2 ring-blue-400' : ''}`}>
         
         {/* Name column - always visible */}
-        <td className={`sticky left-0 px-3 py-2 whitespace-nowrap z-10 ${
+        <td style={getColumnStyle('name')} className={`sticky left-0 px-3 py-2 whitespace-nowrap z-10 ${
           level === 0 
             ? 'bg-gray-50 dark:bg-gray-800'
             : level === 1 
@@ -1729,7 +1906,52 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
                   {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
               ) : (
-                <span className="inline-block w-8"></span>
+                (() => {
+                  // Check if this is an unknown entity that needs a clipboard button
+                  const entityName = level === 0 
+                    ? (row.name || row.campaign_name)
+                    : level === 1 
+                      ? (row.name || row.adset_name)
+                      : (row.name || row.ad_name);
+                  
+                  const isUnknownEntity = entityName && entityName.includes('Unknown') && entityName.includes('(') && entityName.includes(')');
+                  
+                  if (isUnknownEntity) {
+                    // Extract ID from "Unknown Entity (ID)" format
+                    const match = entityName.match(/Unknown\s+([^(]+)\s+\(([^)]+)\)/);
+                    const entityId = match ? match[2] : entityName;
+                    
+                    const handleCopyClick = async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await navigator.clipboard.writeText(entityId);
+                        // Show success feedback
+                        const target = e.currentTarget;
+                        const originalTitle = target.title;
+                        target.title = 'Copied!';
+                        target.style.color = '#22c55e'; // green-500
+                        setTimeout(() => {
+                          target.title = originalTitle;
+                          target.style.color = '';
+                        }, 1500);
+                      } catch (err) {
+                        console.error('Failed to copy:', err);
+                      }
+                    };
+                    
+                    return (
+                      <button 
+                        onClick={handleCopyClick}
+                        className="mr-1 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        title={`Click to copy ID: ${entityId}`}
+                      >
+                        <Copy size={14} />
+                      </button>
+                    );
+                  } else {
+                    return <span className="inline-block w-8"></span>;
+                  }
+                })()
               )}
             </span>
             
@@ -1743,7 +1965,19 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               </button>
             )}
             
-            <span className={`${level === 0 ? 'text-gray-900 dark:text-gray-100' : level === 1 ? 'text-gray-800 dark:text-gray-200' : 'text-gray-700 dark:text-gray-100'}`}>
+            <span 
+              className={`select-text ${level === 0 ? 'text-gray-900 dark:text-gray-100' : level === 1 ? 'text-gray-800 dark:text-gray-200' : 'text-gray-700 dark:text-gray-100'}`}
+              style={{ userSelect: 'text' }}
+              onMouseDown={(e) => {
+                // Prevent drag behavior when clicking on text to allow text selection
+                e.stopPropagation();
+              }}
+              onDragStart={(e) => {
+                // Prevent dragging from starting on the text
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
               {level === 0 
                 ? (row.name || row.campaign_name)
                 : level === 1 
@@ -1759,17 +1993,17 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           // Special handling for campaign/adset name columns based on level
           if (column.key === 'campaign_name') {
             if (level > 0) {
-              return <td key={column.key} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.campaign_name}</td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.campaign_name}</td>;
             } else {
-              return <td key={column.key} className="px-3 py-2"></td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2"></td>;
             }
           }
           
           if (column.key === 'adset_name') {
             if (level > 1) {
-              return <td key={column.key} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.adset_name}</td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{row.adset_name}</td>;
             } else {
-              return <td key={column.key} className="px-3 py-2"></td>;
+              return <td key={column.key} style={getColumnStyle(column.key)} className="px-3 py-2"></td>;
             }
           }
 
@@ -1789,7 +2023,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           const columnBackgroundClass = getColumnBackgroundClass(column.key);
 
                       return (
-              <td key={column.key} className={`px-3 py-2 whitespace-nowrap text-right ${grayedOutColor} ${isRoasColumn ? 'font-medium' : ''} ${columnBackgroundClass}`}>
+              <td key={column.key} style={getColumnStyle(column.key)} className={`px-3 py-2 whitespace-nowrap text-right ${grayedOutColor} ${isRoasColumn ? 'font-medium' : ''} ${columnBackgroundClass}`}>
                 {renderCellValue(calculatedRow, column.key, false, eventPriority, dashboardParams)}
               </td>
             );
@@ -1871,14 +2105,45 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               {/* Name column - always visible and not draggable */}
               <th 
                 scope="col" 
-                className={`sticky left-0 px-3 py-3 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors group
+                style={getColumnStyle('name')}
+                className={`sticky left-0 text-left text-xs font-medium uppercase tracking-wider bg-gray-100 dark:bg-gray-800 z-20 transition-colors group relative
                   ${sortConfig.column === 'name' ? 'border-b-2 border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
-                onClick={() => handleColumnHeaderClick('name')}
               >
-                <div className="flex items-center">
-                  <span>Name</span>
-                  <SortIndicator column="name" sortConfig={sortConfig} />
+                {/* 🎯 RESTRUCTURED: Name column sorting zone */}
+                <div 
+                  className="px-3 py-3 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  onClick={(e) => {
+                    if (!isResizing) { // Only check for isResizing
+                      handleColumnHeaderClick('name');
+                    }
+                  }}
+                  title="Click to sort by Name"
+                >
+                  <div className="flex items-center">
+                    <span>Name</span>
+                    <SortIndicator column="name" sortConfig={sortConfig} />
+                  </div>
                 </div>
+                
+                {/* 🎯 ZONE 3: RESIZING - Dedicated resize handle for Name */}
+                <div
+                  className="absolute top-0 right-0 w-3 h-full cursor-col-resize bg-transparent hover:bg-blue-200 dark:hover:bg-blue-700 transition-colors z-40"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleResizeStart(e, 'name');
+                  }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleResizeDoubleClick(e, 'name');
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  title="Drag to resize • Double-click to auto-size"
+                />
               </th>
               
               {/* Dynamic columns based on visibility - draggable and sortable */}
@@ -1890,33 +2155,78 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
                   <th 
                     key={column.key} 
                     scope="col"
-                    draggable={!column.alwaysVisible}
-                    onDragStart={(e) => handleColumnDragStart(e, column.key)}
+                    style={getColumnStyle(column.key)}
                     onDragOver={handleColumnDragOver}
                     onDragEnter={(e) => handleColumnDragEnter(e, column.key)}
                     onDragLeave={handleColumnDragLeave}
                     onDrop={(e) => handleColumnDrop(e, column.key)}
-                    onDragEnd={handleColumnDragEnd}
-                    onClick={() => handleColumnHeaderClick(column.key)}
-                    className={`px-3 py-3 text-${column.key === 'campaign_name' || column.key === 'adset_name' ? 'left' : 'right'} text-xs font-medium uppercase tracking-wider ${getHeaderColor(column.key)} ${backgroundClass}
-                      cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors duration-150 group
+                    className={`text-${column.key === 'campaign_name' || column.key === 'adset_name' ? 'left' : 'right'} text-xs font-medium uppercase tracking-wider ${getHeaderColor(column.key)} ${backgroundClass}
+                      transition-colors duration-150 group relative
                       ${sortConfig.column === column.key ? 'bg-blue-50 dark:bg-blue-900/20 border-b-2 border-blue-500 dark:border-blue-400' : ''}
-                      ${dragOverColumn === column.key && draggedColumn !== column.key ? 'bg-blue-100 dark:bg-blue-900 border-2 border-blue-300 dark:border-blue-600' : ''}
-                      ${columnType === 'trial' ? 'border-l-2 border-blue-200 dark:border-blue-800' : ''}
-                      ${columnType === 'purchase' ? 'border-l-2 border-green-200 dark:border-green-800' : ''}`}
-                    title={`Click to sort by "${column.label}"${!column.alwaysVisible ? '. Drag to reorder column.' : ''}`}
+                      ${dragOverColumn === column.key && draggedColumn !== column.key ? 'bg-blue-100 dark:bg-blue-900 border-2 border-blue-300 dark:border-blue-600' : ''}`}
                   >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <span>{column.label}</span>
-                      <SortIndicator column={column.key} sortConfig={sortConfig} />
+                    {/* 🎯 RESTRUCTURED: Isolated zones for better event handling */}
+                    <div className="flex items-center justify-between px-3 py-3">
+                      {/* ZONE 1: SORTING - Clickable area */}
+                      <div
+                        className="flex-grow flex items-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 py-1 transition-colors"
+                        onClick={(e) => {
+                          if (!isResizing) { // Only check for isResizing
+                            handleColumnHeaderClick(column.key);
+                          }
+                        }}
+                        title={`Click to sort by "${column.label}"`}
+                      >
+                        <div className="flex flex-col">
+                          <span>{column.label}</span>
+                          {column.subtitle && <span className="text-xs text-gray-500 dark:text-gray-400 font-normal normal-case">{column.subtitle}</span>}
+                        </div>
+                        <SortIndicator column={column.key} sortConfig={sortConfig} />
+                      </div>
+
+                      {/* ZONE 2: DRAGGING - Dedicated drag handle */}
+                      {!column.alwaysVisible && (
+                        <div
+                          className="ml-2 px-2 py-1 cursor-move hover:bg-gray-300 dark:hover:bg-gray-600 rounded transition-colors"
+                          draggable={true}
+                          onDragStart={(e) => {
+                            e.stopPropagation(); // Prevent this drag from triggering other events
+                            handleColumnDragStart(e, column.key);
+                          }}
+                          onDragEnd={handleColumnDragEnd}
+                          // Stop click from bubbling up to the sort handler
+                          onClick={(e) => e.stopPropagation()}
+                          title="Drag to reorder column"
+                        >
+                          <span 
+                            className="text-gray-400 dark:text-gray-500 text-lg leading-none hover:text-gray-600 dark:hover:text-gray-300 transition-colors" 
+                            style={{ transform: 'rotate(90deg)', display: 'block' }}
+                          >⋮⋮</span>
+                        </div>
+                      )}
                     </div>
-                    {!column.alwaysVisible && (
-                      <span className="ml-1 text-gray-400 dark:text-gray-500 text-lg leading-none hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-150" style={{ transform: 'rotate(90deg)' }}>⋮⋮</span>
-                    )}
-                  </div>
-                </th>
-              );
+                    
+                    {/* 🎯 ZONE 3: RESIZING - Dedicated resize handle */}
+                    <div
+                      className="absolute top-0 right-0 w-3 h-full cursor-col-resize bg-transparent hover:bg-blue-200 dark:hover:bg-blue-700 transition-colors z-40"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleResizeStart(e, column.key);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleResizeDoubleClick(e, column.key);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      title="Drag to resize • Double-click to auto-size"
+                    />
+                  </th>
+                );
               })}
             </tr>
           </thead>

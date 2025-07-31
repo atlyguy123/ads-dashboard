@@ -14,6 +14,10 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
+# Import calculator classes for performance calculations
+from ..calculators.base_calculators import CalculationInput
+from ..calculators.roas_calculators import ROASCalculators
+
 # Add the project root to the Python path for database utilities
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -495,7 +499,7 @@ class AnalyticsQueryService:
                 precomputed_query = """
                 SELECT 
                     campaign_data.entity_id as campaign_id,
-                    COALESCE(nm.canonical_name, 'Unknown Campaign') as campaign_name,
+                    COALESCE(nm.canonical_name, 'Unknown Campaign (' || campaign_data.entity_id || ')') as campaign_name,
                     campaign_data.total_users,
                     campaign_data.total_users as new_users,
                     campaign_data.mixpanel_trials_started,
@@ -542,7 +546,11 @@ class AnalyticsQueryService:
                         meta_purchases = meta_info.get('meta_purchases', 0)
                         
                         # Accuracy ratios
-                        trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
+                        # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
+                        if meta_trials == 0 and mixpanel_trials > 0:
+                            trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
+                        else:
+                            trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
                         purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
                         trial_conversion_rate = (mixpanel_purchases / mixpanel_trials) if mixpanel_trials > 0 else 0.0
                         
@@ -640,9 +648,9 @@ class AnalyticsQueryService:
                 precomputed_query = """
         SELECT 
                     adset_data.entity_id as adset_id,
-                    COALESCE(nm.canonical_name, 'Unknown Adset') as adset_name,
+                    COALESCE(nm.canonical_name, 'Unknown Adset (' || adset_data.entity_id || ')') as adset_name,
                     COALESCE(hm.campaign_id, '') as campaign_id,
-                    COALESCE(cm.canonical_name, 'Unknown Campaign') as campaign_name,
+                    COALESCE(cm.canonical_name, 'Unknown Campaign (' || COALESCE(hm.campaign_id, 'No ID') || ')') as campaign_name,
                     adset_data.total_users,
                     adset_data.total_users as new_users,
                     adset_data.mixpanel_trials_started,
@@ -736,7 +744,11 @@ class AnalyticsQueryService:
                         meta_purchases = meta_info.get('meta_purchases', 0)
                         
                         # Core ratios
-                        trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
+                        # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
+                        if meta_trials == 0 and mixpanel_trials > 0:
+                            trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
+                        else:
+                            trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
                         purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
                         trial_conversion_rate = (mixpanel_purchases / mixpanel_trials) if mixpanel_trials > 0 else 0.0
                         
@@ -746,6 +758,23 @@ class AnalyticsQueryService:
                         estimated_revenue_adjusted = (estimated_revenue_raw / trial_accuracy_ratio) if trial_accuracy_ratio > 0 else estimated_revenue_raw
                         estimated_roas = (estimated_revenue_adjusted / spend) if spend > 0 else 0.0
                         profit = estimated_revenue_adjusted - spend
+                        
+                        # Calculate performance impact score using modular calculator system
+                        calc_record = {
+                            'spend': spend,
+                            'estimated_revenue_usd': estimated_revenue_adjusted,
+                            'mixpanel_trials_started': mixpanel_trials,
+                            'meta_trials_started': meta_trials,
+                            'mixpanel_purchases': mixpanel_purchases,
+                            'meta_purchases': meta_purchases
+                        }
+                        calc_input = CalculationInput(
+                            raw_record=calc_record,
+                            config=config.__dict__ if config else None,
+                            start_date=config.start_date if config else None,
+                            end_date=config.end_date if config else None
+                        )
+                        performance_impact_score = ROASCalculators.calculate_performance_impact_score(calc_input)
                         
                         # Refund rates (placeholder for now)
                         trial_refund_rate = 0.0  # TODO: Calculate from actual refund data
@@ -789,6 +818,7 @@ class AnalyticsQueryService:
                             'estimated_revenue_usd': estimated_revenue_adjusted,  # This is the ADJUSTED revenue
                             'estimated_revenue_adjusted': estimated_revenue_adjusted,  # Frontend expects this field
                             'estimated_roas': estimated_roas,
+                            'performance_impact_score': performance_impact_score,  # ✅ FIXED: Now calculated using ROASCalculators
                             'profit': profit,
                             'trial_accuracy_ratio': trial_accuracy_ratio,
                             'purchase_accuracy_ratio': purchase_accuracy_ratio,  # ✅ FIXED: Now calculated properly
@@ -1015,11 +1045,11 @@ class AnalyticsQueryService:
                 precomputed_query = """
                 SELECT 
                     ad_data.entity_id as ad_id,
-                    COALESCE(nm.canonical_name, 'Unknown Ad') as ad_name,
+                    COALESCE(nm.canonical_name, 'Unknown Ad (' || ad_data.entity_id || ')') as ad_name,
                     COALESCE(hm.adset_id, '') as adset_id,
-                    COALESCE(am.canonical_name, 'Unknown Adset') as adset_name,
+                    COALESCE(am.canonical_name, 'Unknown Adset (' || COALESCE(hm.adset_id, 'No ID') || ')') as adset_name,
                     COALESCE(hm.campaign_id, '') as campaign_id,
-                    COALESCE(cm.canonical_name, 'Unknown Campaign') as campaign_name,
+                    COALESCE(cm.canonical_name, 'Unknown Campaign (' || COALESCE(hm.campaign_id, 'No ID') || ')') as campaign_name,
                     ad_data.total_users,
                     ad_data.total_users as new_users,
                     ad_data.mixpanel_trials_started,
@@ -1073,7 +1103,11 @@ class AnalyticsQueryService:
                         meta_purchases = meta_info.get('meta_purchases', 0)
                         
                         # Accuracy ratios
-                        trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
+                        # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
+                        if meta_trials == 0 and mixpanel_trials > 0:
+                            trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
+                        else:
+                            trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
                         purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
                         trial_conversion_rate = (mixpanel_purchases / mixpanel_trials) if mixpanel_trials > 0 else 0.0
                         
@@ -1156,7 +1190,7 @@ class AnalyticsQueryService:
                 adset_query = """
                 SELECT 
                     adset_data.entity_id as adset_id,
-                    COALESCE(nm.canonical_name, 'Unknown Adset') as adset_name,
+                    COALESCE(nm.canonical_name, 'Unknown Adset (' || adset_data.entity_id || ')') as adset_name,
                     adset_data.total_users,
                     adset_data.mixpanel_trials_started,
                     adset_data.mixpanel_purchases,
@@ -1203,6 +1237,10 @@ class AnalyticsQueryService:
                     meta_purchases = meta_info.get('meta_purchases', 0)
                     
                     # Accuracy ratios
+                    # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
+                if meta_trials == 0 and mixpanel_trials > 0:
+                    trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
+                else:
                     trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
                     purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
                     
@@ -1252,7 +1290,7 @@ class AnalyticsQueryService:
                 ad_query = """
                 SELECT 
                     ad_data.entity_id as ad_id,
-                    COALESCE(nm.canonical_name, 'Unknown Ad') as ad_name,
+                    COALESCE(nm.canonical_name, 'Unknown Ad (' || ad_data.entity_id || ')') as ad_name,
                     ad_data.total_users,
                     ad_data.mixpanel_trials_started,
                     ad_data.mixpanel_purchases,
@@ -1299,6 +1337,10 @@ class AnalyticsQueryService:
                     meta_purchases = meta_info.get('meta_purchases', 0)
                     
                     # Accuracy ratios
+                    # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
+                if meta_trials == 0 and mixpanel_trials > 0:
+                    trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
+                else:
                     trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
                     purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
                     
@@ -1955,7 +1997,11 @@ class AnalyticsQueryService:
                 # Add derived metrics
                 meta_trials = item.get('meta_trials_started', 0)
                 mixpanel_trials = item.get('mixpanel_trials_started', 0)
-                item['trial_accuracy_ratio'] = (mixpanel_trials / meta_trials) * 100 if meta_trials > 0 else 0.0
+                # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
+                if meta_trials == 0 and mixpanel_trials > 0:
+                    item['trial_accuracy_ratio'] = 1.0  # 100% accuracy as decimal for frontend consistency
+                else:
+                    item['trial_accuracy_ratio'] = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
         
         process_and_aggregate(records)
         
@@ -1971,14 +2017,17 @@ class AnalyticsQueryService:
         
         # Create unique ID based on entity type
         if entity_type == 'campaign':
-            record_id = f"campaign_{record.get('campaign_id', 'unknown')}"
-            name = record.get('campaign_name', 'Unknown Campaign')
+            campaign_id = record.get('campaign_id', 'unknown')
+            record_id = f"campaign_{campaign_id}"
+            name = record.get('campaign_name', f'Unknown Campaign ({campaign_id})')
         elif entity_type == 'adset':
-            record_id = f"adset_{record.get('adset_id', 'unknown')}"
-            name = record.get('adset_name', 'Unknown Ad Set')
+            adset_id = record.get('adset_id', 'unknown')
+            record_id = f"adset_{adset_id}"
+            name = record.get('adset_name', f'Unknown Ad Set ({adset_id})')
         else:  # ad
-            record_id = f"ad_{record.get('ad_id', 'unknown')}"
-            name = record.get('ad_name', 'Unknown Ad')
+            ad_id = record.get('ad_id', 'unknown')
+            record_id = f"ad_{ad_id}"
+            name = record.get('ad_name', f'Unknown Ad ({ad_id})')
         
         # Helper function to format accuracy score
         def format_accuracy_score(avg_score):
@@ -2554,13 +2603,21 @@ class AnalyticsQueryService:
                 overall_accuracy_ratio = 0.0
             elif total_mixpanel_trials > total_mixpanel_purchases:
                 event_priority = 'trials'
-                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+                # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
+                if total_meta_trials == 0 and total_mixpanel_trials > 0:
+                    overall_accuracy_ratio = 1.0  # 100% accuracy
+                else:
+                    overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
             elif total_mixpanel_purchases > total_mixpanel_trials:
                 event_priority = 'purchases'
                 overall_accuracy_ratio = total_mixpanel_purchases / total_meta_purchases if total_meta_purchases > 0 else 0.0
             else:
                 event_priority = 'equal'
-                overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
+                # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
+                if total_meta_trials == 0 and total_mixpanel_trials > 0:
+                    overall_accuracy_ratio = 1.0  # 100% accuracy
+                else:
+                    overall_accuracy_ratio = total_mixpanel_trials / total_meta_trials if total_meta_trials > 0 else 0.0
             
             # Calculate daily metrics using the modular calculator system for ALL 20 days
             all_data = []
@@ -2894,11 +2951,21 @@ class AnalyticsQueryService:
                             'breakdown_value': breakdown_value
                         }
                 
-                # Calculate summary for actual conversions (current_value > 0 users only)
+                # Calculate summary for actual conversions (status-based logic)
                 def calculate_actual_conversion_stats(users_list):
                     if users_list:
-                        # For actual conversions, only count users with current_value > 0 as "converted"
-                        converted_users = [r for r in users_list if r.get('current_value', 0) > 0]
+                        # For actual conversions, use status field with proper timing
+                        converted_users = []
+                        for r in users_list:
+                            status = r.get('current_status', '')
+                            value_status = r.get('value_status', '')
+                            
+                            # Only consider users who had enough time (not in pending phase)
+                            if value_status in ['post_conversion_pre_refund', 'final_value']:
+                                if status == 'trial_converted':
+                                    converted_users.append(r)
+                                # trial_cancelled users are counted as eligible but not converted
+                        
                         total_eligible = len(users_list)
                         converted_count = len(converted_users)
                         
@@ -2964,8 +3031,14 @@ class AnalyticsQueryService:
                         })
                     return formatted_users
                 
-                # For actual metrics, only show users who converted (current_value > 0)
-                actual_converted_users = [r for r in actual_users if r.get('current_value', 0) > 0]
+                # For actual metrics, only show users who converted (status-based)
+                actual_converted_users = []
+                for r in actual_users:
+                    status = r.get('current_status', '')
+                    value_status = r.get('value_status', '')
+                    # Only show users who had enough time and actually converted
+                    if value_status in ['post_conversion_pre_refund', 'final_value'] and status == 'trial_converted':
+                        actual_converted_users.append(r)
                 
                 logger.info(f"✅ ESTIMATED: {estimated_summary['total_users']} users, avg rates: {estimated_summary['avg_trial_conversion_rate']:.1f}%/{estimated_summary['avg_trial_refund_rate']:.1f}%/{estimated_summary['avg_purchase_refund_rate']:.1f}%")
                 logger.info(f"✅ ACTUAL: {actual_summary['total_eligible']} eligible, {actual_summary['total_users']} converted ({actual_summary['avg_trial_conversion_rate']:.1f}%), rates: {actual_summary['avg_trial_refund_rate']:.1f}%/{actual_summary['avg_purchase_refund_rate']:.1f}%")
@@ -3489,7 +3562,11 @@ class AnalyticsQueryService:
                 overall_accuracy_ratio = 0.0
             elif total_mixpanel_trials > total_mixpanel_purchases:
                 event_priority = 'trials'
-                overall_accuracy_ratio = (total_mixpanel_trials / total_meta_trials) if total_meta_trials > 0 else 0.0
+                # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
+                if total_meta_trials == 0 and total_mixpanel_trials > 0:
+                    overall_accuracy_ratio = 1.0  # 100% accuracy
+                else:
+                    overall_accuracy_ratio = (total_mixpanel_trials / total_meta_trials) if total_meta_trials > 0 else 0.0
             else:
                 event_priority = 'purchases'
                 overall_accuracy_ratio = (total_mixpanel_purchases / total_meta_purchases) if total_meta_purchases > 0 else 0.0

@@ -20,6 +20,9 @@ class AccuracyCalculators(BaseCalculator):
         
         This measures how well Mixpanel trial tracking matches Meta trial tracking.
         
+        Special case: When meta_trials = 0 and mixpanel_trials > 0, 
+        treat as 100% accuracy (perfect tracking) instead of 0%.
+        
         Args:
             calc_input: Standardized calculation input containing raw record data
             
@@ -31,6 +34,10 @@ class AccuracyCalculators(BaseCalculator):
             
         mixpanel_trials = calc_input.mixpanel_trials_started
         meta_trials = calc_input.meta_trials_started
+        
+        # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
+        if meta_trials == 0 and mixpanel_trials > 0:
+            return 100.0
         
         return AccuracyCalculators.safe_percentage(
             numerator=mixpanel_trials,

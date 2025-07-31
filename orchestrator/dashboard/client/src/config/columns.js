@@ -17,17 +17,13 @@
 export const AVAILABLE_COLUMNS = [
   // User's required columns in exact order
   { key: 'name', label: 'Name', defaultVisible: true, alwaysVisible: true },
-  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: true },
-  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: true },
-  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: true },
-  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', defaultVisible: true },
-  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', defaultVisible: true },
-  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: true },
-  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: true },
-  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: true },
-  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', defaultVisible: true },
+  { key: 'trials_combined', label: 'Trials', subtitle: '(Mixpanel | Meta)', defaultVisible: true },
+  { key: 'trial_conversion_rate', label: 'Trial Conversion Rate', subtitle: '(Trials → Purchases)', defaultVisible: true },
+  { key: 'avg_trial_refund_rate', label: 'Trial Refund Rate', subtitle: '(Refunded Trials)', defaultVisible: true },
+  { key: 'purchases_combined', label: 'Purchases', subtitle: '(Mixpanel | Meta)', defaultVisible: true },
+  { key: 'purchase_refund_rate', label: 'Purchase Refund Rate', subtitle: '(Refunded Purchases)', defaultVisible: true },
   { key: 'spend', label: 'Spend', defaultVisible: true },
-  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue (Adjusted)', defaultVisible: true },
+  { key: 'estimated_revenue_adjusted', label: 'Estimated Revenue', subtitle: '(Adjusted)', defaultVisible: true },
   { key: 'profit', label: 'Profit', defaultVisible: true },
   { key: 'estimated_roas', label: 'ROAS', defaultVisible: true },
   { key: 'performance_impact_score', label: 'Performance Impact Score', defaultVisible: true },
@@ -35,6 +31,14 @@ export const AVAILABLE_COLUMNS = [
   // All other columns - set to defaultVisible: false
   { key: 'campaign_name', label: 'Campaign', defaultVisible: false },
   { key: 'adset_name', label: 'Ad Set', defaultVisible: false },
+  
+  // Legacy individual columns (replaced by combined columns)
+  { key: 'meta_trials_started', label: 'Trials (Meta)', defaultVisible: false },
+  { key: 'mixpanel_trials_started', label: 'Trials (Mixpanel)', defaultVisible: false },
+  { key: 'trial_accuracy_ratio', label: 'Trial Accuracy Ratio', defaultVisible: false },
+  { key: 'meta_purchases', label: 'Purchases (Meta)', defaultVisible: false },
+  { key: 'mixpanel_purchases', label: 'Purchases (Mixpanel)', defaultVisible: false },
+  { key: 'purchase_accuracy_ratio', label: 'Purchase Accuracy Ratio', defaultVisible: false },
   { key: 'impressions', label: 'Impressions', defaultVisible: false },
   { key: 'clicks', label: 'Clicks', defaultVisible: false },
   { key: 'mixpanel_trials_ended', label: 'Trials Ended (Mixpanel)', defaultVisible: false },
