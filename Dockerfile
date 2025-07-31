@@ -21,9 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Debug: Check what was copied
-RUN ls -la orchestrator/dashboard/client/
-RUN ls -la orchestrator/dashboard/client/public/ || echo "public directory not found"
+# Explicitly copy React client source files (in case they're being excluded)
+COPY orchestrator/dashboard/client/src ./orchestrator/dashboard/client/src
+COPY orchestrator/dashboard/client/public ./orchestrator/dashboard/client/public
 
 # Install Node.js dependencies (including dev deps needed for build)
 RUN cd orchestrator/dashboard/client && npm install
