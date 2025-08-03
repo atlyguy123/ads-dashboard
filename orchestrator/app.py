@@ -84,6 +84,11 @@ CORS(app, origins=allowed_origins,
 # Initialize SQLite database
 def init_db():
     try:
+        # Ensure project root is in path for utils import
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
         # Import here to avoid circular imports
         from utils.database_utils import get_database_connection
         
@@ -314,6 +319,11 @@ class PipelineRunner:
         
         # Record run start
         try:
+            # Ensure project root is in path for utils import
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            
             from utils.database_utils import get_database_connection
             with get_database_connection('pipeline_runs') as conn:
                 cursor = conn.cursor()
@@ -438,6 +448,11 @@ class PipelineRunner:
             
             # Update run record
             try:
+                # Ensure project root is in path for utils import
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if project_root not in sys.path:
+                    sys.path.insert(0, project_root)
+                
                 from utils.database_utils import get_database_connection
                 with get_database_connection('pipeline_runs') as conn:
                     cursor = conn.cursor()
@@ -1649,6 +1664,11 @@ def mixpanel_debug_latest_processed_date():
 def mixpanel_debug_database_reset():
     """Reset Mixpanel raw data tables"""
     try:
+        # Ensure project root is in path for utils import
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
         # Import database utilities
         from utils.database_utils import get_database_path
         
@@ -1824,6 +1844,11 @@ def mixpanel_debug_test_db_events():
 def mixpanel_debug_database_stats():
     """Get database statistics"""
     try:
+        # Ensure project root is in path for utils import
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
         from utils.database_utils import get_database_connection
         
         with get_database_connection('mixpanel_data') as conn:
@@ -1932,6 +1957,11 @@ def mixpanel_debug_database_stats():
 def mixpanel_debug_user_events():
     """Get user events"""
     try:
+        # Ensure project root is in path for utils import
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
         from utils.database_utils import get_database_connection
         from flask import request
         

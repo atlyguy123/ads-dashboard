@@ -333,6 +333,9 @@ def main():
         # Setup Meta Analytics database with Meta tables
         setup_meta_analytics_database()
         
+        # Setup Pipeline Runs database for orchestrator tracking
+        setup_pipeline_runs_database()
+        
         logger.info("Database setup completed successfully")
         logger.info("Database is ready for data ingestion")
         return 0
@@ -463,6 +466,59 @@ def setup_meta_analytics_database():
         
     except Exception as e:
         logger.error(f"Failed to setup Meta Analytics database: {e}")
+        raise
+
+def setup_pipeline_runs_database():
+    """Setup Pipeline Runs database for orchestrator execution tracking"""
+    try:
+        # Get Pipeline Runs database path
+        pipeline_runs_db_path = Path(get_database_path('pipeline_runs'))
+        
+        logger.info(f"Setting up Pipeline Runs database: {pipeline_runs_db_path}")
+        
+        # Ensure database directory exists
+        os.makedirs(pipeline_runs_db_path.parent, exist_ok=True)
+        
+        # Create connection
+        conn = sqlite3.connect(str(pipeline_runs_db_path), timeout=30.0)
+        cursor = conn.cursor()
+        
+        # Enable optimizations
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute("PRAGMA cache_size = -64000")
+        cursor.execute("PRAGMA temp_store = MEMORY")
+        
+        # Create Pipeline Runs table (matches orchestrator/app.py expectations)
+        pipeline_runs_sql = """
+        CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pipeline_name TEXT,
+            status TEXT,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            error_message TEXT
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_runs_pipeline_name ON runs(pipeline_name);
+        CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+        CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
+        """
+        
+        # Execute all statements
+        cursor.executescript(pipeline_runs_sql)
+        conn.commit()
+        
+        # Optimize
+        cursor.execute("ANALYZE")
+        
+        conn.close()
+        
+        logger.info("Pipeline Runs database setup completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to setup Pipeline Runs database: {e}")
         raise
 
 def create_database_connection() -> sqlite3.Connection:

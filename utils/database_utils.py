@@ -44,6 +44,10 @@ class DatabaseManager:
         'raw_data': {
             'filename': 'raw_data.db',
             'description': 'Raw downloaded data from S3'
+        },
+        'pipeline_runs': {
+            'filename': 'pipeline_runs.db',
+            'description': 'Pipeline execution tracking and status'
         }
     }
     
