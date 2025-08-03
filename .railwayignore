@@ -24,13 +24,11 @@ database/*.backup
 .idea/
 *.log
 
-# Node modules (source files, not build)
+# Node modules (keep source files for build process)
 orchestrator/dashboard/client/node_modules/
-orchestrator/dashboard/client/src/
-orchestrator/dashboard/client/public/
-orchestrator/dashboard/client/package*.json
-orchestrator/dashboard/client/tailwind.config.js
-orchestrator/dashboard/client/postcss.config.js
+# Note: src/ and public/ are needed for React build process
+# orchestrator/dashboard/client/tailwind.config.js
+# orchestrator/dashboard/client/postcss.config.js
 
 # Build artifacts (exclude build tools, keep final builds)
 *.egg-info/
