@@ -34,11 +34,13 @@ from orchestrator.utils.timezone_utils import now_in_timezone
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add parent directories to path for imports
-current_dir = Path(__file__).resolve().parent  # Use resolve() for absolute path
-sys.path.append(str(current_dir.parent.parent))  # Add project root
-sys.path.append(str(current_dir.parent.parent / "utils"))  # Add utils
-sys.path.append(str(current_dir.parent.parent / "orchestrator"))  # Add orchestrator
+# Add utils directory to path for database utilities (consistent with other pipeline files)
+utils_path = str(Path(__file__).resolve().parent.parent.parent / "utils")
+sys.path.append(utils_path)
+
+# Add project root to path for orchestrator imports
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+sys.path.append(project_root)
 
 try:
     # Import specific Meta API functions using full orchestrator paths
