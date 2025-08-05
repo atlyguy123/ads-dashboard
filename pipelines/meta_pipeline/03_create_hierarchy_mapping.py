@@ -3,17 +3,16 @@
 Module 3: Create Hierarchy Relationship Mapping
 
 This module establishes and stores clear campaign → adset → ad hierarchical 
-relationships by analyzing Meta advertising data. It creates a definitive
-mapping that enables proper data aggregation and prevents double-counting.
+relationships by directly extracting them from Meta advertising data. It creates
+authoritative mappings using Meta's own data structure as the single source of truth.
 
 Key Features:
-- Analyzes all Meta data sources for hierarchy relationships
-- Creates confidence-scored mappings for ad → adset → campaign relationships
-- Handles edge cases where ads may move between adsets (rare but possible)
-- Provides relationship strength scoring for data quality assessment
+- Extracts hierarchy relationships directly from Meta ad_performance_daily table
+- Uses Meta data as authoritative source (100% confidence)
+- Simple, reliable approach - no complex analysis needed
 - Optimized for dashboard aggregation queries
 
-Dependencies: Requires Meta data tables (ad_performance_daily_*)
+Dependencies: Requires Meta data table (ad_performance_daily)
 Outputs: Populated id_hierarchy_mapping table
 """
 
@@ -48,143 +47,71 @@ class HierarchyMappingProcessor:
         self.stats = {
             'total_ads_analyzed': 0,
             'hierarchies_created': 0,
-            'conflicting_hierarchies': 0,
-            'high_confidence_mappings': 0,
-            'medium_confidence_mappings': 0,
-            'low_confidence_mappings': 0
+            'high_confidence_mappings': 0
         }
     
     def analyze_hierarchy_relationships(self) -> List[Tuple[str, str, str, float, date, date]]:
         """
-        Analyze hierarchy relationships across all Meta data sources
+        Extract hierarchy relationships directly from Meta data
         
         Returns:
             List of tuples: (ad_id, adset_id, campaign_id, confidence, first_seen, last_seen)
         """
-        logger.info("Analyzing advertising hierarchy relationships...")
+        logger.info("Extracting hierarchy relationships from Meta data...")
         
-        # Query all Meta performance tables for comprehensive hierarchy data
-        tables = [
-            'ad_performance_daily',
-            'ad_performance_daily_country', 
-            'ad_performance_daily_region',
-            'ad_performance_daily_device'
-        ]
+        # Use primary Meta table as single source of truth
+        table = 'ad_performance_daily'
         
-        hierarchy_data = defaultdict(lambda: defaultdict(lambda: {
-            'count': 0,
-            'first_seen': None,
-            'last_seen': None
-        }))
-        
-        total_ads = set()
-        
-        for table in tables:
-            try:
-                # Check if table exists
-                self.meta_cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", 
-                    (table,)
-                )
-                if not self.meta_cursor.fetchone():
-                    logger.warning(f"Table {table} not found, skipping...")
-                    continue
-                
-                # Query hierarchy relationships from this table
-                query = f"""
-                SELECT 
-                    ad_id,
-                    adset_id,
-                    campaign_id,
-                    COUNT(*) as relationship_count,
-                    MIN(date) as first_seen,
-                    MAX(date) as last_seen
-                FROM {table}
-                WHERE ad_id IS NOT NULL 
-                  AND adset_id IS NOT NULL 
-                  AND campaign_id IS NOT NULL
-                GROUP BY ad_id, adset_id, campaign_id
-                ORDER BY ad_id, relationship_count DESC
-                """
-                
-                self.meta_cursor.execute(query)
-                results = self.meta_cursor.fetchall()
-                
-                logger.info(f"Found {len(results)} hierarchy relationships in {table}")
-                
-                # Aggregate hierarchy data across tables
-                for ad_id, adset_id, campaign_id, count, first_seen, last_seen in results:
-                    total_ads.add(ad_id)
-                    hierarchy_key = (adset_id, campaign_id)
-                    
-                    # Accumulate relationship strength
-                    hierarchy_data[ad_id][hierarchy_key]['count'] += count
-                    
-                    # Update date ranges
-                    if hierarchy_data[ad_id][hierarchy_key]['first_seen'] is None:
-                        hierarchy_data[ad_id][hierarchy_key]['first_seen'] = first_seen
-                    else:
-                        if first_seen < hierarchy_data[ad_id][hierarchy_key]['first_seen']:
-                            hierarchy_data[ad_id][hierarchy_key]['first_seen'] = first_seen
-                    
-                    if hierarchy_data[ad_id][hierarchy_key]['last_seen'] is None:
-                        hierarchy_data[ad_id][hierarchy_key]['last_seen'] = last_seen
-                    else:
-                        if last_seen > hierarchy_data[ad_id][hierarchy_key]['last_seen']:
-                            hierarchy_data[ad_id][hierarchy_key]['last_seen'] = last_seen
-                        
-            except sqlite3.Error as e:
-                logger.warning(f"Error querying {table}: {e}")
-                continue
-        
-        self.stats['total_ads_analyzed'] = len(total_ads)
-        logger.info(f"Analyzed {len(total_ads)} unique ads across all sources")
-        
-        # Determine strongest hierarchy for each ad
-        final_hierarchies = []
-        
-        for ad_id, hierarchies in hierarchy_data.items():
-            if not hierarchies:
-                continue
-            
-            # Sort by relationship strength (count) and pick the strongest
-            sorted_hierarchies = sorted(
-                hierarchies.items(), 
-                key=lambda x: x[1]['count'], 
-                reverse=True
+        try:
+            # Check if table exists
+            self.meta_cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", 
+                (table,)
             )
+            if not self.meta_cursor.fetchone():
+                raise RuntimeError(f"Required Meta table '{table}' not found")
             
-            strongest_hierarchy, hierarchy_data_item = sorted_hierarchies[0]
-            adset_id, campaign_id = strongest_hierarchy
-            
-            # Calculate confidence score
-            total_occurrences = sum(h['count'] for h in hierarchies.values())
-            confidence = hierarchy_data_item['count'] / total_occurrences
-            
-            # Track confidence distribution
-            if confidence >= 0.9:
-                self.stats['high_confidence_mappings'] += 1
-            elif confidence >= 0.7:
-                self.stats['medium_confidence_mappings'] += 1
-            else:
-                self.stats['low_confidence_mappings'] += 1
-            
-            # Track conflicts
-            if len(sorted_hierarchies) > 1:
-                self.stats['conflicting_hierarchies'] += 1
-                logger.debug(f"Ad {ad_id} has {len(sorted_hierarchies)} hierarchy options, chose strongest (confidence: {confidence:.2f})")
-            
-            final_hierarchies.append((
+            # Extract unique hierarchy mappings directly from Meta data
+            query = f"""
+            SELECT DISTINCT
                 ad_id,
                 adset_id,
                 campaign_id,
-                round(confidence, 2),
-                hierarchy_data_item['first_seen'],
-                hierarchy_data_item['last_seen']
-            ))
-        
-        logger.info(f"Created {len(final_hierarchies)} hierarchy mappings")
-        return final_hierarchies
+                MIN(date) as first_seen,
+                MAX(date) as last_seen
+            FROM {table}
+            WHERE ad_id IS NOT NULL 
+              AND adset_id IS NOT NULL 
+              AND campaign_id IS NOT NULL
+            GROUP BY ad_id, adset_id, campaign_id
+            ORDER BY ad_id
+            """
+            
+            self.meta_cursor.execute(query)
+            results = self.meta_cursor.fetchall()
+            
+            logger.info(f"Found {len(results)} unique hierarchy mappings in {table}")
+            
+            # Convert to expected format - confidence is always 1.0 since Meta data is authoritative
+            final_hierarchies = []
+            for ad_id, adset_id, campaign_id, first_seen, last_seen in results:
+                final_hierarchies.append((
+                    ad_id,
+                    adset_id,
+                    campaign_id,
+                    1.0,  # 100% confidence - Meta data is authoritative
+                    first_seen,
+                    last_seen
+                ))
+            
+            self.stats['total_ads_analyzed'] = len(final_hierarchies)
+            self.stats['high_confidence_mappings'] = len(final_hierarchies)
+            logger.info(f"Extracted {len(final_hierarchies)} hierarchy mappings")
+            return final_hierarchies
+            
+        except sqlite3.Error as e:
+            logger.error(f"Error querying {table}: {e}")
+            raise
     
     def create_hierarchy_mappings(self):
         """Create hierarchy mappings for all ads"""
@@ -240,21 +167,8 @@ class HierarchyMappingProcessor:
         
         logger.info(f"✅ Total hierarchy mappings: {total_mappings}")
         
-        # Check confidence distribution
-        confidence_ranges = [
-            ("High confidence (≥0.9)", 0.9, 1.0),
-            ("Medium confidence (0.7-0.89)", 0.7, 0.89),
-            ("Low confidence (<0.7)", 0.0, 0.69)
-        ]
-        
-        for label, min_conf, max_conf in confidence_ranges:
-            self.output_cursor.execute("""
-            SELECT COUNT(*) FROM id_hierarchy_mapping 
-            WHERE relationship_confidence >= ? AND relationship_confidence <= ?
-            """, (min_conf, max_conf))
-            count = self.output_cursor.fetchone()[0]
-            percentage = (count / total_mappings) * 100 if total_mappings > 0 else 0
-            logger.info(f"  {label}: {count} ({percentage:.1f}%)")
+        # All mappings have 100% confidence since Meta data is authoritative
+        logger.info(f"  All mappings: {total_mappings} (100% confidence - Meta data is authoritative)")
         
         # Check for duplicate ad_ids (should not happen due to PRIMARY KEY)
         self.output_cursor.execute("""
@@ -273,7 +187,6 @@ class HierarchyMappingProcessor:
         self.output_cursor.execute("""
         SELECT ad_id, adset_id, campaign_id, relationship_confidence
         FROM id_hierarchy_mapping
-        WHERE relationship_confidence >= 0.8
         LIMIT 5
         """)
         
@@ -307,15 +220,13 @@ def main():
             meta_cursor = meta_conn.cursor()
             output_cursor = output_conn.cursor()
             
-            # Check Meta tables exist (source data)
-            meta_tables = ['ad_performance_daily']
-            for table in meta_tables:
-                meta_cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", 
-                    (table,)
-                )
-                if not meta_cursor.fetchone():
-                    raise RuntimeError(f"Required Meta table '{table}' not found in meta_analytics.db")
+            # Check Meta table exists (source data)
+            meta_cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", 
+                ('ad_performance_daily',)
+            )
+            if not meta_cursor.fetchone():
+                raise RuntimeError("Required Meta table 'ad_performance_daily' not found in meta_analytics.db")
             
             # Check output table exists (destination)
             output_cursor.execute(
@@ -338,10 +249,7 @@ def main():
             logger.info("=== Hierarchy Mapping Statistics ===")
             logger.info(f"Total ads analyzed: {stats['total_ads_analyzed']}")
             logger.info(f"Hierarchies created: {stats['hierarchies_created']}")
-            logger.info(f"Conflicting hierarchies resolved: {stats['conflicting_hierarchies']}")
-            logger.info(f"High confidence mappings (≥0.9): {stats['high_confidence_mappings']}")
-            logger.info(f"Medium confidence mappings (0.7-0.89): {stats['medium_confidence_mappings']}")
-            logger.info(f"Low confidence mappings (<0.7): {stats['low_confidence_mappings']}")
+            logger.info(f"All mappings have 100% confidence (Meta data is authoritative)")
         
         logger.info("✅ Module 3 completed successfully")
         logger.info("Hierarchy mappings are ready for dashboard aggregation")

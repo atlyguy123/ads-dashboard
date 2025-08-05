@@ -647,7 +647,7 @@ class BreakdownMappingService:
                         },
                         combined_metrics={
                             'estimated_roas': (estimated_revenue / float(spend or 1)) if spend else 0,  # Use estimated revenue for ROAS
-                            'trial_accuracy_ratio': 1.0 if (meta_trials == 0 and mixpanel_trials > 0) else ((float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0),
+                            'trial_accuracy_ratio': 1.0 if (int(meta_trials or 0) == 0 and int(mixpanel_trials or 0) > 0) else ((float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0),
                             'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
                         }
                     )
@@ -886,7 +886,7 @@ class BreakdownMappingService:
                         },
                         combined_metrics={
                             'estimated_roas': (estimated_revenue / float(spend or 1)) if spend else 0,  # Use estimated revenue for ROAS
-                            'trial_accuracy_ratio': 1.0 if (meta_trials == 0 and mixpanel_trials > 0) else ((float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0),
+                            'trial_accuracy_ratio': 1.0 if (int(meta_trials or 0) == 0 and int(mixpanel_trials or 0) > 0) else ((float(mixpanel_trials or 0) / float(meta_trials or 1)) if meta_trials else 0),
                             'purchase_accuracy_ratio': (float(mixpanel_purchases or 0) / float(meta_purchases or 1)) if meta_purchases else 0
                         }
                     )

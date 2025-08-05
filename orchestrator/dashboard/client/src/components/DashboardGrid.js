@@ -557,7 +557,17 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
           }
         </span>
         <span className={userCountClass}>
-          ({dualData?.actual?.summary?.total_users || '-'})
+          {dualData?.actual ? 
+            (() => {
+              if (columnKey === 'trial_conversion_rate') {
+                return `(${dualData.actual.summary.converted_users || 0}/${dualData.actual.summary.total_users || 0})`;
+              } else if (columnKey === 'avg_trial_refund_rate') {
+                return `(${dualData.actual.summary.trial_refunded_users || 0}/${dualData.actual.summary.trial_converted_users || 0})`;
+              } else { // purchase_refund_rate
+                return `(${dualData.actual.summary.purchase_refunded_users || 0}/${dualData.actual.summary.purchase_users || 0})`;
+              }
+            })() : '(0/0)'
+          }
         </span>
       </div>
       {showTooltip && (

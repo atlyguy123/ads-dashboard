@@ -77,6 +77,9 @@ class AnalyticsQueryService:
         self._breakdown_service = None
         self._breakdown_service_initialized = False
         
+        # ENHANCED FIX: Store fallback paths for more robust initialization
+        self._fallback_paths_checked = False
+        
         # Table mapping based on breakdown parameter
         self.table_mapping = {
             'all': 'ad_performance_daily',
@@ -97,21 +100,49 @@ class AnalyticsQueryService:
             try:
                 # Import here to avoid circular imports
                 from .breakdown_mapping_service import BreakdownMappingService
+                import os
                 
-                # Only initialize if we have valid database paths
+                # Enhanced diagnostics for debugging
+                logger.info(f"🔧 BREAKDOWN SERVICE INITIALIZATION DEBUG:")
+                logger.info(f"   mixpanel_db_path: {self.mixpanel_db_path}")
+                logger.info(f"   meta_db_path: {self.meta_db_path}")
+                logger.info(f"   mixpanel_db_exists: {os.path.exists(self.mixpanel_db_path) if self.mixpanel_db_path else False}")
+                logger.info(f"   meta_db_exists: {os.path.exists(self.meta_db_path) if self.meta_db_path else False}")
+                
+                # Try to initialize with available paths
                 if self.mixpanel_db_path and self.meta_db_path:
-                    logger.info(f"🔧 Initializing BreakdownMappingService: mixpanel={self.mixpanel_db_path}, meta={self.meta_db_path}")
-                    self._breakdown_service = BreakdownMappingService(
-                        self.mixpanel_db_path, 
-                        meta_db_path=self.meta_db_path
-                    )
-                    logger.info("✅ BreakdownMappingService initialized successfully")
+                    # Check if both databases exist
+                    if os.path.exists(self.mixpanel_db_path) and os.path.exists(self.meta_db_path):
+                        logger.info(f"🔧 Initializing BreakdownMappingService: mixpanel={self.mixpanel_db_path}, meta={self.meta_db_path}")
+                        self._breakdown_service = BreakdownMappingService(
+                            self.mixpanel_db_path, 
+                            meta_db_path=self.meta_db_path
+                        )
+                        logger.info("✅ BreakdownMappingService initialized successfully")
+                    else:
+                        logger.warning(f"❌ Database files not found - trying fallback initialization")
+                        # Try fallback initialization with None paths (service will handle its own path discovery)
+                        try:
+                            self._breakdown_service = BreakdownMappingService()
+                            logger.info("✅ BreakdownMappingService initialized with fallback path discovery")
+                        except Exception as fallback_error:
+                            logger.warning(f"❌ Fallback initialization also failed: {fallback_error}")
+                            self._breakdown_service = None
                 else:
                     logger.warning(f"❌ Cannot initialize BreakdownMappingService: missing paths (mixpanel={bool(self.mixpanel_db_path)}, meta={bool(self.meta_db_path)})")
-                    self._breakdown_service = None
+                    logger.warning(f"   This will disable breakdown functionality (country/device breakdown icons won't appear)")
+                    # Try one last fallback with automatic path discovery
+                    try:
+                        logger.info("🔧 Attempting automatic path discovery for BreakdownMappingService...")
+                        self._breakdown_service = BreakdownMappingService()
+                        logger.info("✅ BreakdownMappingService initialized with automatic path discovery")
+                    except Exception as auto_discovery_error:
+                        logger.warning(f"❌ Automatic path discovery failed: {auto_discovery_error}")
+                        self._breakdown_service = None
                     
             except Exception as e:
-                logger.warning(f"❌ Failed to initialize BreakdownMappingService: {e}")
+                logger.error(f"❌ Failed to initialize BreakdownMappingService: {e}")
+                logger.error(f"   Error type: {type(e).__name__}")
                 logger.info("🔧 Breakdown functionality will be disabled, but analytics will continue to work")
                 self._breakdown_service = None
                 
@@ -1263,53 +1294,33 @@ class AnalyticsQueryService:
                 adset_ids = [row['adset_id'] for row in results]
                 meta_data = self._get_meta_data_for_adsets(adset_ids, config)
                 
-                # Format adset children
+                # Format adset children using _format_record for consistency
                 child_adsets = []
                 for row in results:
                     adset_id = row['adset_id']
                     meta_info = meta_data.get(adset_id, {})
                     
-                    mixpanel_trials = int(row['mixpanel_trials_started'])
-                    mixpanel_purchases = int(row['mixpanel_purchases'])
-                    meta_trials = meta_info.get('meta_trials_started', 0)
-                    meta_purchases = meta_info.get('meta_purchases', 0)
-                    
-                    # Accuracy ratios
-                    # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
-                if meta_trials == 0 and mixpanel_trials > 0:
-                    trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
-                else:
-                    trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
-                    purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
-                    
-                    # Financial metrics WITH ADJUSTMENT
-                    spend = meta_info.get('spend', 0.0)
-                    estimated_revenue_raw = float(row['estimated_revenue_usd'])
-                    estimated_revenue_adjusted = (estimated_revenue_raw / trial_accuracy_ratio) if trial_accuracy_ratio > 0 else estimated_revenue_raw
-                    estimated_roas = (estimated_revenue_adjusted / spend) if spend > 0 else 0.0
-                    profit = estimated_revenue_adjusted - spend
-                    
-                    child_adset = {
-                        'id': f"adset_{adset_id}",
-                        'entity_type': 'adset',
+                    # Build raw record with all necessary fields for _format_record
+                    raw_child_record = {
                         'adset_id': adset_id,
                         'adset_name': row['adset_name'],
                         'campaign_id': campaign_id,
-                        'name': row['adset_name'],
-                        'spend': spend,
-                        'meta_trials_started': meta_trials,
-                        'meta_purchases': meta_purchases,
-                        'mixpanel_trials_started': mixpanel_trials,
-                        'mixpanel_purchases': mixpanel_purchases,
-                        'estimated_revenue_usd': estimated_revenue_adjusted,  # ✅ ADJUSTED revenue
-                        'estimated_revenue_adjusted': estimated_revenue_adjusted,
-                        'estimated_roas': estimated_roas,
-                        'profit': profit,
-                        'trial_accuracy_ratio': trial_accuracy_ratio,
-                        'purchase_accuracy_ratio': purchase_accuracy_ratio,
+                        'spend': meta_info.get('spend', 0.0),
+                        'impressions': meta_info.get('impressions', 0),
+                        'clicks': meta_info.get('clicks', 0),
+                        'meta_trials_started': meta_info.get('meta_trials_started', 0),
+                        'meta_purchases': meta_info.get('meta_purchases', 0),
+                        'mixpanel_trials_started': int(row['mixpanel_trials_started']),
+                        'mixpanel_purchases': int(row['mixpanel_purchases']),
+                        'mixpanel_revenue_usd': float(row['mixpanel_revenue_usd']),
+                        'estimated_revenue_usd': float(row['estimated_revenue_usd']),
+                        'total_attributed_users': int(row['total_users']),
                         'children': []  # Adsets can have ad children, populated separately if needed
                     }
-                    child_adsets.append(child_adset)
+                    
+                    # Use _format_record to get consistent calculations including refund rates
+                    formatted_child = self._format_record(raw_child_record, 'adset', config)
+                    child_adsets.append(formatted_child)
                 
                 return child_adsets
                 
@@ -1363,53 +1374,33 @@ class AnalyticsQueryService:
                 ad_ids = [row['ad_id'] for row in results]
                 meta_data = self._get_meta_data_for_ads(ad_ids, config)
                 
-                # Format ad children
+                # Format ad children using _format_record for consistency
                 child_ads = []
                 for row in results:
                     ad_id = row['ad_id']
                     meta_info = meta_data.get(ad_id, {})
                     
-                    mixpanel_trials = int(row['mixpanel_trials_started'])
-                    mixpanel_purchases = int(row['mixpanel_purchases'])
-                    meta_trials = meta_info.get('meta_trials_started', 0)
-                    meta_purchases = meta_info.get('meta_purchases', 0)
-                    
-                    # Accuracy ratios
-                    # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy (1.0)
-                if meta_trials == 0 and mixpanel_trials > 0:
-                    trial_accuracy_ratio = 1.0  # 100% accuracy for calculations
-                else:
-                    trial_accuracy_ratio = (mixpanel_trials / meta_trials) if meta_trials > 0 else 0.0
-                    purchase_accuracy_ratio = (mixpanel_purchases / meta_purchases) if meta_purchases > 0 else 0.0
-                    
-                    # Financial metrics WITH ADJUSTMENT
-                    spend = meta_info.get('spend', 0.0)
-                    estimated_revenue_raw = float(row['estimated_revenue_usd'])
-                    estimated_revenue_adjusted = (estimated_revenue_raw / trial_accuracy_ratio) if trial_accuracy_ratio > 0 else estimated_revenue_raw
-                    estimated_roas = (estimated_revenue_adjusted / spend) if spend > 0 else 0.0
-                    profit = estimated_revenue_adjusted - spend
-                    
-                    child_ad = {
-                        'id': f"ad_{ad_id}",
-                        'entity_type': 'ad',
+                    # Build raw record with all necessary fields for _format_record
+                    raw_child_record = {
                         'ad_id': ad_id,
                         'ad_name': row['ad_name'],
                         'adset_id': adset_id,
-                        'name': row['ad_name'],
-                        'spend': spend,
-                        'meta_trials_started': meta_trials,
-                        'meta_purchases': meta_purchases,
-                        'mixpanel_trials_started': mixpanel_trials,
-                        'mixpanel_purchases': mixpanel_purchases,
-                        'estimated_revenue_usd': estimated_revenue_adjusted,  # ✅ ADJUSTED revenue
-                        'estimated_revenue_adjusted': estimated_revenue_adjusted,
-                        'estimated_roas': estimated_roas,
-                        'profit': profit,
-                        'trial_accuracy_ratio': trial_accuracy_ratio,
-                        'purchase_accuracy_ratio': purchase_accuracy_ratio,
+                        'spend': meta_info.get('spend', 0.0),
+                        'impressions': meta_info.get('impressions', 0),
+                        'clicks': meta_info.get('clicks', 0),
+                        'meta_trials_started': meta_info.get('meta_trials_started', 0),
+                        'meta_purchases': meta_info.get('meta_purchases', 0),
+                        'mixpanel_trials_started': int(row['mixpanel_trials_started']),
+                        'mixpanel_purchases': int(row['mixpanel_purchases']),
+                        'mixpanel_revenue_usd': float(row['mixpanel_revenue_usd']),
+                        'estimated_revenue_usd': float(row['estimated_revenue_usd']),
+                        'total_attributed_users': int(row['total_users']),
                         'children': []  # Ads don't have children
                     }
-                    child_ads.append(child_ad)
+                    
+                    # Use _format_record to get consistent calculations including refund rates
+                    formatted_child = self._format_record(raw_child_record, 'ad', config)
+                    child_ads.append(formatted_child)
                 
                 return child_ads
                 
@@ -2931,36 +2922,68 @@ class AnalyticsQueryService:
                 from datetime import datetime, timedelta
                 today = now_in_timezone().date()
                 
-                estimated_users = user_records  # All users for estimated calculation
+                estimated_users = user_records.copy()  # All users for estimated calculation
                 actual_users = []  # Filtered users for actual calculation
                 
-                # Filter for actual users based on time and conversion status
-                for record in user_records:
-                    credited_date_str = record.get('credited_date')
-                    current_value = record.get('current_value', 0)
+                # Filter actual users based on RC Trial started event timestamps (7+ days ago)
+                with sqlite3.connect(self.mixpanel_db_path) as event_conn:
+                    event_conn.row_factory = sqlite3.Row
+                    event_cursor = event_conn.cursor()
                     
-                    if not credited_date_str or credited_date_str == 'PLACEHOLDER_DATE':
-                        continue
-                    
-                    try:
-                        credited_date = datetime.strptime(credited_date_str, '%Y-%m-%d').date()
-                        days_since = (today - credited_date).days
+                    for record in user_records:
+                        distinct_id = record.get('distinct_id', '')
+                        product_id = record.get('product_id', '')
                         
-                        # Apply time filters and conversion criteria
-                        if is_trial_metric:
-                            # Trial users: need 8+ days to convert, current_value > 0 means converted
-                            if days_since >= 8:
-                                actual_users.append(record)
-                        else:
-                            # Purchase users: need 31+ days to potentially refund, current_value > 0 means not refunded
-                            if days_since >= 31:
-                                actual_users.append(record)
-                    except (ValueError, TypeError):
-                        continue
+                        if distinct_id and product_id:
+                            try:
+                                # Get RC Trial started event timestamp for this user/product
+                                trial_start_query = """
+                                SELECT event_time 
+                                FROM mixpanel_event 
+                                WHERE distinct_id = ? 
+                                  AND JSON_EXTRACT(event_json, '$.properties.product_id') = ?
+                                  AND event_name = 'RC Trial started'
+                                ORDER BY event_time DESC
+                                LIMIT 1
+                                """
+                                event_cursor.execute(trial_start_query, (distinct_id, product_id))
+                                result = event_cursor.fetchone()
+                                
+                                if result:
+                                    event_time_str = result['event_time']
+                                    # Parse event_time (handle both datetime and date formats)
+                                    try:
+                                        if 'T' in event_time_str or ' ' in event_time_str:
+                                            trial_start_date = datetime.fromisoformat(event_time_str.replace('Z', '')).date()
+                                        else:
+                                            trial_start_date = datetime.strptime(event_time_str, '%Y-%m-%d').date()
+                                        
+                                        # Only include users whose trial started 7+ days ago
+                                        days_since_trial = (today - trial_start_date).days
+                                        if days_since_trial >= 7:
+                                            actual_users.append(record)
+                                        else:
+                                            logger.debug(f"🕐 User {distinct_id} trial too recent: {days_since_trial} days ago")
+                                    except ValueError as ve:
+                                        # Skip users with invalid event timestamp
+                                        logger.debug(f"📅 User {distinct_id} invalid timestamp: {event_time_str} - {ve}")
+                                        continue
+                                else:
+                                    logger.debug(f"👻 User {distinct_id} has no RC Trial started event")
+                            except Exception as e:
+                                logger.warning(f"Error checking trial start for user {distinct_id}: {e}")
+                                continue
                 
                 logger.info(f"🔍 FILTERING RESULTS:")
                 logger.info(f"   📊 Estimated users (all): {len(estimated_users)}")
                 logger.info(f"   📊 Actual users (time-filtered): {len(actual_users)}")
+                
+                # DEBUG: If there's a discrepancy, log which users were filtered out
+                if len(estimated_users) != len(actual_users):
+                    estimated_ids = {r['distinct_id'] for r in estimated_users}
+                    actual_ids = {r['distinct_id'] for r in actual_users}
+                    missing_ids = estimated_ids - actual_ids
+                    logger.warning(f"⚠️ {len(missing_ids)} users filtered out: {list(missing_ids)[:5]}...")  # Show first 5
                 
                 # Calculate summary statistics for ESTIMATED users
                 def calculate_summary_stats(users_list):
@@ -2989,52 +3012,12 @@ class AnalyticsQueryService:
                             'breakdown_value': breakdown_value
                         }
                 
-                # Calculate summary for actual conversions (status-based logic)
+                # Calculate summary for actual conversions (binary logic, OPTIMIZED with batch queries)
                 def calculate_actual_conversion_stats(users_list):
-                    if users_list:
-                        # For actual conversions, use status field with proper timing
-                        converted_users = []
-                        for r in users_list:
-                            status = r.get('current_status', '')
-                            value_status = r.get('value_status', '')
-                            
-                            # Only consider users who had enough time (not in pending phase)
-                            if value_status in ['post_conversion_pre_refund', 'final_value']:
-                                if status == 'trial_converted':
-                                    converted_users.append(r)
-                                # trial_cancelled users are counted as eligible but not converted
-                        
-                        total_eligible = len(users_list)
-                        converted_count = len(converted_users)
-                        
-                        # Calculate actual conversion rates
-                        actual_conversion_rate = (converted_count / total_eligible * 100) if total_eligible > 0 else 0
-                        
-                        # For converted users, get their refund rates
-                        if converted_users:
-                            trial_refund_rates = [r['trial_converted_to_refund_rate'] for r in converted_users if r['trial_converted_to_refund_rate'] is not None]
-                            purchase_refund_rates = [r['initial_purchase_to_refund_rate'] for r in converted_users if r['initial_purchase_to_refund_rate'] is not None]
-                            
-                            avg_trial_refund = (sum(trial_refund_rates) / len(trial_refund_rates) * 100) if trial_refund_rates else 0
-                            avg_purchase_refund = (sum(purchase_refund_rates) / len(purchase_refund_rates) * 100) if purchase_refund_rates else 0
-                        else:
-                            avg_trial_refund = 0
-                            avg_purchase_refund = 0
-                        
-                        return {
-                            'total_users': converted_count,  # Only show converted users in actual
-                            'total_eligible': total_eligible,  # Track how many had time to convert
-                            'avg_trial_conversion_rate': actual_conversion_rate,
-                            'avg_trial_refund_rate': avg_trial_refund,
-                            'avg_purchase_refund_rate': avg_purchase_refund,
-                            'total_estimated_revenue': sum(r['current_value'] for r in converted_users if r['current_value']),
-                            'breakdown_applied': breakdown,
-                            'breakdown_value': breakdown_value
-                        }
-                    else:
+                    if not users_list:
                         return {
                             'total_users': 0,
-                            'total_eligible': 0,
+                            'converted_users': 0,
                             'avg_trial_conversion_rate': 0,
                             'avg_trial_refund_rate': 0,
                             'avg_purchase_refund_rate': 0,
@@ -3042,6 +3025,106 @@ class AnalyticsQueryService:
                             'breakdown_applied': breakdown,
                             'breakdown_value': breakdown_value
                         }
+                    
+                    # OPTIMIZED: Batch query for all user/product conversions and refunds
+                    user_product_pairs = [(r['distinct_id'], r['product_id']) for r in users_list if r.get('distinct_id') and r.get('product_id')]
+                    
+                    if not user_product_pairs:
+                        return {
+                            'total_users': 0,
+                            'converted_users': 0,
+                            'avg_trial_conversion_rate': 0,
+                            'avg_trial_refund_rate': 0,
+                            'avg_purchase_refund_rate': 0,
+                            'total_estimated_revenue': 0,
+                            'breakdown_applied': breakdown,
+                            'breakdown_value': breakdown_value
+                        }
+                    
+                    # Create placeholders for batch query
+                    placeholders = ','.join([f"(?,?)" for _ in user_product_pairs])
+                    query_params = [item for pair in user_product_pairs for item in pair]
+                    
+                    # Single batch query for all events
+                    batch_events_query = f"""
+                    SELECT 
+                        distinct_id,
+                        JSON_EXTRACT(event_json, '$.properties.product_id') as product_id,
+                        event_name,
+                        CASE WHEN revenue_usd < 0 THEN 1 ELSE 0 END as is_refund
+                    FROM mixpanel_event 
+                    WHERE (distinct_id, JSON_EXTRACT(event_json, '$.properties.product_id')) IN (VALUES {placeholders})
+                      AND event_name IN ('RC Trial converted', 'RC Initial purchase', 'RC Cancellation')
+                    """
+                    
+                    cursor = conn.cursor()
+                    cursor.execute(batch_events_query, query_params)
+                    all_events = cursor.fetchall()
+                    
+                    # Process results with TWO-PASS logic to fix refund categorization
+                    converted_users = set()
+                    trial_converted_users = set() 
+                    purchase_users = set()
+                    refund_events = []  # Store refund events for second pass
+                    
+                    # PASS 1: Collect all conversions and purchases first
+                    for event in all_events:
+                        user_product = (event['distinct_id'], event['product_id'])
+                        event_name = event['event_name']
+                        is_refund = event['is_refund']
+                        
+                        if event_name == 'RC Trial converted':
+                            converted_users.add(user_product)
+                            trial_converted_users.add(user_product)
+                        elif event_name == 'RC Initial purchase':
+                            purchase_users.add(user_product)
+                        elif event_name == 'RC Cancellation' and is_refund:
+                            # Store refund events for second pass
+                            refund_events.append(user_product)
+                    
+                    # PASS 2: Now categorize refunds based on complete conversion/purchase sets
+                    trial_refunded_users = set()
+                    purchase_refunded_users = set()
+                    
+                    for user_product in refund_events:
+                        if user_product in trial_converted_users:
+                            trial_refunded_users.add(user_product)
+                        if user_product in purchase_users:
+                            purchase_refunded_users.add(user_product)
+                    
+                    total_eligible = len(users_list)
+                    converted_count = len(converted_users)
+                    
+                    # Calculate actual conversion rates
+                    actual_conversion_rate = (converted_count / total_eligible * 100) if total_eligible > 0 else 0
+                    
+                    # Calculate binary refund rates
+                    trial_conversion_count = len(trial_converted_users)
+                    trial_refund_count = len(trial_refunded_users)
+                    avg_trial_refund = (trial_refund_count / trial_conversion_count * 100) if trial_conversion_count > 0 else 0
+                    
+                    purchase_count = len(purchase_users)
+                    purchase_refund_count = len(purchase_refunded_users)
+                    avg_purchase_refund = (purchase_refund_count / purchase_count * 100) if purchase_count > 0 else 0
+                    
+                    # Get converted user records for revenue calculation
+                    converted_user_records = [r for r in users_list if (r['distinct_id'], r['product_id']) in converted_users]
+                    
+                    return {
+                        'total_users': total_eligible,  # Show all time-eligible users (matching modal display)
+                        'converted_users': converted_count,  # Track how many actually converted  
+                        'avg_trial_conversion_rate': actual_conversion_rate,
+                        'avg_trial_refund_rate': avg_trial_refund,
+                        'avg_purchase_refund_rate': avg_purchase_refund,
+                        'total_estimated_revenue': sum(r['current_value'] for r in converted_user_records if r['current_value']),
+                        'breakdown_applied': breakdown,
+                        'breakdown_value': breakdown_value,
+                        # Add specific counts for refund rate display
+                        'trial_refunded_users': trial_refund_count,
+                        'trial_converted_users': trial_conversion_count,
+                        'purchase_refunded_users': purchase_refund_count,
+                        'purchase_users': purchase_count
+                    }
                 
                 estimated_summary = calculate_summary_stats(estimated_users)
                 actual_summary = calculate_actual_conversion_stats(actual_users)
@@ -3069,17 +3152,8 @@ class AnalyticsQueryService:
                         })
                     return formatted_users
                 
-                # For actual metrics, only show users who converted (status-based)
-                actual_converted_users = []
-                for r in actual_users:
-                    status = r.get('current_status', '')
-                    value_status = r.get('value_status', '')
-                    # Only show users who had enough time and actually converted
-                    if value_status in ['post_conversion_pre_refund', 'final_value'] and status == 'trial_converted':
-                        actual_converted_users.append(r)
-                
                 logger.info(f"✅ ESTIMATED: {estimated_summary['total_users']} users, avg rates: {estimated_summary['avg_trial_conversion_rate']:.1f}%/{estimated_summary['avg_trial_refund_rate']:.1f}%/{estimated_summary['avg_purchase_refund_rate']:.1f}%")
-                logger.info(f"✅ ACTUAL: {actual_summary['total_eligible']} eligible, {actual_summary['total_users']} converted ({actual_summary['avg_trial_conversion_rate']:.1f}%), rates: {actual_summary['avg_trial_refund_rate']:.1f}%/{actual_summary['avg_purchase_refund_rate']:.1f}%")
+                logger.info(f"✅ ACTUAL: {actual_summary['total_users']} eligible, {actual_summary['converted_users']} converted ({actual_summary['avg_trial_conversion_rate']:.1f}%), rates: {actual_summary['avg_trial_refund_rate']:.1f}%/{actual_summary['avg_purchase_refund_rate']:.1f}%")
                 
                 return {
                     'success': True,
@@ -3089,7 +3163,7 @@ class AnalyticsQueryService:
                     },
                     'actual': {
                         'summary': actual_summary,
-                        'users': format_user_records(actual_converted_users)  # Only converted users for actual
+                        'users': format_user_records(actual_users)  # Show all time-eligible users for actual
                     },
                     'entity_info': {
                         'entity_type': entity_type,
