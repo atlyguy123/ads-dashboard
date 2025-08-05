@@ -19,10 +19,8 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
 # Initialize the dashboard service
 dashboard_service = DashboardService()
 
-# Initialize the analytics query service with thread safety
-import threading
+# Initialize the analytics query service (batch processing provides thread safety)
 analytics_service = AnalyticsQueryService()
-analytics_lock = threading.Lock()
 
 @dashboard_bp.route('/configurations', methods=['GET'])
 def get_configurations():
@@ -292,9 +290,8 @@ def get_analytics_data():
             include_mixpanel=include_mixpanel
         )
         
-        # Execute analytics query with thread safety
-        with analytics_lock:
-            result = analytics_service.execute_analytics_query(config)
+        # Execute analytics query (batch processing eliminates need for thread lock)
+        result = analytics_service.execute_analytics_query(config)
         
         # 🔍 CRITICAL DEBUG - Log the exact response being sent to frontend
         logger.info("🔍 ANALYTICS ENDPOINT - CRITICAL RESPONSE DEBUG:")
@@ -407,9 +404,8 @@ def get_analytics_chart_data():
                 include_mixpanel=True
             )
             
-            # Use analytics service to get real chart data
-            with analytics_lock:
-                result = analytics_service.get_chart_data(config, entity_type, entity_id)
+            # Use analytics service to get real chart data (batch processing eliminates need for thread lock)
+            result = analytics_service.get_chart_data(config, entity_type, entity_id)
             
             if result.get('success'):
                 return jsonify(result)
@@ -501,8 +497,7 @@ def get_user_details_for_tooltip():
         
         # Get user details with thread safety
         try:
-            with analytics_lock:
-                result = analytics_service.get_user_details_for_tooltip(
+            result = analytics_service.get_user_details_for_tooltip(
                     entity_type=entity_type,
                     entity_id=entity_id,
                     start_date=start_date,
@@ -539,9 +534,8 @@ def get_user_details_for_tooltip():
 def get_available_date_range():
     """Get the available date range from the analytics data"""
     try:
-        with analytics_lock:
-            logger.info("Getting available date range for analytics data")
-            result = analytics_service.get_available_date_range()
+        logger.info("Getting available date range for analytics data")
+        result = analytics_service.get_available_date_range()
             
         if result.get('success'):
             return jsonify(result)
@@ -606,12 +600,11 @@ def get_segment_performance():
         if sort_direction not in ['asc', 'desc']:
             sort_direction = 'desc'
         
-        with analytics_lock:
-            result = analytics_service.get_segment_performance(
-                filters=filters,
-                sort_column=sort_column,
-                sort_direction=sort_direction
-            )
+        result = analytics_service.get_segment_performance(
+            filters=filters,
+            sort_column=sort_column,
+            sort_direction=sort_direction
+        )
             
         if result.get('success'):
             return jsonify(result)
@@ -655,12 +648,11 @@ def get_overview_roas_chart():
         
         # Get overview ROAS chart data with thread safety
         try:
-            with analytics_lock:
-                result = analytics_service.get_overview_roas_chart_data(
-                    start_date=start_date,
-                    end_date=end_date,
-                    breakdown=breakdown
-                )
+            result = analytics_service.get_overview_roas_chart_data(
+                start_date=start_date,
+                end_date=end_date,
+                breakdown=breakdown
+            )
             
             if result.get('success'):
                 return jsonify(result)

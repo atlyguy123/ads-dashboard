@@ -189,6 +189,17 @@ class AnalyticsQueryService:
             if not hierarchical_result.get('success') or not hierarchical_result.get('data'):
                 return hierarchical_result
             
+            # PERFORMANCE OPTIMIZATION: Batch calculate all entity rates before processing
+            logger.info("⚡ Collecting entities for batch rate calculation...")
+            all_entities = self._collect_all_entities_from_hierarchy(hierarchical_result['data'])
+            
+            if all_entities:
+                logger.info(f"⚡ Batch calculating rates for {len(all_entities)} entities...")
+                self._rates_cache = self._batch_calculate_entity_rates(all_entities, config)
+                logger.info(f"⚡ Cached rates for {len(self._rates_cache)} entities")
+            else:
+                self._rates_cache = {}
+            
             # CRITICAL FIX: If breakdown is requested AND we have hierarchical data, 
             # enrich the hierarchy with breakdown data instead of replacing it
             if config.breakdown != 'all' and config.enable_breakdown_mapping:
@@ -2152,8 +2163,13 @@ class AnalyticsQueryService:
         formatted['click_to_trial_rate'] = RateCalculators.calculate_click_to_trial_rate(calc_input)
         
         # Database pass-through calculations (conversion rates)
-        # CRITICAL FIX: Calculate rates directly from database for this entity
-        trial_conv_rate, trial_refund_rate, purchase_refund_rate = self._calculate_entity_rates(entity_type, record, config)
+        # PERFORMANCE OPTIMIZATION: Use cached rates if available, fallback to individual calculation
+        entity_id = record.get(f'{entity_type}_id')
+        if hasattr(self, '_rates_cache') and entity_id in self._rates_cache:
+            trial_conv_rate, trial_refund_rate, purchase_refund_rate = self._rates_cache[entity_id]
+        else:
+            # Fallback to individual calculation for missing entities
+            trial_conv_rate, trial_refund_rate, purchase_refund_rate = self._calculate_entity_rates(entity_type, record, config)
         
         formatted['trial_conversion_rate'] = trial_conv_rate
         formatted['trial_to_purchase_rate'] = trial_conv_rate  # Same as trial conversion rate
@@ -2172,6 +2188,171 @@ class AnalyticsQueryService:
             formatted['children'] = record['children']
         
         return formatted
+    
+    def _batch_calculate_entity_rates(self, entities: List[Dict[str, Any]], config: QueryConfig = None) -> Dict[str, tuple]:
+        """
+        Batch calculate conversion rates for multiple entities in a single database query.
+        
+        Args:
+            entities: List of dicts with 'entity_type', 'entity_id' keys
+            config: Query configuration with date range
+            
+        Returns:
+            Dict mapping entity_id to (trial_conversion_rate, trial_refund_rate, purchase_refund_rate)
+        """
+        if not entities:
+            return {}
+            
+        try:
+            # Use config dates or default to recent period
+            if config:
+                start_date = config.start_date
+                end_date = config.end_date
+            else:
+                from datetime import datetime, timedelta
+                end_date = now_in_timezone().date().strftime('%Y-%m-%d')
+                start_date = (now_in_timezone().date() - timedelta(days=7)).strftime('%Y-%m-%d')
+            
+            # Group entities by type for optimized queries
+            campaigns = [e['entity_id'] for e in entities if e['entity_type'] == 'campaign' and e['entity_id']]
+            adsets = [e['entity_id'] for e in entities if e['entity_type'] == 'adset' and e['entity_id']]
+            ads = [e['entity_id'] for e in entities if e['entity_type'] == 'ad' and e['entity_id']]
+            
+            rates_cache = {}
+            
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Batch query for campaigns
+                if campaigns:
+                    campaign_placeholders = ','.join(['?' for _ in campaigns])
+                    campaign_query = f"""
+                    SELECT 
+                        u.abi_campaign_id as entity_id,
+                        AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                        AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                        AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                        COUNT(DISTINCT upm.distinct_id) as total_users
+                    FROM user_product_metrics upm
+                    JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                    WHERE u.abi_campaign_id IN ({campaign_placeholders})
+                      AND upm.credited_date BETWEEN ? AND ?
+                      AND upm.trial_conversion_rate IS NOT NULL
+                      AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                      AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                    GROUP BY u.abi_campaign_id
+                    """
+                    cursor.execute(campaign_query, campaigns + [start_date, end_date])
+                    for result in cursor.fetchall():
+                        if result['total_users'] > 0:
+                            entity_id = result['entity_id']
+                            trial_conv = max(0.0, min(100.0, (result['avg_trial_conversion_rate'] or 0) * 100))
+                            trial_refund = max(0.0, min(100.0, (result['avg_trial_refund_rate'] or 0) * 100))
+                            purchase_refund = max(0.0, min(100.0, (result['avg_purchase_refund_rate'] or 0) * 100))
+                            rates_cache[entity_id] = (trial_conv, trial_refund, purchase_refund)
+                
+                # Batch query for adsets
+                if adsets:
+                    adset_placeholders = ','.join(['?' for _ in adsets])
+                    adset_query = f"""
+                    SELECT 
+                        u.abi_ad_set_id as entity_id,
+                        AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                        AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                        AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                        COUNT(DISTINCT upm.distinct_id) as total_users
+                    FROM user_product_metrics upm
+                    JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                    WHERE u.abi_ad_set_id IN ({adset_placeholders})
+                      AND upm.credited_date BETWEEN ? AND ?
+                      AND upm.trial_conversion_rate IS NOT NULL
+                      AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                      AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                    GROUP BY u.abi_ad_set_id
+                    """
+                    cursor.execute(adset_query, adsets + [start_date, end_date])
+                    for result in cursor.fetchall():
+                        if result['total_users'] > 0:
+                            entity_id = result['entity_id']
+                            trial_conv = max(0.0, min(100.0, (result['avg_trial_conversion_rate'] or 0) * 100))
+                            trial_refund = max(0.0, min(100.0, (result['avg_trial_refund_rate'] or 0) * 100))
+                            purchase_refund = max(0.0, min(100.0, (result['avg_purchase_refund_rate'] or 0) * 100))
+                            rates_cache[entity_id] = (trial_conv, trial_refund, purchase_refund)
+                
+                # Batch query for ads
+                if ads:
+                    ad_placeholders = ','.join(['?' for _ in ads])
+                    ad_query = f"""
+                    SELECT 
+                        u.abi_ad_id as entity_id,
+                        AVG(upm.trial_conversion_rate) as avg_trial_conversion_rate,
+                        AVG(upm.trial_converted_to_refund_rate) as avg_trial_refund_rate,
+                        AVG(upm.initial_purchase_to_refund_rate) as avg_purchase_refund_rate,
+                        COUNT(DISTINCT upm.distinct_id) as total_users
+                    FROM user_product_metrics upm
+                    JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
+                    WHERE u.abi_ad_id IN ({ad_placeholders})
+                      AND upm.credited_date BETWEEN ? AND ?
+                      AND upm.trial_conversion_rate IS NOT NULL
+                      AND upm.trial_converted_to_refund_rate IS NOT NULL  
+                      AND upm.initial_purchase_to_refund_rate IS NOT NULL
+                    GROUP BY u.abi_ad_id
+                    """
+                    cursor.execute(ad_query, ads + [start_date, end_date])
+                    for result in cursor.fetchall():
+                        if result['total_users'] > 0:
+                            entity_id = result['entity_id']
+                            trial_conv = max(0.0, min(100.0, (result['avg_trial_conversion_rate'] or 0) * 100))
+                            trial_refund = max(0.0, min(100.0, (result['avg_trial_refund_rate'] or 0) * 100))
+                            purchase_refund = max(0.0, min(100.0, (result['avg_purchase_refund_rate'] or 0) * 100))
+                            rates_cache[entity_id] = (trial_conv, trial_refund, purchase_refund)
+            
+            logger.info(f"✅ Batch calculated rates for {len(rates_cache)}/{len(entities)} entities in 3 queries (vs {len(entities)} individual queries)")
+            return rates_cache
+            
+        except Exception as e:
+            logger.error(f"Error in batch calculating entity rates: {e}")
+            return {}
+    
+    def _collect_all_entities_from_hierarchy(self, data: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Recursively collect all entities (campaigns, adsets, ads) from hierarchical data.
+        
+        Returns:
+            List of dicts with 'entity_type' and 'entity_id' keys
+        """
+        entities = []
+        
+        def collect_entities_recursive(items, level='campaign'):
+            for item in items:
+                # Determine entity type and ID
+                if level == 'campaign':
+                    entity_id = item.get('campaign_id')
+                    entity_type = 'campaign'
+                elif level == 'adset':
+                    entity_id = item.get('adset_id')
+                    entity_type = 'adset'
+                elif level == 'ad':
+                    entity_id = item.get('ad_id')
+                    entity_type = 'ad'
+                else:
+                    continue
+                
+                # Add entity if it has an ID
+                if entity_id:
+                    entities.append({
+                        'entity_type': entity_type,
+                        'entity_id': entity_id
+                    })
+                
+                # Recursively process children
+                if 'children' in item and item['children']:
+                    next_level = 'adset' if level == 'campaign' else 'ad'
+                    collect_entities_recursive(item['children'], next_level)
+        
+        collect_entities_recursive(data)
+        return entities
     
     def _calculate_entity_rates(self, entity_type: str, record: Dict[str, Any], config: QueryConfig = None) -> tuple:
         """

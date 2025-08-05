@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { dashboardApi } from '../../services/dashboardApi';
+import React, { useState, useRef, useCallback } from 'react';
+import useOverviewChartData from '../../hooks/useOverviewChartData';
 
 const OverviewSpendSparkline = React.memo(({ 
   dateRange,
   breakdown = 'all',
+  refreshTrigger = 0,
   width = 120,
   height = 40
 }) => {
-  const [chartData, setChartData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Use shared overview chart data
+  const { chartData, loading, error } = useOverviewChartData(dateRange, breakdown, refreshTrigger);
+  
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const svgRef = useRef(null);
@@ -26,42 +27,7 @@ const OverviewSpendSparkline = React.memo(({
     return 'text-blue-700';
   };
 
-  // Load overview spend chart data
-  useEffect(() => {
-    const loadChartData = async () => {
-      if (!dateRange?.end_date) {
-        return;
-      }
-      
-      setLoading(true);
-      setError(null);
-      
-      try {
-        // Calculate 28 days ending at the end_date
-        const endDate = new Date(dateRange.end_date);
-        const startDate = new Date(endDate);
-        startDate.setDate(endDate.getDate() - 27); // 27 days back = 28 days total
-        
-        const response = await dashboardApi.getOverviewROASChartData({
-          start_date: startDate.toISOString().split('T')[0],
-          end_date: dateRange.end_date,
-          breakdown: breakdown
-        });
-        
-        if (response && response.success && response.chart_data) {
-          setChartData(response.chart_data);
-        } else {
-          setError('Invalid API response');
-        }
-      } catch (error) {
-        setError(error.message);
-      } finally {
-        setLoading(false);
-      }
-    };
 
-    loadChartData();
-  }, [dateRange, breakdown]);
 
   // Handle mouse move over SVG
   const handleMouseMove = useCallback((event) => {
@@ -110,6 +76,15 @@ const OverviewSpendSparkline = React.memo(({
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
     parseFloat(d.rolling_1d_spend) > 0
   );
+  
+  // Debug logging
+  console.log('📊 SpendSparkline data:', { 
+    chartDataLength: chartData.length, 
+    hasEnoughData, 
+    loading, 
+    error,
+    sampleData: chartData.slice(0, 2)
+  });
 
   if (loading) {
     return (

@@ -38,6 +38,7 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for overview sparklines refresh
   const [dashboardData, setDashboardData] = useState(() => {
     // Load saved dashboard data immediately
     const saved = localStorage.getItem('dashboard_data');
@@ -607,6 +608,7 @@ export const Dashboard = () => {
       if (response.success) {
         setDashboardData(response.data || []);
         setLastUpdated(new Date().toISOString());
+        setRefreshTrigger(prev => prev + 1); // Trigger overview sparklines refresh
         
         // Initialize row order with data IDs only if no column sorting is active
         if (response.data && response.data.length > 0 && (!sortConfig.column)) {
@@ -877,6 +879,7 @@ export const Dashboard = () => {
                     <OverviewSpendSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
                     />
@@ -899,6 +902,7 @@ export const Dashboard = () => {
                     <OverviewRevenueSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
                     />
@@ -921,6 +925,7 @@ export const Dashboard = () => {
                     <OverviewProfitSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
                     />
@@ -950,6 +955,7 @@ export const Dashboard = () => {
                     <OverviewROASSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
                     />
