@@ -610,9 +610,37 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
                   <div className="grid grid-cols-2 gap-3">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-white">
-                        {userDetails.summary.total_users}
+                        {(() => {
+                          // For estimated mode, always show total users (averaging calculation)
+                          if (currentMode === 'estimated') {
+                            return userDetails.summary.total_users;
+                          }
+                          // For actual mode, show specific cohort
+                          if (columnKey === 'trial_conversion_rate') {
+                            return userDetails.summary.total_users;
+                          } else if (columnKey === 'avg_trial_refund_rate') {
+                            return userDetails.summary.trial_converted_users || 0;
+                          } else { // purchase_refund_rate
+                            return userDetails.summary.purchase_users || 0;
+                          }
+                        })()}
                       </div>
-                      <div className="text-xs text-gray-300">Total Users</div>
+                      <div className="text-xs text-gray-300">
+                        {(() => {
+                          // For estimated mode, always show "Total Users"
+                          if (currentMode === 'estimated') {
+                            return 'Total Users';
+                          }
+                          // For actual mode, show specific cohort label
+                          if (columnKey === 'trial_conversion_rate') {
+                            return 'Total Users';
+                          } else if (columnKey === 'avg_trial_refund_rate') {
+                            return 'Converted Users';
+                          } else { // purchase_refund_rate
+                            return 'Purchase Users';
+                          }
+                        })()}
+                      </div>
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-green-400">

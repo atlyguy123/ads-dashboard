@@ -3291,6 +3291,10 @@ class AnalyticsQueryService:
                     # Get converted user records for revenue calculation
                     converted_user_records = [r for r in users_list if (r['distinct_id'], r['product_id']) in converted_users]
                     
+                    # Create cohort-specific user lists for display
+                    trial_converted_user_records = [r for r in users_list if (r['distinct_id'], r['product_id']) in trial_converted_users]
+                    purchase_user_records = [r for r in users_list if (r['distinct_id'], r['product_id']) in purchase_users]
+                    
                     return {
                         'total_users': total_eligible,  # Show all time-eligible users (matching modal display)
                         'converted_users': converted_count,  # Track how many actually converted  
@@ -3304,7 +3308,10 @@ class AnalyticsQueryService:
                         'trial_refunded_users': trial_refund_count,
                         'trial_converted_users': trial_conversion_count,
                         'purchase_refunded_users': purchase_refund_count,
-                        'purchase_users': purchase_count
+                        'purchase_users': purchase_count,
+                        # Add cohort-specific user lists
+                        'trial_converted_user_records': trial_converted_user_records,
+                        'purchase_user_records': purchase_user_records
                     }
                 
                 estimated_summary = calculate_summary_stats(estimated_users)
@@ -3336,6 +3343,14 @@ class AnalyticsQueryService:
                 logger.info(f"✅ ESTIMATED: {estimated_summary['total_users']} users, avg rates: {estimated_summary['avg_trial_conversion_rate']:.1f}%/{estimated_summary['avg_trial_refund_rate']:.1f}%/{estimated_summary['avg_purchase_refund_rate']:.1f}%")
                 logger.info(f"✅ ACTUAL: {actual_summary['total_users']} eligible, {actual_summary['converted_users']} converted ({actual_summary['avg_trial_conversion_rate']:.1f}%), rates: {actual_summary['avg_trial_refund_rate']:.1f}%/{actual_summary['avg_purchase_refund_rate']:.1f}%")
                 
+                # Select appropriate user list for actual mode based on metric type
+                if metric_type == 'avg_trial_refund_rate':
+                    actual_users_for_display = actual_summary['trial_converted_user_records']
+                elif metric_type == 'purchase_refund_rate':
+                    actual_users_for_display = actual_summary['purchase_user_records']
+                else:  # trial_conversion_rate
+                    actual_users_for_display = actual_users
+                
                 return {
                     'success': True,
                     'estimated': {
@@ -3344,7 +3359,7 @@ class AnalyticsQueryService:
                     },
                     'actual': {
                         'summary': actual_summary,
-                        'users': format_user_records(actual_users)  # Show all time-eligible users for actual
+                        'users': format_user_records(actual_users_for_display)  # Show cohort that matches summary count
                     },
                     'entity_info': {
                         'entity_type': entity_type,
