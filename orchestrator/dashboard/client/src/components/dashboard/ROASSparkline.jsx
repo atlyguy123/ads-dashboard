@@ -23,20 +23,15 @@ const ROASSparkline = React.memo(({
   startDate,
   endDate,
   isBreakdownEntity = false,
-  calculationTooltip = null
+  calculationTooltip = null,
+  sparklineData = []  // 🚀 NEW: Data passed from main API call
 }) => {
-  const [chartData, setChartData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const svgRef = useRef(null);
   
-  // Memoize cache key to prevent unnecessary recalculations
-  const cacheKey = useMemo(() => 
-    getCacheKey(entityType, entityId, breakdown, startDate, endDate),
-    [entityType, entityId, breakdown, startDate, endDate]
-  );
+  // 🚀 CRITICAL: Use sparklineData from main API response instead of making individual API calls
+  const chartData = sparklineData;
 
   // Get ROAS performance color based on thresholds
   const getROASPerformanceColor = (roas, conversions = 0) => {
@@ -61,53 +56,8 @@ const ROASSparkline = React.memo(({
     return 'text-purple-400';
   };
 
-  // Load chart data with caching
-  useEffect(() => {
-    const loadChartData = async () => {
-      if (!entityId || !startDate || !endDate) {
-        return;
-      }
-      
-      // Check cache first
-      if (sparklineCache.has(cacheKey)) {
-        const cachedData = sparklineCache.get(cacheKey);
-        setChartData(cachedData);
-        setError(null);
-        return;
-      }
-      
-      setLoading(true);
-      setError(null);
-      
-      try {
-        const apiParams = {
-          entity_type: entityType,
-          entity_id: entityId,
-          breakdown: breakdown,
-          start_date: startDate,
-          end_date: endDate
-        };
-        
-        const response = await dashboardApi.getAnalyticsChartData(apiParams);
-        
-        if (response && response.success && response.chart_data) {
-          // Cache the successful response
-          sparklineCache.set(cacheKey, response.chart_data);
-          setChartData(response.chart_data);
-        } else {
-          console.error(`🚨 SPARKLINE RESPONSE ERROR (${entityType}/${entityId}):`, response);
-          setError(`Invalid response: ${response?.error || 'No chart data'}`);
-        }
-      } catch (error) {
-        console.error(`🚨 SPARKLINE CATCH ERROR (${entityType}/${entityId}):`, error);
-        setError(error.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadChartData();
-  }, [cacheKey, entityType, entityId, breakdown, startDate, endDate]);
+  // 🗑️ REMOVED: Individual API calls for sparkline data
+  // Data is now provided via sparklineData prop from main dashboard API call
 
   // Handle mouse move over SVG - memoized to prevent unnecessary re-renders
   const handleMouseMove = useCallback((event) => {
@@ -178,15 +128,7 @@ const ROASSparkline = React.memo(({
       
       {/* Sparkline Area */}
       <div className="min-w-[60px] relative">
-        {loading ? (
-          <div className="w-[60px] h-[20px] bg-blue-200 animate-pulse rounded flex items-center justify-center text-xs">
-            ⏳
-          </div>
-        ) : error ? (
-          <div className="w-[60px] h-[20px] flex items-center justify-center text-red-400 text-xs border border-red-300">
-            ❌
-          </div>
-        ) : hasEnoughData ? (
+        {hasEnoughData ? (
           // Real sparkline using actual data
           (() => {
             const width = 60;

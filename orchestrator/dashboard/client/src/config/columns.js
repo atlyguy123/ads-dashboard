@@ -53,6 +53,25 @@ export const AVAILABLE_COLUMNS = [
   { key: 'click_to_trial_rate', label: 'Click to Trial Rate', defaultVisible: false },
   { key: 'estimated_revenue_usd', label: 'Estimated Revenue (Base)', defaultVisible: false },
   { key: 'mixpanel_revenue_net', label: 'Net Actual Revenue', defaultVisible: false },
+  
+  // Comprehensive revenue fields from pre-computed data
+  { key: 'actual_revenue_usd', label: 'Actual Revenue', subtitle: '(Completed Purchases)', defaultVisible: false },
+  { key: 'actual_refunds_usd', label: 'Actual Refunds', subtitle: '(USD)', defaultVisible: false },
+  { key: 'net_actual_revenue_usd', label: 'Net Revenue', subtitle: '(After Refunds)', defaultVisible: false },
+  
+  // Comprehensive conversion rate fields (estimated vs actual)
+  { key: 'trial_conversion_rate_estimated', label: 'Trial Conversion Rate (Est.)', subtitle: '(Meta Estimate)', defaultVisible: false },
+  { key: 'trial_refund_rate_estimated', label: 'Trial Refund Rate (Est.)', subtitle: '(Meta Estimate)', defaultVisible: false },
+  { key: 'purchase_refund_rate_estimated', label: 'Purchase Refund Rate (Est.)', subtitle: '(Meta Estimate)', defaultVisible: false },
+  
+  // User lists (typically hidden but available for debugging)
+  { key: 'trial_users_list', label: 'Trial User IDs', defaultVisible: false },
+  { key: 'post_trial_user_ids', label: 'Post-Trial User IDs', defaultVisible: false },
+  { key: 'converted_user_ids', label: 'Converted User IDs', defaultVisible: false },
+  { key: 'trial_refund_user_ids', label: 'Trial Refund User IDs', defaultVisible: false },
+  { key: 'purchase_user_ids', label: 'Purchase User IDs', defaultVisible: false },
+  { key: 'purchase_refund_user_ids', label: 'Purchase Refund User IDs', defaultVisible: false },
+  
   { key: 'segment_accuracy_average', label: 'Avg. Accuracy', defaultVisible: false }
 ];
 

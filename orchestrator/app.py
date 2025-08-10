@@ -109,20 +109,19 @@ def init_db():
     except Exception as e:
         logger.error(f"❌ Failed to initialize pipeline runs database: {e}")
         # Fallback to local db.sqlite for development
-        conn = sqlite3.connect('db.sqlite')
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pipeline_name TEXT,
-                status TEXT,
-                started_at TIMESTAMP,
-                completed_at TIMESTAMP,
-                error_message TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
+        with sqlite3.connect('db.sqlite') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pipeline_name TEXT,
+                    status TEXT,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    error_message TEXT
+                )
+            ''')
+            conn.commit()
 
 class PipelineRunner:
     def __init__(self):
@@ -1008,46 +1007,15 @@ def handle_json_get_requests():
     if request.method == 'GET' and request.content_type == 'application/json':
 
         
-        # For analytics chart-data endpoints, handle this gracefully
+        # 🗑️ REMOVED: chart-data fallback handler - sparkline data now included in main /analytics/data response
+        # This was causing individual API calls for each sparkline, defeating the O(1) optimization
         if 'chart-data' in request.path:
             from flask import jsonify
-            from orchestrator.dashboard.services.analytics_query_service import AnalyticsQueryService, QueryConfig
-            
-            try:
-                # Extract query parameters manually since Flask is confused by Content-Type
-                start_date = request.args.get('start_date')
-                end_date = request.args.get('end_date')
-                breakdown = request.args.get('breakdown')
-                entity_type = request.args.get('entity_type')
-                entity_id = request.args.get('entity_id')
-                
-                # Basic validation
-                if not all([start_date, end_date, breakdown, entity_type, entity_id]):
-                    return jsonify({
-                        'success': False,
-                        'error': 'Missing required parameters',
-                        'message': 'Required: start_date, end_date, breakdown, entity_type, entity_id'
-                    }), 400
-                
-                # Create service and execute query
-                service = AnalyticsQueryService()
-                config = QueryConfig(
-                    breakdown=breakdown,
-                    start_date=start_date,
-                    end_date=end_date,
-                    include_mixpanel=False
-                )
-                
-                result = service.get_chart_data(config, entity_type, entity_id)
-                return jsonify(result)
-                
-            except Exception as e:
-                print(f"Error in GET/JSON workaround: {e}")
-                return jsonify({
-                    'success': False,
-                    'error': 'Internal Server Error',
-                    'message': str(e)
-                }), 500
+            return jsonify({
+                'success': False,
+                'error': 'Endpoint deprecated - sparkline data included in main /analytics/data response',
+                'message': 'Use /api/dashboard/analytics/data instead'
+            }), 410  # 410 Gone - resource no longer available
 
 @app.before_request
 def log_request():

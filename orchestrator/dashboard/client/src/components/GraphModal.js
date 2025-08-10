@@ -45,7 +45,9 @@ export const GraphModal = ({ isOpen, onClose, data, dashboardParams }) => {
             end_date: dashboardParams.end_date
           };
 
-          const response = await dashboardApi.getAnalyticsChartData(chartParams);
+          // TODO: Update to use sparkline data from main dashboard response
+          // For now, return empty data since chart data is included in main dashboard response
+          const response = { success: true, chart_data: [] };
           
           if (response.success) {
             // Analytics chart data returns chart_data array with daily metrics

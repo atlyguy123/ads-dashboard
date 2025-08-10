@@ -290,6 +290,107 @@ EXPECTED_TABLES = {
         'last_modified': 'DATETIME',
         'view_parameters': 'TEXT',
         'is_public': 'BOOLEAN'
+    },
+    'daily_mixpanel_metrics': {
+        'metric_id': 'INTEGER',
+        'date': 'DATE',
+        'entity_type': 'TEXT',
+        'entity_id': 'TEXT',
+        'trial_users_count': 'INTEGER',
+        'trial_users_list': 'TEXT',
+        'purchase_users_count': 'INTEGER',
+        'purchase_users_list': 'TEXT',
+        'estimated_revenue_usd': 'DECIMAL',
+        'meta_spend': 'DECIMAL',
+        'meta_impressions': 'INTEGER',
+        'meta_clicks': 'INTEGER',
+        'meta_trial_count': 'INTEGER',
+        'meta_purchase_count': 'INTEGER',
+        'post_trial_user_ids': 'TEXT',
+        'converted_user_ids': 'TEXT',
+        'trial_refund_user_ids': 'TEXT',
+        'purchase_refund_user_ids': 'TEXT',
+        'trial_conversion_rate_estimated': 'DECIMAL',
+        'trial_conversion_rate_actual': 'DECIMAL',
+        'trial_refund_rate_estimated': 'DECIMAL',
+        'trial_refund_rate_actual': 'DECIMAL',
+        'purchase_refund_rate_estimated': 'DECIMAL',
+        'purchase_refund_rate_actual': 'DECIMAL',
+        'actual_revenue_usd': 'DECIMAL',
+        'actual_refunds_usd': 'DECIMAL',
+        'net_actual_revenue_usd': 'DECIMAL',
+        'adjusted_estimated_revenue_usd': 'DECIMAL',
+        'profit_usd': 'DECIMAL',
+        'estimated_roas': 'DECIMAL',
+        'trial_accuracy_ratio': 'DECIMAL',
+        'purchase_accuracy_ratio': 'DECIMAL',
+        'mixpanel_cost_per_trial': 'DECIMAL',
+        'mixpanel_cost_per_purchase': 'DECIMAL',
+        'meta_cost_per_trial': 'DECIMAL',
+        'meta_cost_per_purchase': 'DECIMAL',
+        'click_to_trial_rate': 'DECIMAL',
+        'computed_at': 'DATETIME',
+        'data_quality_score': 'DECIMAL'
+    },
+    'daily_mixpanel_metrics_breakdown': {
+        'entity_type': 'TEXT',
+        'entity_id': 'TEXT',
+        'date': 'DATE',
+        'breakdown_type': 'TEXT',
+        'breakdown_value': 'TEXT',
+        'meta_spend': 'DECIMAL',
+        'meta_impressions': 'INTEGER',
+        'meta_clicks': 'INTEGER',
+        'meta_trial_count': 'INTEGER',
+        'meta_purchase_count': 'INTEGER',
+        'mixpanel_trial_count': 'INTEGER',
+        'mixpanel_purchase_count': 'INTEGER',
+        'trial_user_ids': 'TEXT',
+        'post_trial_user_ids': 'TEXT',
+        'converted_user_ids': 'TEXT',
+        'trial_refund_user_ids': 'TEXT',
+        'purchase_user_ids': 'TEXT',
+        'purchase_refund_user_ids': 'TEXT',
+        'trial_conversion_rate_estimated': 'DECIMAL',
+        'trial_conversion_rate_actual': 'DECIMAL',
+        'trial_refund_rate_estimated': 'DECIMAL',
+        'trial_refund_rate_actual': 'DECIMAL',
+        'purchase_refund_rate_estimated': 'DECIMAL',
+        'purchase_refund_rate_actual': 'DECIMAL',
+        'actual_revenue_usd': 'DECIMAL',
+        'actual_refunds_usd': 'DECIMAL',
+        'net_actual_revenue_usd': 'DECIMAL',
+        'estimated_revenue_usd': 'DECIMAL',
+        'adjusted_estimated_revenue_usd': 'DECIMAL',
+        'profit_usd': 'DECIMAL',
+        'estimated_roas': 'DECIMAL',
+        'trial_accuracy_ratio': 'DECIMAL',
+        'purchase_accuracy_ratio': 'DECIMAL',
+        'mixpanel_cost_per_trial': 'DECIMAL',
+        'mixpanel_cost_per_purchase': 'DECIMAL',
+        'meta_cost_per_trial': 'DECIMAL',
+        'meta_cost_per_purchase': 'DECIMAL',
+        'click_to_trial_rate': 'DECIMAL',
+        'computed_at': 'DATETIME'
+    },
+    'id_name_mapping': {
+        'entity_type': 'TEXT',
+        'entity_id': 'TEXT',
+        'canonical_name': 'TEXT',
+        'frequency_count': 'INTEGER',
+        'last_seen_date': 'DATE',
+        'created_at': 'DATETIME',
+        'updated_at': 'DATETIME'
+    },
+    'id_hierarchy_mapping': {
+        'ad_id': 'TEXT',
+        'adset_id': 'TEXT',
+        'campaign_id': 'TEXT',
+        'relationship_confidence': 'DECIMAL',
+        'first_seen_date': 'DATE',
+        'last_seen_date': 'DATE',
+        'created_at': 'DATETIME',
+        'updated_at': 'DATETIME'
     }
 }
 
@@ -549,10 +650,12 @@ def drop_mixpanel_tables(conn: sqlite3.Connection):
     
     # Tables to drop (Mixpanel data only) - Order matters for foreign key constraints
     mixpanel_tables = [
-        'user_product_metrics',  # Drop dependent tables first
-        'mixpanel_event',        # Drop dependent tables first  
-        'mixpanel_user',         # Drop parent table last
-        'processed_event_days'   # This tracks which event dates have been processed
+        'daily_mixpanel_metrics_breakdown',  # Drop dependent tables first
+        'daily_mixpanel_metrics',            # Drop dependent tables first
+        'user_product_metrics',              # Drop dependent tables first
+        'mixpanel_event',                    # Drop dependent tables first  
+        'mixpanel_user',                     # Drop parent table last
+        'processed_event_days'               # This tracks which event dates have been processed
     ]
     
     try:

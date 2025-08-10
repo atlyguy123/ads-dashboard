@@ -121,12 +121,7 @@ class DashboardApiService {
     return this.makeRequest('/health');
   }
 
-  async getChartData(params) {
-    return this.makeRequest('/chart-data', {
-      method: 'POST',
-      body: JSON.stringify(params),
-    });
-  }
+  // 🗑️ REMOVED: getChartData - legacy endpoint, replaced by sparkline data in main response
 
   /**
    * Get analytics data from the analytics pipeline - NEW ANALYTICS API
@@ -157,13 +152,7 @@ class DashboardApiService {
     return result;
   }
 
-  /**
-   * Get chart data for analytics sparklines and detailed views
-   */
-  async getAnalyticsChartData(params) {
-    const queryParams = new URLSearchParams(params).toString();
-    return this.makeRequest(`/analytics/chart-data?${queryParams}`);
-  }
+  // 🗑️ REMOVED: getAnalyticsChartData - sparkline data now included in main analytics response
 
   /**
    * Run pipeline analysis for a specific campaign, adset, or ad

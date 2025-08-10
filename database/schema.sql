@@ -452,11 +452,114 @@ CREATE TABLE daily_mixpanel_metrics (
     -- Revenue Metrics
     estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     
+    -- Meta Advertising Metrics (NEW)
+    meta_spend DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_impressions INTEGER NOT NULL DEFAULT 0,
+    meta_clicks INTEGER NOT NULL DEFAULT 0,
+    meta_trial_count INTEGER NOT NULL DEFAULT 0,
+    meta_purchase_count INTEGER NOT NULL DEFAULT 0,
+    
+    -- User Lifecycle Tracking (NEW)
+    post_trial_user_ids TEXT, -- JSON array for users in post-trial phase
+    converted_user_ids TEXT,   -- JSON array for trial->purchase conversions  
+    trial_refund_user_ids TEXT, -- JSON array for trial refunds
+    purchase_refund_user_ids TEXT, -- JSON array for purchase refunds
+    
+    -- Conversion Rate Metrics (NEW)
+    trial_conversion_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_conversion_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_refund_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_refund_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    purchase_refund_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    purchase_refund_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    
+    -- Revenue Metrics (NEW)
+    actual_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    actual_refunds_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    net_actual_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    adjusted_estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    
+    -- Performance Metrics (NEW)
+    profit_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    estimated_roas DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    trial_accuracy_ratio DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    purchase_accuracy_ratio DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    
+    -- Cost Metrics (NEW)
+    mixpanel_cost_per_trial DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    mixpanel_cost_per_purchase DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_cost_per_trial DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_cost_per_purchase DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    click_to_trial_rate DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    
     -- Metadata
     computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     data_quality_score DECIMAL(3,2), -- 0.00 to 1.00
     
     UNIQUE (date, entity_type, entity_id)
+);
+
+-- Country/Device/Region Breakdown Metrics Table
+CREATE TABLE daily_mixpanel_metrics_breakdown (
+    entity_type TEXT NOT NULL,          -- 'campaign', 'adset', 'ad'  
+    entity_id TEXT NOT NULL,            -- The actual ID
+    date DATE NOT NULL,                 -- Daily granularity
+    breakdown_type TEXT NOT NULL,       -- 'country', 'region', 'device'
+    breakdown_value TEXT NOT NULL,      -- 'US', 'mobile', etc.
+    
+    -- Meta Advertising Metrics (country-specific)
+    meta_spend DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_impressions INTEGER NOT NULL DEFAULT 0,
+    meta_clicks INTEGER NOT NULL DEFAULT 0,
+    meta_trial_count INTEGER NOT NULL DEFAULT 0,
+    meta_purchase_count INTEGER NOT NULL DEFAULT 0,
+    
+    -- Mixpanel Metrics (country-specific)
+    mixpanel_trial_count INTEGER NOT NULL DEFAULT 0,
+    mixpanel_purchase_count INTEGER NOT NULL DEFAULT 0,
+    
+    -- User Lists (comma-separated distinct_ids for this breakdown)
+    trial_user_ids TEXT,
+    post_trial_user_ids TEXT,
+    converted_user_ids TEXT,
+    trial_refund_user_ids TEXT,
+    purchase_user_ids TEXT,
+    purchase_refund_user_ids TEXT,
+    
+    -- Conversion Rate Metrics (breakdown-specific)
+    trial_conversion_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_conversion_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_refund_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    trial_refund_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    purchase_refund_rate_estimated DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    purchase_refund_rate_actual DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+    
+    -- Revenue Metrics (breakdown-specific, USD)
+    actual_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    actual_refunds_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    net_actual_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    adjusted_estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    
+    -- Performance Metrics (breakdown-specific)
+    profit_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    estimated_roas DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    trial_accuracy_ratio DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    purchase_accuracy_ratio DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    
+    -- Cost Metrics (breakdown-specific, USD)
+    mixpanel_cost_per_trial DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    mixpanel_cost_per_purchase DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_cost_per_trial DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    meta_cost_per_purchase DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    click_to_trial_rate DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    
+    -- Metadata
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (entity_type, entity_id, date, breakdown_type, breakdown_value),
+    FOREIGN KEY (entity_type, entity_id, date) 
+        REFERENCES daily_mixpanel_metrics(entity_type, entity_id, date)
 );
 
 -- Performance Indexes for Pipeline Enhancement Tables
@@ -472,6 +575,12 @@ CREATE INDEX idx_daily_metrics_date_type_id ON daily_mixpanel_metrics(date, enti
 CREATE INDEX idx_daily_metrics_entity_type ON daily_mixpanel_metrics(entity_type);
 CREATE INDEX idx_daily_metrics_date_range ON daily_mixpanel_metrics(date);
 CREATE INDEX idx_daily_metrics_computed ON daily_mixpanel_metrics(computed_at);
+
+-- Breakdown table indexes for fast query performance
+CREATE INDEX idx_breakdown_entity_lookup ON daily_mixpanel_metrics_breakdown(entity_type, entity_id, date, breakdown_type);
+CREATE INDEX idx_breakdown_type_value ON daily_mixpanel_metrics_breakdown(breakdown_type, breakdown_value, date);
+CREATE INDEX idx_breakdown_date_range ON daily_mixpanel_metrics_breakdown(date);
+CREATE INDEX idx_breakdown_computed ON daily_mixpanel_metrics_breakdown(computed_at);
 
 -- ========================================
 -- MERGE BENEFITS & RELATIONSHIPS

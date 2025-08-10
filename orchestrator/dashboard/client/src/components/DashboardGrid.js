@@ -240,62 +240,9 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     product_id: ''
   });
 
-  // Load data immediately on component mount
-  useEffect(() => {
-    const loadInitialData = async () => {
-      if (initialLoad) return; // Already loaded
-      
-      try {
-        setInitialLoad(true);
-        
-        // Extract entity information from row (same logic as handleMouseEnter)
-        let entityType = row.entity_type || row.type;
-        const entityId = row.id;
-        
-        if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
-          entityType = row.entity_type || row.type || 'campaign';
-        }
-        
-        if (!entityType) {
-          console.error('❌ ConversionRateTooltip: Unable to determine entity type for initial load');
-          return;
-        }
-        
-        let apiEntityId = entityId;
-        let breakdownValue = null;
-        
-        if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
-          const parts = entityId.split('_');
-          breakdownValue = parts[0];
-          apiEntityId = parts.slice(1).join('_');
-        }
-        
-        const params = new URLSearchParams({
-          entity_type: entityType,
-          entity_id: apiEntityId,
-          start_date: dashboardParams?.start_date || '2025-01-01',
-          end_date: dashboardParams?.end_date || '2025-12-31',
-          breakdown: dashboardParams?.breakdown || 'all',
-          metric_type: columnKey
-        });
-        
-        if (breakdownValue) {
-          params.append('breakdown_value', breakdownValue);
-        }
-        
-        const response = await apiRequest(`/api/dashboard/analytics/user-details?${params.toString()}`);
-        const result = await response.json();
-        
-        if (result.success) {
-          setDualData(result);
-        }
-      } catch (err) {
-        console.error('Error loading initial conversion rate data:', err);
-      }
-    };
-    
-    loadInitialData();
-  }, [row.id, columnKey, dashboardParams, initialLoad]);
+  // REMOVED: Automatic data loading on component mount
+  // Data is now only loaded when user hovers over the tooltip (on-demand loading)
+  // This prevents 89+ API calls on dashboard load
 
   const handleMouseEnter = async (e, mode = 'estimated') => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -332,89 +279,80 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
       return;
     }
     
-    // Otherwise, fetch data from API
+    // 🚀 CRITICAL: Use user details from main API response instead of making individual API calls
     setLoading(true);
     
     try {
-      // Extract entity information from row
-      // ✅ FIX: Handle both 'entity_type' and 'type' field names from backend
-      let entityType = row.entity_type || row.type; // 'campaign', 'adset', or 'ad'
-      const entityId = row.id; // e.g., 'campaign_123' or 'US_123' for breakdowns
+      // Get user details from row data (included in main dashboard API response)
+      const userDetails = row.user_details || {};
+      const trialUsersCount = row.trial_users_count || 0;
+      const purchaseUsersCount = row.purchase_users_count || 0;
+      const trialRefundCount = row.trial_refund_count || 0;
+      const purchaseRefundCount = row.purchase_refund_count || 0;
       
-      console.log('🔍 ConversionRateTooltip Debug:', {
-        'row.entity_type': row.entity_type,
-        'row.type': row.type,
-        'entityType': entityType,
-        'entityId': entityId,
-        'available_fields': Object.keys(row)
+      console.log('🚀 ConversionRateTooltip using included data:', {
+        'entity_id': row.id,
+        'trial_users_count': trialUsersCount,
+        'purchase_users_count': purchaseUsersCount,
+        'user_details_keys': Object.keys(userDetails),
+        'column_key': columnKey
       });
       
-      // Handle breakdown rows - they might not have proper entity_type
-      if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
-        // This is a breakdown row like "US_123" - use the parent entity type
-        entityType = row.entity_type || row.type || 'campaign'; // fallback to campaign if not specified
-      }
-      
-      // Validate that we have entity type
-      if (!entityType) {
-        console.error('❌ ConversionRateTooltip: Unable to determine entity type from row data:', row);
-        setError('Unable to determine entity type for this item');
-        setLoading(false);
-        return;
-      }
-      
-      // Build API parameters
-      let apiEntityId = entityId;
-      let breakdownValue = null;
-      
-      // Extract breakdown_value and actual entity_id for breakdown rows
-      if (entityId && entityId.includes('_') && !entityId.startsWith('campaign_') && !entityId.startsWith('adset_') && !entityId.startsWith('ad_')) {
-        const parts = entityId.split('_');
-        breakdownValue = parts[0]; // e.g., "US" from "US_120215772671800178"
-        apiEntityId = parts.slice(1).join('_'); // e.g., "120215772671800178" from "US_120215772671800178"
-      }
-      
-      console.log('🔍 ConversionRateTooltip API Call Parameters:', {
-        'entity_type': entityType,
-        'entity_id': apiEntityId,
-        'breakdown_value': breakdownValue,
-        'start_date': dashboardParams?.start_date || '2025-01-01',
-        'end_date': dashboardParams?.end_date || '2025-12-31',
-        'breakdown': dashboardParams?.breakdown || 'all'
-      });
-      
-      const params = new URLSearchParams({
-        entity_type: entityType,
-        entity_id: apiEntityId,
-        start_date: dashboardParams?.start_date || '2025-01-01',
-        end_date: dashboardParams?.end_date || '2025-12-31',
-        breakdown: dashboardParams?.breakdown || 'all',
-        metric_type: columnKey // Pass columnKey to determine trial vs purchase users
-      });
-      
-      // Add breakdown_value if this is a breakdown row
-      if (breakdownValue) {
-        params.append('breakdown_value', breakdownValue);
-      }
-      
-              const response = await apiRequest(`/api/dashboard/analytics/user-details?${params.toString()}`);
-      const result = await response.json();
-      
-      if (result.success) {
-        // Store the full dual data structure
-        setDualData(result);
-        
-        // Set current view to the requested mode
-        const modeData = result[mode]; // Get either 'estimated' or 'actual' data
-        setUserDetails(modeData);
-        // Store all users for modal
-        setAllUsers(modeData.users || []);
+      // Create tooltip data structure based on columnKey
+      let tooltipData;
+      if (columnKey === 'trial_conversion_rate') {
+        // Show trial-related data
+        tooltipData = {
+          estimated: {
+            total_count: trialUsersCount,
+            conversion_rate: value || 0,
+            users: userDetails.trial_users || [],
+            summary: `${trialUsersCount} trial users`,
+            refund_count: trialRefundCount,
+            refund_users: userDetails.trial_refund_user_ids || []
+          },
+          actual: {
+            total_count: trialUsersCount,
+            conversion_rate: value || 0,
+            users: userDetails.trial_users || [],
+            summary: `${trialUsersCount} trial users`,
+            refund_count: trialRefundCount,
+            refund_users: userDetails.trial_refund_user_ids || []
+          }
+        };
       } else {
-        setError(result.error || 'Failed to load user details');
+        // Show purchase-related data
+        tooltipData = {
+          estimated: {
+            total_count: purchaseUsersCount,
+            conversion_rate: value || 0,
+            users: userDetails.converted_users || [],
+            summary: `${purchaseUsersCount} purchase users`,
+            refund_count: purchaseRefundCount,
+            refund_users: userDetails.purchase_refund_user_ids || []
+          },
+          actual: {
+            total_count: purchaseUsersCount,
+            conversion_rate: value || 0,
+            users: userDetails.converted_users || [],
+            summary: `${purchaseUsersCount} purchase users`,
+            refund_count: purchaseRefundCount,
+            refund_users: userDetails.purchase_refund_user_ids || []
+          }
+        };
       }
+      
+      // Store the data structure
+      setDualData(tooltipData);
+      
+      // Set current view to the requested mode
+      const modeData = tooltipData[mode];
+      setUserDetails(modeData);
+      setAllUsers(modeData.users || []);
+      
     } catch (err) {
-      setError('Network error loading user details');
-      console.error('Error fetching user details:', err);
+      setError('Error loading user details from included data');
+      console.error('Error processing user details:', err);
     } finally {
       setLoading(false);
     }
@@ -530,14 +468,20 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
           onClick={(e) => handleClick('estimated')}
           title="Estimated rate - click to see all users"
         >
-          {dualData?.estimated ? 
-            (() => {
-              const rate = columnKey === 'trial_conversion_rate' ? dualData.estimated.summary.avg_trial_conversion_rate :
-                          columnKey === 'avg_trial_refund_rate' ? dualData.estimated.summary.avg_trial_refund_rate :
-                          dualData.estimated.summary.avg_purchase_refund_rate;
-              return `${formatNumber(rate, 1)}%`;
-            })() : (value !== undefined && value !== null ? `${formatNumber(value, 1)}%` : '--.--%')
-          }
+          {(() => {
+            // Use estimated rate from backend data
+            if (columnKey === 'trial_conversion_rate') {
+              const estimatedRate = (row.trial_conversion_rate_estimated || 0) * 100;
+              return `${formatNumber(estimatedRate, 1)}%`;
+            } else if (columnKey === 'avg_trial_refund_rate') {
+              const estimatedRate = (row.trial_refund_rate_estimated || 0) * 100;
+              return `${formatNumber(estimatedRate, 1)}%`;
+            } else if (columnKey === 'purchase_refund_rate') {
+              const estimatedRate = (row.purchase_refund_rate_estimated || 0) * 100;
+              return `${formatNumber(estimatedRate, 1)}%`;
+            }
+            return '--.--%';
+          })()}
         </span>
         <span className={separatorClass}>|</span>
         <span
@@ -547,27 +491,39 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
           onClick={(e) => handleClick('actual')}
           title="Actual rate - click to see converted users"
         >
-          {dualData?.actual ? 
-            (() => {
-              const rate = columnKey === 'trial_conversion_rate' ? dualData.actual.summary.avg_trial_conversion_rate :
-                          columnKey === 'avg_trial_refund_rate' ? dualData.actual.summary.avg_trial_refund_rate :
-                          dualData.actual.summary.avg_purchase_refund_rate;
-              return `${formatNumber(rate, 1)}%`;
-            })() : '--.--%'
-          }
+          {(() => {
+            // Use actual rate from backend data
+            if (columnKey === 'trial_conversion_rate') {
+              const actualRate = (row.trial_conversion_rate || 0) * 100;
+              return `${formatNumber(actualRate, 1)}%`;
+            } else if (columnKey === 'avg_trial_refund_rate') {
+              const actualRate = (row.avg_trial_refund_rate || 0) * 100;
+              return `${formatNumber(actualRate, 1)}%`;
+            } else if (columnKey === 'purchase_refund_rate') {
+              const actualRate = (row.purchase_refund_rate || 0) * 100;
+              return `${formatNumber(actualRate, 1)}%`;
+            }
+            return '--.--%';
+          })()}
         </span>
         <span className={userCountClass}>
-          {dualData?.actual ? 
-            (() => {
-              if (columnKey === 'trial_conversion_rate') {
-                return `(${dualData.actual.summary.converted_users || 0}/${dualData.actual.summary.total_users || 0})`;
-              } else if (columnKey === 'avg_trial_refund_rate') {
-                return `(${dualData.actual.summary.trial_refunded_users || 0}/${dualData.actual.summary.trial_converted_users || 0})`;
-              } else { // purchase_refund_rate
-                return `(${dualData.actual.summary.purchase_refunded_users || 0}/${dualData.actual.summary.purchase_users || 0})`;
-              }
-            })() : '(0/0)'
-          }
+          {(() => {
+            // Show user count calculation for actual rates
+            if (columnKey === 'trial_conversion_rate') {
+              const converted = row.converted_users_count || row.purchase_users_count || 0;
+              const total = row.post_trial_users_count || row.trial_users_count || 0;
+              return `(${converted}/${total})`;
+            } else if (columnKey === 'avg_trial_refund_rate') {
+              const refunded = (row.user_details?.trial_refund_user_ids || []).length;
+              const converted = row.converted_users_count || row.purchase_users_count || 0;
+              return `(${refunded}/${converted})`;
+            } else if (columnKey === 'purchase_refund_rate') {
+              const refunded = (row.user_details?.purchase_refund_user_ids || []).length;
+              const purchases = row.purchase_users_count || 0;
+              return `(${refunded}/${purchases})`;
+            }
+            return '(0/0)';
+          })()}
         </span>
       </div>
       {showTooltip && (
@@ -1442,6 +1398,9 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       case 'mixpanel_revenue_usd':
       case 'estimated_revenue_usd':
       case 'estimated_revenue_adjusted':
+      case 'actual_revenue_usd':
+      case 'actual_refunds_usd':
+      case 'net_actual_revenue_usd':
       case 'mixpanel_revenue_net':
       case 'mixpanel_refunds_usd':
       case 'profit':
@@ -1469,10 +1428,23 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
       case 'purchase_accuracy_ratio':
         formattedValue = value !== undefined && value !== null ? `${formatNumber(value * 100, 2)}%` : 'N/A';
         break;
+      case 'trial_conversion_rate_estimated':
+      case 'trial_refund_rate_estimated':
+      case 'purchase_refund_rate_estimated':
+        formattedValue = value !== undefined && value !== null ? `${formatNumber(value, 2)}%` : 'N/A';
+        break;
+      case 'trial_users_list':
+      case 'post_trial_user_ids':
+      case 'converted_user_ids':
+      case 'trial_refund_user_ids':
+      case 'purchase_user_ids':
+      case 'purchase_refund_user_ids':
+        formattedValue = Array.isArray(value) ? `${value.length} users` : 'N/A';
+        break;
       case 'trial_conversion_rate':
         if (value !== undefined && value !== null) {
-          // Use the new ConversionRateTooltip for trial conversion rate
-          // Backend already returns percentage (0-100), no need to multiply by 100
+          // CRITICAL FIX: Backend now returns decimal (0-1), convert to percentage for display
+          const percentageValue = value * 100;
           const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
           const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
           
@@ -1481,7 +1453,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               <ConversionRateTooltip 
                 row={row}
                 columnKey={columnKey}
-                value={value} // Already in percentage
+                value={percentageValue} // Convert decimal to percentage for display
                 colorClass={tooltipColorClass}
                 dashboardParams={dashboardParams}
               />
@@ -1493,7 +1465,9 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         break;
       case 'avg_trial_refund_rate':
         if (value !== undefined && value !== null) {
-          const hasMinimumFlag = Math.abs(value - 5.0) < 0.01;
+          // CRITICAL FIX: Backend now returns decimal (0-1), convert to percentage for display
+          const percentageValue = value * 100;
+          const hasMinimumFlag = Math.abs(percentageValue - 5.0) < 0.01;
           const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
           const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
           const refundIconColor = shouldBeGrayed ? 'text-gray-500' : 'text-blue-500';
@@ -1503,7 +1477,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               <ConversionRateTooltip 
                 row={row}
                 columnKey={columnKey}
-                value={value} // Already in percentage
+                value={percentageValue} // Convert decimal to percentage for display
                 colorClass={tooltipColorClass}
                 dashboardParams={dashboardParams}
               />
@@ -1523,7 +1497,9 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         break;
       case 'purchase_refund_rate':
         if (value !== undefined && value !== null) {
-          const hasMinimumFlag = Math.abs(value - 15.0) < 0.01;
+          // CRITICAL FIX: Backend now returns decimal (0-1), convert to percentage for display
+          const percentageValue = value * 100;
+          const hasMinimumFlag = Math.abs(percentageValue - 15.0) < 0.01;
           const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
           const tooltipColorClass = shouldBeGrayed ? 'text-gray-500' : '';
           const refundIconColor = shouldBeGrayed ? 'text-gray-500' : 'text-orange-500';
@@ -1533,7 +1509,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
               <ConversionRateTooltip 
                 row={row}
                 columnKey={columnKey}
-                value={value} // Already in percentage
+                value={percentageValue} // Convert decimal to percentage for display
                 colorClass={tooltipColorClass}
                 dashboardParams={dashboardParams}
               />
@@ -1585,15 +1561,15 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
         {
           const mixpanelPurchases = calculatedRow.mixpanel_purchases || 0;
           const metaPurchases = calculatedRow.meta_purchases || 0;
-          const accuracyRatio = calculatedRow.purchase_accuracy_ratio || 0;
+          const purchaseAccuracyRatio = calculatedRow.purchase_accuracy_ratio || 0;
           const shouldBeGrayed = eventPriority && shouldGrayOutColumn(columnKey, eventPriority);
           const numberColor = shouldBeGrayed ? 'text-gray-500' : '';
           const dividerColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
-          const percentageColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-400';
+          const percentageColor = shouldBeGrayed ? 'text-gray-500' : 'text-gray-500';
           
           formattedValue = (
             <span className={numberColor}>
-              {formatNumber(mixpanelPurchases)} <span className={`${dividerColor}`}>|</span> {formatNumber(metaPurchases)} <span className={`${percentageColor} text-xs`}>({formatNumber(accuracyRatio * 100, 1)}%)</span>
+              {formatNumber(mixpanelPurchases)} <span className={`${dividerColor}`}>|</span> {formatNumber(metaPurchases)} <span className={`${percentageColor} text-xs`}>({formatNumber(purchaseAccuracyRatio * 100, 1)}%)</span>
             </span>
           );
         }
@@ -1702,6 +1678,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
             endDate={dashboardParams?.end_date || '2025-04-10'}
             isBreakdownEntity={true}  // Flag to indicate this is a breakdown entity
             calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
+            sparklineData={row.sparkline_data || []}  // 🚀 Pass sparkline data from main API response
           />
         );
       }
@@ -1718,6 +1695,7 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           startDate={dashboardParams?.start_date || '2025-04-01'}
           endDate={dashboardParams?.end_date || '2025-04-10'}
           calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
+          sparklineData={row.sparkline_data || []}  // 🚀 Pass sparkline data from main API response
         />
       );
     }

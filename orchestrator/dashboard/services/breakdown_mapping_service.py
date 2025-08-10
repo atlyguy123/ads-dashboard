@@ -11,7 +11,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from utils.database_utils import get_database_path
+from utils.database_utils import get_database_path, get_database_connection
 
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
@@ -40,7 +40,7 @@ class BreakdownMappingService:
     def _initialize_default_mappings(self):
         """Initialize default mapping tables with known mappings"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 
                 # CRITICAL FIX: Country mappings using ISO codes (Meta stores codes, not names)
@@ -179,7 +179,7 @@ class BreakdownMappingService:
     def get_country_mapping(self, meta_country: str) -> Optional[str]:
         """Get Mixpanel country code for Meta country name"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT mixpanel_country_code 
@@ -197,7 +197,7 @@ class BreakdownMappingService:
     def get_device_mapping(self, meta_device: str) -> Optional[Dict[str, str]]:
         """Get Mixpanel store category mapping for Meta device type"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT mixpanel_store_category, device_category, platform
@@ -221,7 +221,7 @@ class BreakdownMappingService:
     def discover_unmapped_values(self) -> Dict[str, List[str]]:
         """Discover unmapped countries and devices from actual Meta breakdown data"""
         try:
-            with sqlite3.connect(self.meta_db_path) as meta_conn:  # 🔥 CRITICAL FIX: Use Meta database
+            with get_database_connection('meta_analytics') as meta_conn:  # 🔥 CRITICAL FIX: Use Meta database
                 meta_cursor = meta_conn.cursor()
                 
                 # Find unmapped countries from Meta data
@@ -243,7 +243,7 @@ class BreakdownMappingService:
                 meta_devices = [row[0] for row in meta_cursor.fetchall()]
             
             # Check which ones are unmapped by querying the mapping tables in Mixpanel DB
-            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+            with get_database_connection('mixpanel_data') as mixpanel_conn:
                 mixpanel_cursor = mixpanel_conn.cursor()
                 
                 # Get existing country mappings
@@ -274,7 +274,7 @@ class BreakdownMappingService:
     def discover_and_update_mappings(self):
         """Discover new breakdown values from Meta data and suggest mappings"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 
                 # Discover new countries
@@ -395,7 +395,7 @@ class BreakdownMappingService:
         """
         try:
             # Query Meta data grouped by entity, then collect all breakdown values
-            with sqlite3.connect(self.meta_db_path) as meta_conn:
+            with get_database_connection('meta_analytics') as meta_conn:
                 meta_cursor = meta_conn.cursor()
                 
                 # Get all Meta breakdown data for the date range
@@ -455,7 +455,7 @@ class BreakdownMappingService:
                 meta_results = meta_cursor.fetchall()
             
             # Group Meta data by entity and process with Mixpanel data
-            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+            with get_database_connection('mixpanel_data') as mixpanel_conn:
                 mixpanel_cursor = mixpanel_conn.cursor()
                 
                 # Group breakdown data by entity ID
@@ -678,7 +678,7 @@ class BreakdownMappingService:
         """
         try:
             # Query Meta data grouped by entity, then collect all breakdown values
-            with sqlite3.connect(self.meta_db_path) as meta_conn:
+            with get_database_connection('meta_analytics') as meta_conn:
                 meta_cursor = meta_conn.cursor()
                 
                 # Get all Meta breakdown data for the date range
@@ -738,7 +738,7 @@ class BreakdownMappingService:
                 meta_results = meta_cursor.fetchall()
             
             # Group Meta data by entity and process with Mixpanel data
-            with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
+            with get_database_connection('mixpanel_data') as mixpanel_conn:
                 mixpanel_cursor = mixpanel_conn.cursor()
                 
                 # Group breakdown data by entity ID
@@ -912,7 +912,7 @@ class BreakdownMappingService:
     def _get_cached_breakdown(self, cache_key: str) -> Optional[List[BreakdownData]]:
         """Get cached breakdown data if valid"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT meta_data, mixpanel_data, computed_at, expires_at
@@ -935,7 +935,7 @@ class BreakdownMappingService:
                             end_date: str, breakdown_data: List[BreakdownData]):
         """Cache breakdown data for faster subsequent requests"""
         try:
-            with sqlite3.connect(self.mixpanel_db_path) as conn:
+            with get_database_connection('mixpanel_data') as conn:
                 cursor = conn.cursor()
                 
                 # Cache for 1 hour
