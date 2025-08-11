@@ -28,6 +28,7 @@ from ...utils.timezone_utils import now_in_timezone
 
 # Import the QueryConfig from analytics_query_service
 from .analytics_query_service import QueryConfig
+from .overview_service import OverviewService
 
 logger = logging.getLogger(__name__)
 
@@ -607,7 +608,11 @@ class DashboardRefreshService:
         estimated_rate_sum = 0
         valid_estimated_days = 0
 
-        for row in daily_rows:
+        logger.info(f"🔍 BACKEND AGGREGATION DEBUG: Processing {len(daily_rows)} daily rows")
+        for i, row in enumerate(daily_rows):
+            if i < 3:  # Log first 3 rows for debugging
+                logger.info(f"🔍 Sample row {i}: date={row['date']}, spend={row['meta_spend']}, revenue={row['adjusted_estimated_revenue_usd']}, profit={row['profit_usd']}")
+            
             # Parse user lists and aggregate unique users (sqlite3.Row access)
             if 'trial_user_ids' in row.keys() and row['trial_user_ids']:
                 all_trial_users.update(parse_user_list(row['trial_user_ids']))
@@ -639,6 +644,8 @@ class DashboardRefreshService:
             if 'trial_conversion_rate_estimated' in row.keys() and row['trial_conversion_rate_estimated'] is not None:
                 estimated_rate_sum += float(row['trial_conversion_rate_estimated'])
                 valid_estimated_days += 1
+        
+        logger.info(f"🔍 BACKEND TOTALS: spend={total_meta_spend}, revenue={total_adjusted_revenue}, profit={total_profit}")
         
         # Calculate final metrics
         unique_trial_count = len(all_trial_users)
@@ -1111,208 +1118,34 @@ class DashboardRefreshService:
         logger.warning("DEPRECATED: execute_analytics_query_optimized() called. Use execute_optimized_dashboard_refresh() instead!")
         return self.execute_optimized_dashboard_refresh(config)
 
-    def get_overview_roas_chart_data(self, start_date: str, end_date: str, breakdown: str = 'all') -> Dict[str, Any]:
+    def get_overview_roas_chart_data(self, start_date: str, end_date: str, breakdown: str = 'all', entity_type: str = 'campaign') -> Dict[str, Any]:
         """
-        Get overview ROAS sparkline data for dashboard summary
+        ⚠️ DEPRECATED: This method has been moved to OverviewService.
+        Use OverviewService.get_overview_roas_chart_data() instead.
+        """
+        logger.warning("⚠️ DEPRECATED: get_overview_roas_chart_data() called from DashboardRefreshService. Use OverviewService instead.")
         
-        This aggregates data across all campaigns to show overall performance trends
+        # Redirect to overview service
+        overview_service = OverviewService(
+            meta_db_path=self.meta_db_path,
+            mixpanel_db_path=self.mixpanel_db_path,
+            mixpanel_analytics_db_path=self.mixpanel_analytics_db_path
+        )
+        return overview_service.get_overview_roas_chart_data(start_date, end_date, breakdown, entity_type)
+
+    def get_dashboard_stats(self, start_date: str, end_date: str, breakdown: str = 'all', entity_type: str = 'campaign') -> Dict[str, Any]:
         """
-        try:
-            # Getting overview ROAS chart data
-            
-            # Calculate date range for chart period
-            from datetime import datetime, timedelta
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-            
-            # Calculate how many days we need
-            date_diff = (end_dt - start_dt).days + 1
-            # Generate date range for overview period
-            
-            # Generate all dates in the requested range
-            daily_data = {}
-            current_dt = start_dt
-            
-            # Initialize all days with zero values
-            while current_dt <= end_dt:
-                date_str = current_dt.strftime('%Y-%m-%d')
-                daily_data[date_str] = {
-                    'date': date_str,
-                    'daily_spend': 0.0,
-                    'daily_impressions': 0,
-                    'daily_clicks': 0,
-                    'daily_meta_trials': 0,
-                    'daily_meta_purchases': 0,
-                    'daily_mixpanel_trials': 0,
-                    'daily_mixpanel_purchases': 0,
-                    'daily_mixpanel_conversions': 0,
-                    'daily_mixpanel_revenue': 0.0,
-                    'daily_mixpanel_refunds': 0.0,
-                    'daily_estimated_revenue': 0.0,
-                    'daily_attributed_users': 0,
-                    'is_inactive': True  # Will be set to False if we have data
-                }
-                current_dt += timedelta(days=1)
-            
-            # ✅ STEP 1: Get aggregated Meta data from correct table (ad_performance_daily)
-            # Step 1: Query Meta data
-            
-            # Determine which table to use based on breakdown
-            table_name = self.get_table_name(breakdown)  # Uses existing table mapping logic
-            
-            meta_query = f"""
-                SELECT 
-                    date,
-                    SUM(spend) as daily_spend,
-                    SUM(impressions) as daily_impressions,
-                    SUM(clicks) as daily_clicks,
-                    SUM(meta_trials) as daily_meta_trials,
-                    SUM(meta_purchases) as daily_meta_purchases
-                FROM {table_name}
-                WHERE date BETWEEN ? AND ?
-                GROUP BY date
-                ORDER BY date
-            """
-            
-            try:
-                with sqlite3.connect(self.meta_db_path) as meta_conn:
-                    meta_conn.row_factory = sqlite3.Row
-                    meta_cursor = meta_conn.cursor()
-                    
-                    meta_cursor.execute(meta_query, (start_date, end_date))
-                    meta_results = meta_cursor.fetchall()
-                    
-                    # Process Meta results
-                    for row in meta_results:
-                        date_str = row['date']
-                        if date_str in daily_data:
-                            daily_data[date_str].update({
-                                'daily_spend': float(row['daily_spend'] or 0),
-                                'daily_impressions': int(row['daily_impressions'] or 0),
-                                'daily_clicks': int(row['daily_clicks'] or 0),
-                                'daily_meta_trials': int(row['daily_meta_trials'] or 0),
-                                'daily_meta_purchases': int(row['daily_meta_purchases'] or 0),
-                                'is_inactive': False
-                            })
-                    
-                    logger.info(f"✅ Retrieved Meta data for {len(meta_results)} days")
-            except Exception as e:
-                logger.warning(f"⚠️ Meta database error (overview chart): {e}")
-                # Continue with Mixpanel data only
-            
-            # ✅ STEP 2: Get aggregated Mixpanel data from pre-computed daily metrics  
-            mixpanel_query = """
-                SELECT 
-                    date,
-                    SUM(trial_users_count) as daily_mixpanel_trials,
-                    SUM(purchase_users_count) as daily_mixpanel_purchases,
-                    SUM(adjusted_estimated_revenue_usd) as daily_estimated_revenue,
-                    SUM(actual_revenue_usd) as daily_mixpanel_revenue,
-                    COUNT(DISTINCT entity_id) as daily_attributed_users
-                FROM daily_mixpanel_metrics
-                WHERE date BETWEEN ? AND ?
-                GROUP BY date
-                ORDER BY date
-            """
-            
-            try:
-                with sqlite3.connect(self.mixpanel_db_path) as mixpanel_conn:
-                    mixpanel_conn.row_factory = sqlite3.Row
-                    mixpanel_cursor = mixpanel_conn.cursor()
-                    
-                    mixpanel_cursor.execute(mixpanel_query, (start_date, end_date))
-                    mixpanel_results = mixpanel_cursor.fetchall()
-                    
-                    # Process Mixpanel results
-                    for row in mixpanel_results:
-                        date_str = row['date']
-                        if date_str in daily_data:
-                            daily_data[date_str].update({
-                                'daily_mixpanel_trials': int(row['daily_mixpanel_trials'] or 0),
-                                'daily_mixpanel_purchases': int(row['daily_mixpanel_purchases'] or 0),
-                                'daily_mixpanel_conversions': int(row['daily_mixpanel_purchases'] or 0),  # Alias
-                                'daily_estimated_revenue': float(row['daily_estimated_revenue'] or 0),
-                                'daily_mixpanel_revenue': float(row['daily_mixpanel_revenue'] or 0),
-                                'daily_attributed_users': int(row['daily_attributed_users'] or 0),
-                                'is_inactive': False
-                            })
-                    
-                    logger.info(f"✅ Retrieved Mixpanel data for {len(mixpanel_results)} days")
-            except Exception as e:
-                logger.error(f"❌ Mixpanel database error (overview chart): {e}")
-                # Continue with Meta data only
-            
-            # ✅ STEP 3: Process daily data into chart format
-            chart_data = []
-            total_spend = 0.0
-            total_revenue = 0.0
-            total_trials = 0
-            total_purchases = 0
-            
-            for date_str in sorted(daily_data.keys()):
-                day_data = daily_data[date_str]
-                
-                # Calculate daily ROAS
-                daily_spend = day_data['daily_spend']
-                daily_revenue = day_data['daily_estimated_revenue']  # Use estimated revenue
-                daily_roas = (daily_revenue / daily_spend) if daily_spend > 0 else 0.0
-                
-                # Update totals
-                total_spend += daily_spend
-                total_revenue += daily_revenue
-                total_trials += day_data['daily_mixpanel_trials']
-                total_purchases += day_data['daily_mixpanel_purchases']
-                
-                chart_data.append({
-                    'date': date_str,
-                    'spend': daily_spend,
-                    'revenue': daily_revenue,
-                    'roas': daily_roas,
-                    'rolling_1d_roas': daily_roas,  # Frontend expects this field name
-                    'rolling_1d_spend': daily_spend,  # For consistency with other sparklines
-                    'rolling_1d_revenue': daily_revenue,  # For consistency with other sparklines
-                    'trials': day_data['daily_mixpanel_trials'],
-                    'purchases': day_data['daily_mixpanel_purchases'],
-                    'impressions': day_data['daily_impressions'],
-                    'clicks': day_data['daily_clicks'],
-                    'is_inactive': day_data['is_inactive']
-                })
-            
-            # Calculate overall metrics
-            overall_roas = (total_revenue / total_spend) if total_spend > 0 else 0.0
-            conversion_rate = (total_purchases / total_trials) if total_trials > 0 else 0.0
-            
-            return {
-                'success': True,
-                'chart_data': chart_data,
-                'summary': {
-                    'total_spend': total_spend,
-                    'total_revenue': total_revenue,
-                    'overall_roas': overall_roas,
-                    'total_trials': total_trials,
-                    'total_purchases': total_purchases,
-                    'conversion_rate': conversion_rate,
-                    'date_range': {
-                        'start': start_date,
-                        'end': end_date,
-                        'days': date_diff
-                    }
-                },
-                'metadata': {
-                    'breakdown': breakdown,
-                    'table_used': table_name,
-                    'data_points': len(chart_data),
-                    'generated_at': now_in_timezone().isoformat()
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting overview ROAS chart data: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'chart_data': [],
-                'summary': {}
-            }
+        ⚠️ DEPRECATED: This method has been moved to OverviewService.
+        Use OverviewService.get_dashboard_stats() instead.
+        """
+        logger.warning("⚠️ DEPRECATED: get_dashboard_stats() called from DashboardRefreshService. Use OverviewService instead.")
+        
+        # Redirect to overview service
+        overview_service = OverviewService(
+            meta_db_path=self.meta_db_path,
+            mixpanel_db_path=self.mixpanel_db_path,
+            mixpanel_analytics_db_path=self.mixpanel_analytics_db_path
+        )
+        return overview_service.get_dashboard_stats(start_date, end_date, breakdown, entity_type)
 
 

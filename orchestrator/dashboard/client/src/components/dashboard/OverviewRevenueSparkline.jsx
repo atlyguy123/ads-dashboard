@@ -4,12 +4,13 @@ import useOverviewChartData from '../../hooks/useOverviewChartData';
 const OverviewRevenueSparkline = React.memo(({ 
   dateRange,
   breakdown = 'all',
+  hierarchy = 'campaign',
   refreshTrigger = 0,
   width = 120,
   height = 40
 }) => {
   // Use shared overview chart data
-  const { chartData, loading, error } = useOverviewChartData(dateRange, breakdown, refreshTrigger);
+  const { chartData, loading, error } = useOverviewChartData(dateRange, breakdown, hierarchy, refreshTrigger);
   
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });

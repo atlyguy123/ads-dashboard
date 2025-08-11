@@ -39,18 +39,7 @@ export const Dashboard = () => {
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [error, setError] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for overview sparklines refresh
-  const [dashboardData, setDashboardData] = useState(() => {
-    // Load saved dashboard data immediately
-    const saved = localStorage.getItem('dashboard_data');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.warn('Failed to parse saved dashboard data:', e);
-      }
-    }
-    return [];
-  });
+  const [dashboardData, setDashboardData] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(() => {
     return localStorage.getItem('dashboard_last_updated') || null;
   });
@@ -256,9 +245,7 @@ export const Dashboard = () => {
     localStorage.setItem('dashboard_sort_config', JSON.stringify(sortConfig));
   }, [sortConfig]);
 
-  useEffect(() => {
-    localStorage.setItem('dashboard_data', JSON.stringify(dashboardData));
-  }, [dashboardData]);
+  // ❌ CACHE REMOVED: No localStorage caching for dashboard data
 
   useEffect(() => {
     if (lastUpdated) {
@@ -670,27 +657,12 @@ export const Dashboard = () => {
     }
   }, [pipelineRunning]);
 
-  // Initialize component state on mount (no automatic data refresh)
+  // ❌ NO AUTO-LOAD: User must manually refresh to get data
   useEffect(() => {
-    if (hasInitialLoadRef.current) return; // Prevent multiple initial loads
-    
-    const hasValidData = dashboardData && dashboardData.length > 0;
-    
-    if (hasValidData) {
-      // Show cached data without refreshing - user must manually refresh
-      console.log('📋 Loading cached data (no auto-refresh)');
-      
-      // Initialize row order with cached data IDs only if no column sorting is active
-      if (dashboardData.length > 0 && rowOrder.length === 0 && (!sortConfig.column)) {
-        setRowOrder(dashboardData.map(r => r.id));
-      }
-    } else {
-      // No cached data - show empty state, user must click refresh
-      console.log('📋 No cached data available - waiting for user action');
-    }
-    
+    if (hasInitialLoadRef.current) return; 
+    console.log('📋 No auto-load - user must click refresh');
     hasInitialLoadRef.current = true;
-  }, []); // Empty dependency array - only run once on mount
+  }, []);
 
   // Pipeline status polling
   useEffect(() => {
@@ -713,7 +685,16 @@ export const Dashboard = () => {
     if (!dashboardData || dashboardData.length === 0) return {};
     
     const calculateStats = (items) => {
-      return items.reduce((acc, item) => {
+      console.log('🔍 OVERVIEW AGGREGATION DEBUG:');
+      console.log(`- Processing ${items.length} items`);
+      console.log('- Sample items:', items.slice(0, 3).map(i => ({
+        name: i.name,
+        spend: i.spend,
+        estimated_revenue_adjusted: i.estimated_revenue_adjusted,
+        profit: i.profit
+      })));
+      
+      const result = items.reduce((acc, item) => {
         acc.totalSpend += item.spend || 0;
         acc.totalImpressions += item.impressions || 0;
         acc.totalClicks += item.clicks || 0;
@@ -728,6 +709,9 @@ export const Dashboard = () => {
         totalRevenue: 0,
         totalProfit: 0
       });
+      
+      console.log('📊 OVERVIEW TOTALS:', result);
+      return result;
     };
 
     return calculateStats(processedData);
@@ -916,6 +900,7 @@ export const Dashboard = () => {
                     <OverviewSpendSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      hierarchy={hierarchy}
                       refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
@@ -939,6 +924,7 @@ export const Dashboard = () => {
                     <OverviewRevenueSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      hierarchy={hierarchy}
                       refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
@@ -962,6 +948,7 @@ export const Dashboard = () => {
                     <OverviewProfitSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      hierarchy={hierarchy}
                       refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}
@@ -992,6 +979,7 @@ export const Dashboard = () => {
                     <OverviewROASSparkline 
                       dateRange={dateRange}
                       breakdown={breakdown}
+                      hierarchy={hierarchy}
                       refreshTrigger={refreshTrigger}
                       width={180}
                       height={60}

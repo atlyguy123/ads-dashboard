@@ -10,6 +10,7 @@ from ..services.dashboard_service import DashboardService
 from ..services.analytics_query_service import AnalyticsQueryService, QueryConfig
 from ..services.dashboard_refresh_service import DashboardRefreshService
 from ..services.dashboard_tooltip_service import DashboardTooltipService
+from ..services.overview_service import OverviewService
 
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
@@ -29,6 +30,9 @@ dashboard_refresh_service = DashboardRefreshService()
 
 # Initialize the dashboard tooltip service (focused on user stats tooltips)
 dashboard_tooltip_service = DashboardTooltipService()
+
+# Initialize the overview service (focused on overview calculations and sparklines)
+overview_service = OverviewService()
 
 @dashboard_bp.route('/configurations', methods=['GET'])
 def get_configurations():
@@ -724,12 +728,16 @@ def get_overview_roas_chart():
                 'error': error_msg
             }), 400
         
-        # Get overview ROAS chart data with thread safety
+        # Get overview ROAS chart data using dedicated OverviewService
+        # Extract entity_type from group_by parameter (default to 'campaign')
+        entity_type = request.args.get('group_by', 'campaign')
+        
         try:
-            result = dashboard_refresh_service.get_overview_roas_chart_data(
+            result = overview_service.get_overview_roas_chart_data(
                 start_date=start_date,
                 end_date=end_date,
-                breakdown=breakdown
+                breakdown=breakdown,
+                entity_type=entity_type
             )
             
             if result.get('success'):
@@ -753,6 +761,71 @@ def get_overview_roas_chart():
         return jsonify({
             'success': False,
             'error': error_msg
+        }), 500
+
+
+@dashboard_bp.route('/analytics/dashboard-stats', methods=['GET'])
+def get_dashboard_stats():
+    """
+    Get dashboard overview statistics (total spend, revenue, profit, ROAS)
+    
+    Query parameters:
+    - start_date: Start date (YYYY-MM-DD)
+    - end_date: End date (YYYY-MM-DD) 
+    - breakdown: Breakdown type ('all', 'country', 'device', etc.)
+    """
+    try:
+        # Get query parameters
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        breakdown = request.args.get('breakdown', 'all')
+        
+        logger.info(f"Getting dashboard stats: start_date={start_date}, end_date={end_date}, breakdown={breakdown}")
+        
+        # Validate required parameters
+        if not start_date or not end_date:
+            error_msg = 'Missing required parameters: start_date and end_date'
+            logger.error(f"Dashboard stats validation error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+        
+        # Get dashboard stats using dedicated OverviewService
+        # Extract entity_type from group_by parameter (default to 'campaign')
+        entity_type = request.args.get('group_by', 'campaign')
+        
+        try:
+            result = overview_service.get_dashboard_stats(
+                start_date=start_date,
+                end_date=end_date,
+                breakdown=breakdown,
+                entity_type=entity_type
+            )
+            
+            if result.get('success'):
+                return jsonify(result)
+            else:
+                error_msg = result.get('error', 'Unknown overview service error')
+                logger.error(f"Dashboard stats overview error: {error_msg}")
+                return jsonify(result), 500
+            
+        except Exception as overview_error:
+            error_msg = f"Overview service exception: {str(overview_error)}"
+            logger.error(f"Dashboard stats overview error: {error_msg}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'service': 'overview_service'
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"Dashboard stats endpoint exception: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': error_msg,
+            'endpoint': 'dashboard_stats'
         }), 500
 
 
