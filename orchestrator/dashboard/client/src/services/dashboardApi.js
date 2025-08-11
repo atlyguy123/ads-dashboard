@@ -263,13 +263,18 @@ class DashboardApiService {
       return response;
     } catch (error) {
       console.error('Error fetching available date range:', error);
-      // Return fallback data if API fails
+      // Return dynamic fallback data if API fails (NO hardcoded dates!)
+      const today = new Date().toISOString().split('T')[0];
+      const fallbackStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
       return {
         success: true,
         data: {
-          earliest_date: '2025-01-01',
-          latest_date: new Date().toISOString().split('T')[0]
-        }
+          earliest_date: fallbackStart,
+          latest_date: today
+        },
+        fallback: true,
+        source: 'frontend_dynamic_fallback'
       };
     }
   }
@@ -334,6 +339,28 @@ class DashboardApiService {
         runningProcesses: {}
       };
     }
+  }
+
+  /**
+   * Get detailed user statistics for tooltip display
+   */
+  async getUserDetailsForTooltip(params) {
+    const { entity_type, entity_id, start_date, end_date, breakdown = 'all', breakdown_value, metric_type = 'trial_conversion_rate' } = params;
+    
+    const queryParams = new URLSearchParams({
+      entity_type,
+      entity_id,
+      start_date,
+      end_date,
+      breakdown,
+      metric_type
+    });
+    
+    if (breakdown_value) {
+      queryParams.append('breakdown_value', breakdown_value);
+    }
+    
+    return this.makeRequest(`/analytics/user-details-tooltip?${queryParams.toString()}`);
   }
 }
 

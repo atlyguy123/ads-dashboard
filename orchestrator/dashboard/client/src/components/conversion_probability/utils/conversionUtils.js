@@ -16,9 +16,10 @@ export const getDateRangeFromTimeframe = (timeframe) => {
   }
   
   const end = new Date();
-  const start = new Date('2024-01-01'); // Always start from Jan 1, 2024 to ensure comprehensive coverage
+  // Dynamic start date: 1 year ago to ensure comprehensive coverage
+  const start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
   
-  // Note: We now always start from 2024-01-01 and go to today to ensure all products are included
+  // Note: We now always start from 1 year ago and go to today to ensure all products are included
   // This prevents newer products from being excluded due to narrow date windows
   
   return {

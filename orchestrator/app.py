@@ -81,6 +81,17 @@ CORS(app, origins=allowed_origins,
      allow_headers=['Content-Type', 'Authorization'], 
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
+# Root-level health check endpoint (no authentication required)
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Simple health check endpoint for development and monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'orchestrator',
+        'timestamp': now_in_timezone().isoformat(),
+        'version': '1.0.0'
+    })
+
 # Initialize SQLite database
 def init_db():
     try:

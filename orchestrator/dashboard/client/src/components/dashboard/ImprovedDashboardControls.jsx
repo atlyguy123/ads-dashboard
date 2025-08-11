@@ -87,7 +87,7 @@ const ImprovedDashboardControls = ({
     breakdownFilters
   });
   const [availableDateRange, setAvailableDateRange] = useState({
-    earliest_date: '2025-01-01', // Fallback
+    earliest_date: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Dynamic fallback: 90 days ago
     latest_date: new Date().toISOString().split('T')[0]
   });
   const datePresets = getDatePresets();

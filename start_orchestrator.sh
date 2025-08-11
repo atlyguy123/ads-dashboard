@@ -22,9 +22,10 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "  💻 Development Mode (--dev):"
     echo "     • Flask backend with live reload"
     echo "     • React dev server with hot reload"
-    echo "     • Flask API: http://localhost:5001"
-    echo "     • React UI: http://localhost:3000"
+    echo "     • 🎯 ALWAYS PORT 3000: http://localhost:3000"
+    echo "     • Backend API (internal): http://localhost:5001"
     echo "     • Code changes appear instantly!"
+    echo "     • No more port conflicts!"
     echo ""
     echo "🛑 To stop: ./stop_orchestrator.sh"
     exit 0
@@ -62,40 +63,102 @@ if [ "$DEV_MODE" = true ]; then
         exit 1
     fi
     
-    # Auto-cleanup any existing services
-    if lsof -Pi :5001 -sTCP:LISTEN -t >/dev/null 2>&1 || lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        echo "🧹 Stopping existing services..."
+    # Enhanced cleanup for ports 5001 and 3000
+    echo "🧹 Performing thorough port cleanup..."
+    
+    # Check and report what's currently using the ports
+    PORT_5001_PID=$(lsof -ti:5001 2>/dev/null || true)
+    PORT_3000_PID=$(lsof -ti:3000 2>/dev/null || true)
+    
+    if [ -n "$PORT_5001_PID" ]; then
+        echo "  🔍 Found process on port 5001: PID $PORT_5001_PID"
+        ps -p $PORT_5001_PID -o pid,ppid,cmd 2>/dev/null || true
+    fi
+    
+    if [ -n "$PORT_3000_PID" ]; then
+        echo "  🔍 Found process on port 3000: PID $PORT_3000_PID"
+        ps -p $PORT_3000_PID -o pid,ppid,cmd 2>/dev/null || true
+    fi
+    
+    # Stop all related processes gracefully first
+    echo "  🛑 Gracefully stopping Flask processes..."
+    pkill -TERM -f "python.*launcher.py" 2>/dev/null || true
+    pkill -TERM -f "flask.*run" 2>/dev/null || true
+    
+    echo "  🛑 Gracefully stopping React processes..."
+    pkill -TERM -f "react-scripts start" 2>/dev/null || true
+    pkill -TERM -f "node.*react-scripts" 2>/dev/null || true
+    
+    echo "  🛑 Gracefully stopping Node.js processes..."
+    pkill -TERM -f "node.*start" 2>/dev/null || true
+    
+    # Stop Docker containers if running
+    if command -v docker &> /dev/null; then
+        echo "  🐳 Stopping Docker containers..."
+        docker-compose down --remove-orphans >/dev/null 2>&1 || true
         
-        # Stop development servers
-        if pgrep -f "python.*launcher.py" >/dev/null 2>&1; then
-            echo "  🐍 Stopping Flask backend..."
-            pkill -f "python.*launcher.py" 2>/dev/null || true
+        # Stop any containers using our ports
+        DOCKER_CONTAINERS=$(docker ps -q --filter "publish=5001" --filter "publish=3000" 2>/dev/null || true)
+        if [ -n "$DOCKER_CONTAINERS" ]; then
+            echo "  🐳 Stopping Docker containers on our ports..."
+            docker stop $DOCKER_CONTAINERS >/dev/null 2>&1 || true
         fi
-        
-        if pgrep -f "react-scripts start" >/dev/null 2>&1; then
-            echo "  ⚛️  Stopping React dev server..."
-            pkill -f "react-scripts start" 2>/dev/null || true
+    fi
+    
+    # Wait for graceful shutdown
+    echo "  ⏳ Waiting for graceful shutdown..."
+    sleep 5
+    
+    # Force kill anything still running on the ports (multiple approaches)
+    echo "  💥 Force killing remaining processes on ports 5001 and 3000..."
+    
+    # Method 1: Direct port killing
+    for port in 5001 3000; do
+        PIDS=$(lsof -ti:$port 2>/dev/null || true)
+        if [ -n "$PIDS" ]; then
+            echo "    🔫 Force killing PIDs on port $port: $PIDS"
+            echo "$PIDS" | xargs -r kill -9 2>/dev/null || true
         fi
-        
-        # Stop Docker containers if running
-        if command -v docker &> /dev/null && docker ps --format "table {{.Names}}" | grep -q "ads-dashboard-final" 2>/dev/null; then
-            echo "  🐳 Stopping Docker containers..."
-            docker-compose down >/dev/null 2>&1 || true
+    done
+    
+    # Method 2: Kill by process patterns (more thorough)
+    echo "  💥 Force killing by process patterns..."
+    pkill -9 -f "launcher.py" 2>/dev/null || true
+    pkill -9 -f "python.*app.py" 2>/dev/null || true
+    pkill -9 -f "flask.*run" 2>/dev/null || true
+    pkill -9 -f "react-scripts" 2>/dev/null || true
+    pkill -9 -f "node.*start" 2>/dev/null || true
+    
+    # Method 3: Kill any remaining Python/Node processes on our ports
+    for port in 5001 3000; do
+        REMAINING_PIDS=$(lsof -ti:$port 2>/dev/null || true)
+        if [ -n "$REMAINING_PIDS" ]; then
+            echo "    🔫 Final cleanup - killing remaining PIDs on port $port: $REMAINING_PIDS"
+            echo "$REMAINING_PIDS" | xargs -r kill -9 2>/dev/null || true
         fi
-        
-        # Wait for services to stop
-        echo "  ⏳ Waiting for services to stop..."
-        sleep 3
-        
-        # Force kill anything still on the ports
-        echo "  💥 Force killing processes on ports 5001 and 3000..."
-        lsof -ti:5001 | xargs -r kill -9 2>/dev/null || true
-        lsof -ti:3000 | xargs -r kill -9 2>/dev/null || true
-        
-        # Also kill any launcher.py processes specifically
-        pkill -9 -f "launcher.py" 2>/dev/null || true
-        
-        echo "✅ All existing services stopped"
+    done
+    
+    # Wait a moment for cleanup to complete
+    sleep 2
+    
+    # Final verification
+    echo "  🔍 Verifying ports are free..."
+    FINAL_5001=$(lsof -ti:5001 2>/dev/null || true)
+    FINAL_3000=$(lsof -ti:3000 2>/dev/null || true)
+    
+    if [ -n "$FINAL_5001" ] || [ -n "$FINAL_3000" ]; then
+        echo "  ⚠️  WARNING: Some processes may still be using the ports!"
+        if [ -n "$FINAL_5001" ]; then
+            echo "    Port 5001 still in use by PID: $FINAL_5001"
+            ps -p $FINAL_5001 -o pid,ppid,cmd 2>/dev/null || true
+        fi
+        if [ -n "$FINAL_3000" ]; then
+            echo "    Port 3000 still in use by PID: $FINAL_3000"
+            ps -p $FINAL_3000 -o pid,ppid,cmd 2>/dev/null || true
+        fi
+        echo "  🔧 You may need to manually kill these processes or restart your system"
+    else
+        echo "  ✅ Ports 5001 and 3000 are now completely free!"
     fi
     
     echo "✅ Starting development servers..."
@@ -182,6 +245,11 @@ EOF
         sleep 2
     done
     
+    # If Flask health check failed, still continue but warn user
+    if [ "$FLASK_STARTED" = false ]; then
+        echo "   ⚠️  Flask health check timed out, but process is running. Check Flask terminal for details."
+    fi
+    
     # Start React dev server in separate terminal window
     echo "⚛️  Starting React dev server in new terminal window..."
     echo "   ⏳ This will take 30-60 seconds to compile..."
@@ -190,9 +258,12 @@ EOF
     cat > start_react_dev.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")/orchestrator/dashboard/client"
+export PORT=3000
+export REACT_APP_API_URL=http://localhost:5001
 echo "⚛️  React Development Server Starting..."
 echo "📍 Working Directory: $(pwd)"
 echo "🌐 React app will be available at: http://localhost:3000"
+echo "⚠️  Port 3000 is FORCED - no port selection prompts"
 echo "⏳ Initial compilation may take 30-60 seconds..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 npm start
@@ -248,8 +319,24 @@ EOF
     echo "  📋 Terminal 1: 🐍 Flask Development Server (port 5001)"
     echo "  📋 Terminal 2: ⚛️  React Development Server (port 3000)"
     echo ""
-    echo "🌐 React will be ready at: http://localhost:3000 (in 30-60 seconds)"
-    echo "🔧 Flask API available at: http://localhost:5001"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🌟 DEVELOPMENT MODE - USE PORT 3000 FOR TESTING!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "🎯 PRIMARY URL FOR TESTING:"
+    echo "   👉 http://localhost:3000 ← ALWAYS THIS PORT!"
+    echo "      • Full React development experience"
+    echo "      • Hot reloading enabled"
+    echo "      • Code changes appear instantly"
+    echo "      • Port 3000 is FORCED - no more port conflicts!"
+    echo ""
+    echo "🔧 BACKEND API (for direct API testing):"
+    echo "   👉 http://localhost:5001"
+    echo "      • Flask API endpoints only"
+    echo "      • JSON responses"
+    echo "      • Used internally by React app"
+    echo ""
+    echo "⏰ React will be ready in 30-60 seconds at http://localhost:3000"
     echo "📺 Live output: Check the separate terminal windows!"
     echo ""
     echo "📋 Process IDs: Flask=$FLASK_PID, React=$REACT_PID"

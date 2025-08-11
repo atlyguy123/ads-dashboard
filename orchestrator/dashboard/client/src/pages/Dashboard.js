@@ -69,9 +69,12 @@ export const Dashboard = () => {
         console.warn('Failed to parse saved date range:', e);
       }
     }
+    // Use dynamic date range instead of hardcoded 2024
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
     return {
-      start_date: '2024-01-01',
-      end_date: getCurrentETDate()
+      start_date: thirtyDaysAgo.toISOString().split('T')[0],
+      end_date: today.toISOString().split('T')[0]
     };
   });
 
@@ -262,6 +265,40 @@ export const Dashboard = () => {
       localStorage.setItem('dashboard_last_updated', lastUpdated);
     }
   }, [lastUpdated]);
+
+  // Fetch actual available date range and update if using defaults
+  useEffect(() => {
+    const fetchAndSetAvailableDateRange = async () => {
+      try {
+        const response = await dashboardApi.getAvailableDateRange();
+        if (response.success && response.data) {
+          const { earliest_date, latest_date } = response.data;
+          
+          // Check if we're using the default dynamic range (last 30 days)
+          const today = new Date().toISOString().split('T')[0];
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          
+          // If current date range matches our default calculation, update to use actual data range
+          if (dateRange.start_date === thirtyDaysAgo && dateRange.end_date === today) {
+            console.log('🔧 Updating default date range to actual data range:', { earliest_date, latest_date });
+            const newDateRange = {
+              start_date: earliest_date,
+              end_date: latest_date
+            };
+            setDateRange(newDateRange);
+            localStorage.setItem('dashboard_date_range', JSON.stringify(newDateRange));
+          }
+        }
+      } catch (error) {
+        console.warn('Could not fetch available date range, using current settings:', error);
+      }
+    };
+
+    // Only fetch if we have a date range (avoid infinite loops)
+    if (dateRange.start_date && dateRange.end_date) {
+      fetchAndSetAvailableDateRange();
+    }
+  }, []); // Run only once on mount
 
   // Column visibility functions  
   // 📋 MODIFY COLUMN FUNCTIONS? Read: src/config/Column README.md for best practices

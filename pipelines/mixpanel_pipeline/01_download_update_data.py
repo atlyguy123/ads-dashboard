@@ -462,10 +462,11 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                                 cursor.executemany("""
                                     INSERT INTO raw_event_data (date_day, file_sequence, event_data)
                                     VALUES (%s, %s, %s)
+                                    ON CONFLICT DO NOTHING
                                 """, batch_data)
                             else:
                                 cursor.executemany("""
-                                    INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
+                                    INSERT OR REPLACE INTO raw_event_data (date_day, file_sequence, event_data)
                                     VALUES (?, ?, ?)
                                 """, batch_data)
                             
@@ -483,10 +484,11 @@ def download_and_store_event_file(conn, db_type, s3_client, bucket_name, object_
                 cursor.executemany("""
                     INSERT INTO raw_event_data (date_day, file_sequence, event_data)
                     VALUES (%s, %s, %s)
+                    ON CONFLICT DO NOTHING
                 """, batch_data)
             else:
                 cursor.executemany("""
-                    INSERT OR IGNORE INTO raw_event_data (date_day, file_sequence, event_data)
+                    INSERT OR REPLACE INTO raw_event_data (date_day, file_sequence, event_data)
                     VALUES (?, ?, ?)
                 """, batch_data)
             
@@ -605,6 +607,31 @@ def download_missing_data(conn, db_type, missing_dates, refresh_dates_set):
     logger.info(f"=== STARTING DOWNLOAD PROCESS ===")
     logger.info(f"Will download data for {len(missing_dates)} missing dates...")
     
+    # PHASE 2: Always delete last 3 days before any downloads (surgical fix for duplicates)
+    today = now_in_timezone().date()
+    refresh_start = today - timedelta(days=2)  # Last 3 days including today
+    
+    logger.info(f"🧹 DUPLICATE PREVENTION: Clearing last 3 days ({refresh_start} to {today}) before downloads")
+    cursor = conn.cursor()
+    try:
+        cursor.execute("BEGIN TRANSACTION")
+        
+        if db_type == 'postgres':
+            cursor.execute("DELETE FROM raw_event_data WHERE date_day >= %s AND date_day <= %s", (refresh_start, today))
+            cursor.execute("DELETE FROM downloaded_dates WHERE date_day >= %s AND date_day <= %s", (refresh_start, today))
+        else:
+            cursor.execute("DELETE FROM raw_event_data WHERE date_day >= ? AND date_day <= ?", (refresh_start, today))
+            cursor.execute("DELETE FROM downloaded_dates WHERE date_day >= ? AND date_day <= ?", (refresh_start, today))
+        
+        deleted_events = cursor.rowcount if hasattr(cursor, 'rowcount') else 'unknown'
+        cursor.execute("COMMIT")
+        logger.info(f"✅ Cleared existing data for last 3 days (deleted {deleted_events} events)")
+        
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        logger.error(f"Failed to clear last 3 days: {e}")
+        raise
+    
     # Initialize S3 client
     logger.info("Initializing AWS S3 connection...")
     try:
@@ -682,19 +709,8 @@ def download_events_for_date(conn, db_type, s3_client, target_date, is_refresh_d
             cursor.execute("SELECT events_downloaded FROM downloaded_dates WHERE date_day = ?", (target_date,))
         result = cursor.fetchone()
 
-        # If it's a refresh date and data exists, force re-download
-        if result and result[0] > 0 and is_refresh_date:
-            logger.info(f"Event data for {target_date.strftime('%Y-%m-%d')} already exists in database. Forcing re-download for refresh.")
-            # Clear existing data for this date to force re-download
-            if db_type == 'postgres':
-                cursor.execute("DELETE FROM raw_event_data WHERE date_day = %s", (target_date,))
-                cursor.execute("DELETE FROM downloaded_dates WHERE date_day = %s", (target_date,))
-            else:
-                cursor.execute("DELETE FROM raw_event_data WHERE date_day = ?", (target_date,))
-                cursor.execute("DELETE FROM downloaded_dates WHERE date_day = ?", (target_date,))
-            conn.commit()
-            logger.info(f"🗑️  Cleared existing raw data for {target_date.strftime('%Y-%m-%d')} to enable refresh")
-        elif result and result[0] > 0 and not is_refresh_date:
+        # Check if data already exists (but don't delete here - deletion handled globally)
+        if result and result[0] > 0 and not is_refresh_date:
             logger.info(f"Event data for {target_date.strftime('%Y-%m-%d')} already exists in database. Skipping download.")
             return True
 

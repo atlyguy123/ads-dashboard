@@ -8,6 +8,8 @@ from datetime import datetime
 
 from ..services.dashboard_service import DashboardService
 from ..services.analytics_query_service import AnalyticsQueryService, QueryConfig
+from ..services.dashboard_refresh_service import DashboardRefreshService
+from ..services.dashboard_tooltip_service import DashboardTooltipService
 
 # Import timezone utilities for consistent timezone handling
 from ...utils.timezone_utils import now_in_timezone
@@ -21,6 +23,12 @@ dashboard_service = DashboardService()
 
 # Use the analytics service from dashboard_service to prevent duplicate instances and connection leaks
 analytics_service = dashboard_service.analytics_service
+
+# Initialize the dashboard refresh service (focused on dashboard operations)
+dashboard_refresh_service = DashboardRefreshService()
+
+# Initialize the dashboard tooltip service (focused on user stats tooltips)
+dashboard_tooltip_service = DashboardTooltipService()
 
 @dashboard_bp.route('/configurations', methods=['GET'])
 def get_configurations():
@@ -292,8 +300,8 @@ def get_analytics_data():
             include_mixpanel=include_mixpanel
         )
         
-        # Execute OPTIMIZED analytics query (pre-computed data only) 
-        result = analytics_service.execute_analytics_query_optimized(config)
+        # Execute OPTIMIZED analytics query using new DashboardRefreshService (pre-computed data only) 
+        result = dashboard_refresh_service.execute_optimized_dashboard_refresh(config)
         
         # 🔍 CRITICAL DEBUG - Log the exact response being sent to frontend
         logger.info("🔍 ANALYTICS ENDPOINT - CRITICAL RESPONSE DEBUG:")
@@ -392,8 +400,8 @@ def get_optimized_analytics_data():
             include_mixpanel=include_mixpanel
         )
         
-        # Execute OPTIMIZED analytics query - NO FALLBACK
-        result = analytics_service.execute_analytics_query_optimized(config)
+        # Execute OPTIMIZED analytics query using new DashboardRefreshService - NO FALLBACK
+        result = dashboard_refresh_service.execute_optimized_dashboard_refresh(config)
         
         # Response format IDENTICAL to existing endpoint
         if result.get('success'):
@@ -407,6 +415,92 @@ def get_optimized_analytics_data():
             'success': False,
             'error': str(e),
             'endpoint': 'optimized_analytics'
+        }), 500
+
+
+@dashboard_bp.route('/refresh', methods=['POST'])
+def refresh_dashboard_data():
+    """
+    🚀 NEW OPTIMIZED dashboard refresh endpoint using DashboardRefreshService
+    
+    This endpoint specifically handles dashboard refresh requests with optimal performance.
+    It's separate from the main analytics endpoint to provide clear separation of concerns.
+    
+    Expected JSON payload:
+    {
+        "start_date": "2025-05-01",
+        "end_date": "2025-05-31",
+        "breakdown": "all",  // 'all', 'country', 'region', 'device'
+        "group_by": "ad",    // 'campaign', 'adset', 'ad'
+        "include_mixpanel": true
+    }
+    """
+    try:
+        data = request.get_json(force=True, silent=True)
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No data provided in request'
+            }), 400
+        
+        # Validate required parameters
+        required_params = ['start_date', 'end_date']
+        for param in required_params:
+            if param not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required parameter: {param}'
+                }), 400
+        
+        # Extract parameters with defaults
+        start_date = data['start_date']
+        end_date = data['end_date']
+        breakdown = data.get('breakdown', 'all')
+        group_by = data.get('group_by', 'ad')
+        include_mixpanel = data.get('include_mixpanel', True)
+        
+        # Validate breakdown parameter
+        valid_breakdowns = ['all', 'country', 'region', 'device']
+        if breakdown not in valid_breakdowns:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid breakdown parameter. Must be one of: {valid_breakdowns}'
+            }), 400
+        
+        # Validate group_by parameter
+        valid_group_by = ['campaign', 'adset', 'ad']
+        if group_by not in valid_group_by:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid group_by parameter. Must be one of: {valid_group_by}'
+            }), 400
+        
+        # Create query configuration
+        config = QueryConfig(
+            breakdown=breakdown,
+            start_date=start_date,
+            end_date=end_date,
+            group_by=group_by,
+            include_mixpanel=include_mixpanel
+        )
+        
+        # Execute dashboard refresh using new DashboardRefreshService
+        result = dashboard_refresh_service.execute_optimized_dashboard_refresh(config)
+        
+        # Return result with clear method indication
+        if result.get('success'):
+            result['method'] = 'dashboard_refresh_service'
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logger.error(f"Error in dashboard refresh endpoint: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'endpoint': 'dashboard_refresh'
         }), 500
 
 
@@ -515,10 +609,10 @@ def get_optimized_analytics_data():
 
 @dashboard_bp.route('/analytics/date-range', methods=['GET'])
 def get_available_date_range():
-    """Get the available date range from the analytics data"""
+    """Get the available date range from dashboard data"""
     try:
-        logger.info("Getting available date range for analytics data")
-        result = analytics_service.get_available_date_range()
+        logger.info("Getting available date range for dashboard data using dashboard_refresh_service")
+        result = dashboard_refresh_service.get_available_date_range()
             
         if result.get('success'):
             return jsonify(result)
@@ -526,10 +620,11 @@ def get_available_date_range():
             return jsonify(result), 500
             
     except Exception as e:
-        logger.error(f"Error getting date range: {str(e)}", exc_info=True)
+        logger.error(f"Error getting date range from dashboard_refresh_service: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'source': 'dashboard_refresh_service_error'
         }), 500
 
 @dashboard_bp.route('/analytics/segments', methods=['POST'])
@@ -583,7 +678,7 @@ def get_segment_performance():
         if sort_direction not in ['asc', 'desc']:
             sort_direction = 'desc'
         
-        result = analytics_service.get_segment_performance(
+        result = dashboard_refresh_service.get_segment_performance(
             filters=filters,
             sort_column=sort_column,
             sort_direction=sort_direction
@@ -631,7 +726,7 @@ def get_overview_roas_chart():
         
         # Get overview ROAS chart data with thread safety
         try:
-            result = analytics_service.get_overview_roas_chart_data(
+            result = dashboard_refresh_service.get_overview_roas_chart_data(
                 start_date=start_date,
                 end_date=end_date,
                 breakdown=breakdown
@@ -658,4 +753,84 @@ def get_overview_roas_chart():
         return jsonify({
             'success': False,
             'error': error_msg
+        }), 500
+
+
+@dashboard_bp.route('/analytics/user-details-tooltip', methods=['GET'])
+def get_user_details_for_tooltip():
+    """
+    Get detailed user statistics for dashboard tooltips
+    
+    Query parameters:
+    - entity_type: Type of entity ('campaign', 'adset', 'ad')
+    - entity_id: Entity ID (can be prefixed like 'ad_123' or just '123')
+    - start_date: Start date (YYYY-MM-DD)
+    - end_date: End date (YYYY-MM-DD)
+    - breakdown: Breakdown type ('all', 'country', 'device', etc.) - optional, default 'all'
+    - breakdown_value: Specific breakdown value - optional
+    - metric_type: Metric type ('trial_conversion_rate', 'avg_trial_refund_rate', 'purchase_refund_rate') - optional, default 'trial_conversion_rate'
+    """
+    try:
+        # Get query parameters
+        entity_type = request.args.get('entity_type')
+        entity_id = request.args.get('entity_id')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        breakdown = request.args.get('breakdown', 'all')
+        breakdown_value = request.args.get('breakdown_value')
+        metric_type = request.args.get('metric_type', 'trial_conversion_rate')
+        
+        logger.info(f"Getting user details for tooltip: entity_type={entity_type}, entity_id={entity_id}, start_date={start_date}, end_date={end_date}, metric_type={metric_type}")
+        
+        # Validate required parameters
+        if not all([entity_type, entity_id, start_date, end_date]):
+            error_msg = 'Missing required parameters: entity_type, entity_id, start_date, end_date'
+            logger.error(f"Tooltip user details validation error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+        
+        # Get user details from tooltip service
+        result = dashboard_tooltip_service.get_user_details_for_tooltip(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            start_date=start_date,
+            end_date=end_date,
+            breakdown=breakdown,
+            breakdown_value=breakdown_value,
+            metric_type=metric_type
+        )
+        
+        # Return result
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logger.error(f"Error in user details tooltip endpoint: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'estimated': {
+                'summary': {
+                    'total_users': 0,
+                    'avg_trial_conversion_rate': 0,
+                    'avg_trial_refund_rate': 0,
+                    'avg_purchase_refund_rate': 0,
+                    'total_estimated_revenue': 0
+                },
+                'users': []
+            },
+            'actual': {
+                'summary': {
+                    'total_users': 0,
+                    'avg_trial_conversion_rate': 0,
+                    'avg_trial_refund_rate': 0,
+                    'avg_purchase_refund_rate': 0,
+                    'total_estimated_revenue': 0
+                },
+                'users': []
+            }
         }), 500

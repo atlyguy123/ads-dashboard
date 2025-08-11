@@ -41,24 +41,28 @@ const useOverviewChartData = (dateRange, breakdown, refreshTrigger = 0) => {
     }
     
     const cacheKey = getCacheKey();
-    const hasValidCachedData = chartData.length > 0;
     
-    // Only fetch new data when:
-    // 1. Explicitly triggered (refreshTrigger > 0), OR
-    // 2. No cached data exists (need initial load)
-    if (refreshTrigger === 0 && hasValidCachedData) {
-      console.log('📊 Using cached overview chart data, no API call needed');
-      return; // Use cached data only, no API call
-    }
-    
-    // Allow initial load if no cached data exists
-    if (refreshTrigger === 0 && !hasValidCachedData) {
+    // FORCE REFRESH: Always update when refresh button is clicked
+    if (refreshTrigger > 0) {
+      console.log('📊 FORCED REFRESH: Clearing cache and fetching fresh data');
+      if (cacheKey) {
+        localStorage.removeItem(cacheKey);
+      }
+      // Clear the current state data to force fresh rendering
+      setChartData([]);
+    } else {
+      // Only use cache on initial load (refreshTrigger === 0)
+      const hasValidCachedData = chartData.length > 0;
+      if (hasValidCachedData) {
+        console.log('📊 Using cached overview chart data for initial load');
+        return; // Use cached data only for initial load
+      }
       console.log('📊 No cached data found, making initial API call');
     }
     
     console.log('📊 Fetching overview chart data:', { 
       refreshTrigger, 
-      hasValidCachedData, 
+      isForceRefresh: refreshTrigger > 0,
       dateRange: dateRange.end_date,
       breakdown 
     });

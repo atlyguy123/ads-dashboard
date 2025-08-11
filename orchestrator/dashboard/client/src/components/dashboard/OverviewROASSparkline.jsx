@@ -75,7 +75,7 @@ const OverviewROASSparkline = React.memo(({
 
   // Check if we have enough valid data for sparkline
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
-    parseFloat(d.rolling_1d_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
+    parseFloat(d.rolling_1d_roas) > 0 || parseFloat(d.rolling_1d_spend) > 0 || parseFloat(d.rolling_1d_revenue) > 0
   );
 
   if (loading) {

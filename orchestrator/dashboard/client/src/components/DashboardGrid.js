@@ -279,80 +279,81 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
       return;
     }
     
-    // 🚀 CRITICAL: Use user details from main API response instead of making individual API calls
+    // 🚀 NEW: Use dedicated tooltip API for detailed user statistics
     setLoading(true);
     
     try {
-      // Get user details from row data (included in main dashboard API response)
-      const userDetails = row.user_details || {};
-      const trialUsersCount = row.trial_users_count || 0;
-      const purchaseUsersCount = row.purchase_users_count || 0;
-      const trialRefundCount = row.trial_refund_count || 0;
-      const purchaseRefundCount = row.purchase_refund_count || 0;
+      // Extract entity information from row
+      const entityId = row.entity_id || row.id;
+      const entityType = row.entity_type || 'ad'; // Default to ad if not specified
       
-      console.log('🚀 ConversionRateTooltip using included data:', {
-        'entity_id': row.id,
-        'trial_users_count': trialUsersCount,
-        'purchase_users_count': purchaseUsersCount,
-        'user_details_keys': Object.keys(userDetails),
-        'column_key': columnKey
+      // Get date range from dashboard params (fallback to reasonable defaults)
+      const startDate = dashboardParams?.start_date || '2025-07-01';
+      const endDate = dashboardParams?.end_date || '2025-07-31';
+      const breakdown = dashboardParams?.breakdown || 'all';
+      
+      console.log('🔍 ConversionRateTooltip calling dedicated API:', {
+        'entity_id': entityId,
+        'entity_type': entityType,
+        'date_range': `${startDate} to ${endDate}`,
+        'column_key': columnKey,
+        'breakdown': breakdown
       });
       
-      // Create tooltip data structure based on columnKey
-      let tooltipData;
-      if (columnKey === 'trial_conversion_rate') {
-        // Show trial-related data
-        tooltipData = {
+      // Call the dedicated tooltip API
+      const { dashboardApi } = await import('../services/dashboardApi');
+      const result = await dashboardApi.getUserDetailsForTooltip({
+        entity_type: entityType,
+        entity_id: entityId,
+        start_date: startDate,
+        end_date: endDate,
+        breakdown: breakdown,
+        metric_type: columnKey
+      });
+      
+      if (result.success) {
+        // Transform API response to tooltip format
+        const tooltipData = {
           estimated: {
-            total_count: trialUsersCount,
+            total_count: result.estimated.summary.total_users,
             conversion_rate: value || 0,
-            users: userDetails.trial_users || [],
-            summary: `${trialUsersCount} trial users`,
-            refund_count: trialRefundCount,
-            refund_users: userDetails.trial_refund_user_ids || []
+            users: result.estimated.users || [],
+            summary: result.estimated.summary,
+            refund_count: result.estimated.users?.filter(u => u.is_trial_refund || u.is_purchase_refund).length || 0,
+            refund_users: result.estimated.users?.filter(u => u.is_trial_refund || u.is_purchase_refund) || []
           },
           actual: {
-            total_count: trialUsersCount,
-            conversion_rate: value || 0,
-            users: userDetails.trial_users || [],
-            summary: `${trialUsersCount} trial users`,
-            refund_count: trialRefundCount,
-            refund_users: userDetails.trial_refund_user_ids || []
+            total_count: result.actual.summary.total_users,
+            conversion_rate: result.actual.summary.avg_trial_conversion_rate || result.actual.summary.avg_purchase_refund_rate || 0,
+            users: result.actual.users || [],
+            summary: result.actual.summary,
+            refund_count: result.actual.users?.filter(u => u.is_trial_refund || u.is_purchase_refund).length || 0,
+            refund_users: result.actual.users?.filter(u => u.is_trial_refund || u.is_purchase_refund) || []
           }
         };
+        
+        // Store the data structure
+        setDualData(tooltipData);
+        
+        // Set current view to the requested mode
+        const modeData = tooltipData[mode];
+        setUserDetails(modeData);
+        setAllUsers(modeData.users || []);
+        
+        console.log('✅ Tooltip data loaded successfully:', {
+          estimated_users: tooltipData.estimated.total_count,
+          actual_users: tooltipData.actual.total_count,
+          mode: mode
+        });
+        
       } else {
-        // Show purchase-related data
-        tooltipData = {
-          estimated: {
-            total_count: purchaseUsersCount,
-            conversion_rate: value || 0,
-            users: userDetails.converted_users || [],
-            summary: `${purchaseUsersCount} purchase users`,
-            refund_count: purchaseRefundCount,
-            refund_users: userDetails.purchase_refund_user_ids || []
-          },
-          actual: {
-            total_count: purchaseUsersCount,
-            conversion_rate: value || 0,
-            users: userDetails.converted_users || [],
-            summary: `${purchaseUsersCount} purchase users`,
-            refund_count: purchaseRefundCount,
-            refund_users: userDetails.purchase_refund_user_ids || []
-          }
-        };
+        setError(`API Error: ${result.error || 'Failed to load user details'}`);
+        console.error('❌ Tooltip API Error:', result);
       }
       
-      // Store the data structure
-      setDualData(tooltipData);
-      
-      // Set current view to the requested mode
-      const modeData = tooltipData[mode];
-      setUserDetails(modeData);
-      setAllUsers(modeData.users || []);
-      
     } catch (err) {
-      setError('Error loading user details from included data');
-      console.error('Error processing user details:', err);
+      setError('Error loading user details from tooltip API');
+      console.error('❌ Error calling tooltip API:', err);
     } finally {
       setLoading(false);
     }
@@ -462,11 +463,8 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
     <>
       <div className="flex items-center space-x-1">
         <span
-          className={`${colorClass} cursor-pointer hover:underline`}
-          onMouseEnter={(e) => handleMouseEnter(e, 'estimated')}
-          onMouseLeave={handleMouseLeave}
-          onClick={(e) => handleClick('estimated')}
-          title="Estimated rate - click to see all users"
+          className={`${colorClass}`}
+          title="Estimated rate"
         >
           {(() => {
             // Use estimated rate from backend data
@@ -485,11 +483,8 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
         </span>
         <span className={separatorClass}>|</span>
         <span
-          className={`${colorClass} cursor-pointer hover:underline`}
-          onMouseEnter={(e) => handleMouseEnter(e, 'actual')}
-          onMouseLeave={handleMouseLeave}
-          onClick={(e) => handleClick('actual')}
-          title="Actual rate - click to see converted users"
+          className={`${colorClass}`}
+          title="Actual rate"
         >
           {(() => {
             // Use actual rate from backend data
@@ -526,7 +521,7 @@ const ConversionRateTooltip = ({ row, columnKey, value, colorClass, dashboardPar
           })()}
         </span>
       </div>
-      {showTooltip && (
+      {false && showTooltip && (
         <div
           className="fixed z-50 bg-gray-900 text-white text-xs rounded-lg shadow-lg border border-gray-700 max-w-lg"
           style={{
@@ -1674,8 +1669,8 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
             currentROAS={value}
             conversionCount={calculatedRow.mixpanel_purchases || 0}
             breakdown={dashboardParams?.breakdown || 'all'}
-            startDate={dashboardParams?.start_date || '2025-04-01'}
-            endDate={dashboardParams?.end_date || '2025-04-10'}
+            startDate={dashboardParams?.start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+            endDate={dashboardParams?.end_date || new Date().toISOString().split('T')[0]}
             isBreakdownEntity={true}  // Flag to indicate this is a breakdown entity
             calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
             sparklineData={row.sparkline_data || []}  // 🚀 Pass sparkline data from main API response
@@ -1692,8 +1687,8 @@ const renderCellValue = (row, columnKey, isPipelineUpdated = false, eventPriorit
           currentROAS={value}
           conversionCount={calculatedRow.mixpanel_purchases || 0}
           breakdown={dashboardParams?.breakdown || 'all'}
-          startDate={dashboardParams?.start_date || '2025-04-01'}
-          endDate={dashboardParams?.end_date || '2025-04-10'}
+          startDate={dashboardParams?.start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+          endDate={dashboardParams?.end_date || new Date().toISOString().split('T')[0]}
           calculationTooltip={<ROASCalculationTooltip row={row} roas={value} />}
           sparklineData={row.sparkline_data || []}  // 🚀 Pass sparkline data from main API response
         />

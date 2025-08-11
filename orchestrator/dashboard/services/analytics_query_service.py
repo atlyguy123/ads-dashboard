@@ -3391,8 +3391,12 @@ class AnalyticsQueryService:
             }
 
     def get_earliest_meta_date(self) -> str:
-        """Get the earliest date available in meta analytics database"""
+        """
+        DEPRECATED: Moved to dashboard_refresh_service.py
+        Get the earliest date available in meta analytics database
+        """
         try:
+            logger.warning("DEPRECATED: analytics_query_service.get_earliest_meta_date() called. Use dashboard_refresh_service.get_earliest_meta_date() instead!")
             # Connect to meta analytics database
             with sqlite3.connect(self.meta_db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -3430,8 +3434,13 @@ class AnalyticsQueryService:
             return '2025-01-01'
 
     def get_available_date_range(self) -> Dict[str, Any]:
-        """Get available date range from analytics data"""
+        """
+        DEPRECATED: Moved to dashboard_refresh_service.py
+        Use dashboard_refresh_service.get_available_date_range() instead.
+        Get available date range from analytics data
+        """
         try:
+            logger.warning("DEPRECATED: analytics_query_service.get_available_date_range() called. Use dashboard_refresh_service.get_available_date_range() instead!")
             logger.info("Getting available date range for analytics data")
             earliest_date = self.get_earliest_meta_date()
             latest_date = now_in_timezone().strftime('%Y-%m-%d')
@@ -3458,6 +3467,9 @@ class AnalyticsQueryService:
     def get_segment_performance(self, filters: Dict[str, Any], sort_column: str = 'trial_conversion_rate', 
                               sort_direction: str = 'desc') -> Dict[str, Any]:
         """
+        DEPRECATED: Moved to dashboard_refresh_service.py
+        Use dashboard_refresh_service.get_segment_performance() instead.
+        
         Get segment performance data for conversion rate analysis
         
         Returns unique segments based on conversion rate cohort properties:
@@ -3465,6 +3477,7 @@ class AnalyticsQueryService:
         - Shows user count, conversion rates, and accuracy level for each segment
         """
         try:
+            logger.warning("DEPRECATED: analytics_query_service.get_segment_performance() called. Use dashboard_refresh_service.get_segment_performance() instead!")
             logger.info(f"Getting segment performance data with filters: {filters}")
             
             with sqlite3.connect(self.mixpanel_db_path) as conn:
@@ -3708,301 +3721,21 @@ class AnalyticsQueryService:
 
     def get_overview_roas_chart_data(self, start_date: str, end_date: str, breakdown: str = 'all') -> Dict[str, Any]:
         """
-        Get overview ROAS sparkline data for dashboard summary
-        
-        This aggregates data across all campaigns to show overall performance trends
+        DEPRECATED: Redirect to dashboard_refresh_service
         """
-        try:
-            # Getting overview ROAS chart data
-            
-            # Calculate date range for chart period
-            from datetime import datetime, timedelta
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-            
-            # Calculate how many days we need
-            date_diff = (end_dt - start_dt).days + 1
-            # Generate date range for overview period
-            
-            # Generate all dates in the requested range
-            daily_data = {}
-            current_dt = start_dt
-            
-            # Initialize all days with zero values
-            while current_dt <= end_dt:
-                date_str = current_dt.strftime('%Y-%m-%d')
-                daily_data[date_str] = {
-                    'date': date_str,
-                    'daily_spend': 0.0,
-                    'daily_impressions': 0,
-                    'daily_clicks': 0,
-                    'daily_meta_trials': 0,
-                    'daily_meta_purchases': 0,
-                    'daily_mixpanel_trials': 0,
-                    'daily_mixpanel_purchases': 0,
-                    'daily_mixpanel_conversions': 0,
-                    'daily_mixpanel_revenue': 0.0,
-                    'daily_mixpanel_refunds': 0.0,
-                    'daily_estimated_revenue': 0.0,
-                    'daily_attributed_users': 0,
-                    'is_inactive': True  # Will be set to False if we have data
-                }
-                current_dt += timedelta(days=1)
-            
-            # ✅ STEP 1: Get aggregated Meta data from correct table (ad_performance_daily)
-            # Step 1: Query Meta data
-            
-            # Determine which table to use based on breakdown
-            table_name = self.get_table_name(breakdown)  # Uses existing table mapping logic
-            
-            meta_query = f"""
-                SELECT 
-                    date,
-                    SUM(spend) as daily_spend,
-                    SUM(impressions) as daily_impressions,
-                    SUM(clicks) as daily_clicks,
-                    SUM(meta_trials) as daily_meta_trials,
-                    SUM(meta_purchases) as daily_meta_purchases
-                FROM {table_name}
-                WHERE date BETWEEN ? AND ?
-                GROUP BY date
-                ORDER BY date
-            """
-            
-            meta_data = self._execute_meta_query(meta_query, [start_date, end_date])
-            logger.info(f"📊 Retrieved {len(meta_data)} days of Meta data")
-            
-            # ✅ STEP 2: Get aggregated Mixpanel data from correct tables
-            # Step 2: Query Mixpanel data
-            
-            # Get estimated revenue from user_product_metrics (attributed by credited_date)
-            with get_database_connection('mixpanel_data') as mixpanel_conn:
-                mixpanel_conn.row_factory = sqlite3.Row
-                mixpanel_cursor = mixpanel_conn.cursor()
-                
-                # Query for estimated revenue from user lifecycle predictions
-                revenue_query = """
-                SELECT 
-                    upm.credited_date as date,
-                    SUM(upm.current_value) as daily_estimated_revenue,
-                    COUNT(DISTINCT upm.distinct_id) as daily_attributed_users
-                FROM user_product_metrics upm
-                JOIN mixpanel_user u ON upm.distinct_id = u.distinct_id
-                WHERE upm.credited_date BETWEEN ? AND ?
-                  AND u.has_abi_attribution = TRUE
-                GROUP BY upm.credited_date
-                ORDER BY upm.credited_date
-                """
-                
-                mixpanel_cursor.execute(revenue_query, [start_date, end_date])
-                revenue_data = [dict(row) for row in mixpanel_cursor.fetchall()]
-                
-                # Query for trial/purchase events aggregated by event date
-                events_query = """
-                SELECT 
-                    DATE(e.event_time) as date,
-                    COUNT(DISTINCT CASE WHEN e.event_name = 'RC Trial started' THEN u.distinct_id END) as daily_mixpanel_trials,
-                    COUNT(DISTINCT CASE WHEN e.event_name = 'RC Initial purchase' THEN u.distinct_id END) as daily_mixpanel_purchases,
-                    COUNT(DISTINCT CASE WHEN e.event_name = 'RC Initial purchase' THEN u.distinct_id END) as daily_mixpanel_conversions,
-                    COALESCE(SUM(CASE WHEN e.event_name = 'RC Initial purchase' THEN e.revenue_usd ELSE 0 END), 0) as daily_mixpanel_revenue,
-                    COALESCE(SUM(CASE WHEN e.event_name = 'RC Cancellation' THEN ABS(e.revenue_usd) ELSE 0 END), 0) as daily_mixpanel_refunds
-                FROM mixpanel_event e
-                JOIN mixpanel_user u ON e.distinct_id = u.distinct_id
-                WHERE DATE(e.event_time) BETWEEN ? AND ?
-                  AND u.has_abi_attribution = TRUE
-                  AND e.event_name IN ('RC Trial started', 'RC Initial purchase', 'RC Cancellation')
-                GROUP BY DATE(e.event_time)
-                ORDER BY DATE(e.event_time)
-                """
-                
-                mixpanel_cursor.execute(events_query, [start_date, end_date])
-                events_data = [dict(row) for row in mixpanel_cursor.fetchall()]
-                
-                logger.info(f"📊 Retrieved {len(revenue_data)} days of revenue data and {len(events_data)} days of events data")
-            
-            # Combine revenue and events data
-            mixpanel_data = {}
-            for row in revenue_data:
-                date = row['date']
-                mixpanel_data[date] = dict(row)
-            
-            for row in events_data:
-                date = row['date']
-                if date in mixpanel_data:
-                    mixpanel_data[date].update(row)
-                else:
-                    mixpanel_data[date] = dict(row)
-            
-            # ✅ STEP 3: Overlay actual data onto the date framework
-            # Overlay Meta data
-            for row in meta_data:
-                date = row['date']
-                if date in daily_data:
-                    daily_data[date].update({
-                        'daily_spend': float(row.get('daily_spend', 0) or 0),
-                        'daily_impressions': int(row.get('daily_impressions', 0) or 0),
-                        'daily_clicks': int(row.get('daily_clicks', 0) or 0),
-                        'daily_meta_trials': int(row.get('daily_meta_trials', 0) or 0),
-                        'daily_meta_purchases': int(row.get('daily_meta_purchases', 0) or 0),
-                        'is_inactive': False  # Has data
-                    })
-            
-            # Overlay Mixpanel data (now a dictionary)
-            for date, row in mixpanel_data.items():
-                if date in daily_data:
-                    daily_data[date].update({
-                        'daily_mixpanel_trials': int(row.get('daily_mixpanel_trials', 0) or 0),
-                        'daily_mixpanel_purchases': int(row.get('daily_mixpanel_purchases', 0) or 0),
-                        'daily_mixpanel_conversions': int(row.get('daily_mixpanel_conversions', 0) or 0),
-                        'daily_mixpanel_revenue': float(row.get('daily_mixpanel_revenue', 0) or 0),
-                        'daily_mixpanel_refunds': float(row.get('daily_mixpanel_refunds', 0) or 0),
-                        'daily_estimated_revenue': float(row.get('daily_estimated_revenue', 0) or 0),
-                        'daily_attributed_users': int(row.get('daily_attributed_users', 0) or 0),
-                        'is_inactive': False  # Has data
-                    })
-            
-            # ✅ STEP 4: Calculate rolling ROAS using the same system as individual charts
-            from ..calculators.base_calculators import CalculationInput
-            from ..calculators.roas_calculators import ROASCalculators
-            from ..calculators.revenue_calculators import RevenueCalculators
-            
-            # Calculate overall accuracy ratio for the period
-            total_mixpanel_trials = sum(d['daily_mixpanel_trials'] for d in daily_data.values())
-            total_meta_trials = sum(d['daily_meta_trials'] for d in daily_data.values())
-            total_mixpanel_purchases = sum(d['daily_mixpanel_purchases'] for d in daily_data.values())
-            total_meta_purchases = sum(d['daily_meta_purchases'] for d in daily_data.values())
-            
-            # Determine event priority and accuracy ratio
-            if total_mixpanel_trials == 0 and total_mixpanel_purchases == 0:
-                event_priority = 'trials'
-                overall_accuracy_ratio = 0.0
-            elif total_mixpanel_trials > total_mixpanel_purchases:
-                event_priority = 'trials'
-                # Special case: If meta_trials = 0 but mixpanel_trials > 0, treat as 100% accuracy
-                if total_meta_trials == 0 and total_mixpanel_trials > 0:
-                    overall_accuracy_ratio = 1.0  # 100% accuracy
-                else:
-                    overall_accuracy_ratio = (total_mixpanel_trials / total_meta_trials) if total_meta_trials > 0 else 0.0
-            else:
-                event_priority = 'purchases'
-                overall_accuracy_ratio = (total_mixpanel_purchases / total_meta_purchases) if total_meta_purchases > 0 else 0.0
-            
-            # Overview accuracy calculated
-            
-            # Convert to list and calculate rolling metrics
-            all_data = []
-            for date in sorted(daily_data.keys()):
-                day_data = daily_data[date]
-                
-                # Map daily fields to standard calculator field names
-                calculator_record = {
-                    'spend': day_data['daily_spend'],
-                    'estimated_revenue_usd': day_data['daily_estimated_revenue'],
-                    'mixpanel_revenue_usd': day_data.get('daily_mixpanel_revenue', 0),
-                    'mixpanel_refunds_usd': day_data.get('daily_mixpanel_refunds', 0),
-                    'mixpanel_trials_started': day_data.get('daily_mixpanel_trials', 0),
-                    'meta_trials_started': day_data.get('daily_meta_trials', 0),
-                    'mixpanel_purchases': day_data.get('daily_mixpanel_purchases', 0),
-                    'meta_purchases': day_data.get('daily_meta_purchases', 0),
-                    **day_data  # Keep original daily fields for reference
-                }
-                
-                # Use the modular calculator system for ROAS and profit calculations
-                calc_input = CalculationInput(raw_record=calculator_record)
-                day_data['daily_roas'] = ROASCalculators.calculate_estimated_roas(calc_input)
-                day_data['daily_profit'] = RevenueCalculators.calculate_profit(calc_input)
-                
-                # Store accuracy ratio and event priority for tooltips
-                day_data['period_accuracy_ratio'] = overall_accuracy_ratio
-                day_data['event_priority'] = event_priority
-                day_data['conversions_for_coloring'] = day_data['daily_mixpanel_conversions']
-                
-                all_data.append(day_data)
-            
-            # Calculate rolling 1-day ROAS for each day in the full dataset
-            for i, day_data in enumerate(all_data):
-                # Calculate rolling window (current day only)
-                rolling_days = [day_data]  # Only current day
-                
-                # Sum spend and accuracy-adjusted revenue for the rolling window (just current day)
-                rolling_spend = day_data['daily_spend']
-                rolling_revenue = RevenueCalculators.calculate_estimated_revenue_with_accuracy_adjustment(
-                    CalculationInput(raw_record={
-                        'estimated_revenue_usd': day_data['daily_estimated_revenue'],
-                        'mixpanel_trials_started': day_data['daily_mixpanel_trials'],
-                        'mixpanel_purchases': day_data['daily_mixpanel_purchases'],
-                        'meta_trials_started': day_data['daily_meta_trials'],
-                        'meta_purchases': day_data['daily_meta_purchases']
-                    })
-                )
-                rolling_conversions = day_data['daily_mixpanel_purchases']
-                rolling_trials = day_data['daily_mixpanel_trials']
-                rolling_meta_trials = day_data['daily_meta_trials']
-                
-                # Calculate rolling ROAS
-                if rolling_spend > 0:
-                    rolling_roas = rolling_revenue / rolling_spend
-                else:
-                    rolling_roas = 0.0
-                
-                # Add rolling metrics to day data
-                day_data['rolling_1d_roas'] = round(rolling_roas, 2)
-                day_data['rolling_1d_spend'] = rolling_spend
-                day_data['rolling_1d_revenue'] = rolling_revenue
-                day_data['rolling_1d_conversions'] = rolling_conversions
-                day_data['rolling_1d_trials'] = rolling_trials
-                day_data['rolling_1d_meta_trials'] = rolling_meta_trials
-                day_data['rolling_window_days'] = len(rolling_days)  # For tooltip info
-            
-            # Return all the data (no need to limit since we only generate the requested range)
-            chart_data = all_data
-            
-            # Summary logging - ✅ FIXED: Use ADJUSTED revenue for totals
-            total_days_with_data = sum(1 for d in chart_data if not d.get('is_inactive', False))
-            total_spend = sum(d['daily_spend'] for d in chart_data)
-            total_revenue = sum(d['rolling_1d_revenue'] for d in chart_data)  # ✅ Use adjusted revenue
-            avg_daily_roas = sum(d['rolling_1d_roas'] for d in chart_data) / len(chart_data) if chart_data else 0
-            
-                    # Overview chart data completed
-            
-            return {
-                'success': True,
-                'chart_data': chart_data,
-                'entity_type': 'overview',
-                'entity_id': 'all_campaigns',
-                'date_range': f"{start_date} to {end_date}",
-                'total_days': len(chart_data),
-                'active_days': total_days_with_data,
-                'total_spend': total_spend,
-                'total_revenue': total_revenue,
-                'avg_roas': avg_daily_roas,
-                'period_info': f"Overview data for {len(chart_data)}-day period from {start_date} to {end_date}",
-                'rolling_calculation_info': f"1-day rolling averages calculated for all {len(chart_data)} days",
-                'breakdown': breakdown,
-                'metadata': {
-                    'table_used': table_name,
-                    'accuracy_ratio': overall_accuracy_ratio,
-                    'event_priority': event_priority,
-                    'generated_at': now_in_timezone().isoformat()
-                }
-            }
-                
-        except Exception as e:
-            logger.error(f"❌ Error getting overview ROAS chart data: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'chart_data': [],
-                'metadata': {
-                    'generated_at': now_in_timezone().isoformat(),
-                    'error_details': str(e),
-                    'date_range_requested': f"{start_date} to {end_date}",
-                    'breakdown_requested': breakdown
-                }
-            }
+        logger.error("❌ DEPRECATED: analytics_query_service.get_overview_roas_chart_data() called! This should NOT happen. Using dashboard_refresh_service instead.")
+        
+        # Import and redirect to the correct service
+        from .dashboard_refresh_service import DashboardRefreshService
+        refresh_service = DashboardRefreshService()
+        return refresh_service.get_overview_roas_chart_data(start_date, end_date, breakdown)
+
 
     def execute_analytics_query_optimized(self, config: QueryConfig) -> Dict[str, Any]:
         """
+        DEPRECATED: Moved to dashboard_refresh_service.py
+        Use dashboard_refresh_service.execute_optimized_dashboard_refresh() instead.
+        
         🚀 OPTIMIZED analytics query using ONLY pre-computed data
         
         No real-time calculations - just reads from daily_mixpanel_metrics and structures the data.
@@ -4010,6 +3743,7 @@ class AnalyticsQueryService:
         Handles both overall and country breakdowns using pre-computed tables.
         """
         try:
+            logger.warning("DEPRECATED: analytics_query_service.execute_analytics_query_optimized() called. Use dashboard_refresh_service.execute_optimized_dashboard_refresh() instead!")
             import sqlite3
             import json
             from utils.database_utils import get_database_connection

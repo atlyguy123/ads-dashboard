@@ -10,7 +10,10 @@ const TableViewer = () => {
   const [showAllTables, setShowAllTables] = useState(false);
   
   // Date range update states
-  const [startDate, setStartDate] = useState('2025-04-01');
+  const [startDate, setStartDate] = useState(() => {
+    // Dynamic default: 30 days ago
+    return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  });
   const [endDate, setEndDate] = useState(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);

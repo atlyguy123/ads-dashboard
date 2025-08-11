@@ -106,9 +106,9 @@ const ROASSparkline = React.memo(({
   // Calculate current ROAS color (using conversionCount passed as prop)
   const colorClass = getROASPerformanceColor(currentROAS, conversionCount);
   
-  // Check if we have enough valid data for sparkline
+  // Check if we have enough valid data for sparkline (at least some days with data)
   const hasEnoughData = chartData.length >= 2 && chartData.some(d => 
-    parseFloat(d.rolling_1d_roas) > 0 || parseFloat(d.daily_spend) > 0 || parseFloat(d.daily_estimated_revenue) > 0
+    d.has_data === true  // Only check if there are days with actual data, not the values
   );
 
   return (
@@ -163,29 +163,29 @@ const ROASSparkline = React.memo(({
               const startConversions = parseInt(chartData[i].rolling_1d_conversions) || 0;
               const endConversions = parseInt(chartData[i + 1].rolling_1d_conversions) || 0;
               
-              // Use grey styling for inactive periods (before first spend / after last spend)
-              const startIsInactive = chartData[i].is_inactive || false;
-              const endIsInactive = chartData[i + 1].is_inactive || false;
+              // Use grey styling for days with no data
+              const startHasData = chartData[i].has_data === true;
+              const endHasData = chartData[i + 1].has_data === true;
               
-              const startColor = startIsInactive ? 
-                'text-gray-300 dark:text-gray-600' : 
-                getROASPerformanceColor(startROAS, startConversions);
-              const endColor = endIsInactive ? 
-                'text-gray-300 dark:text-gray-600' : 
-                getROASPerformanceColor(endROAS, endConversions);
+              const startColor = startHasData ? 
+                getROASPerformanceColor(startROAS, startConversions) :
+                'text-gray-300 dark:text-gray-600';
+              const endColor = endHasData ? 
+                getROASPerformanceColor(endROAS, endConversions) :
+                'text-gray-300 dark:text-gray-600';
               
               // First half: from start point to midpoint (colored like start point)
               segments.push({
                 path: `M ${points[i]} L ${midPoint}`,
                 color: startColor,
-                isInactive: startIsInactive
+                isInactive: !startHasData
               });
               
               // Second half: from midpoint to end point (colored like end point)
               segments.push({
                 path: `M ${midPoint} L ${points[i + 1]}`,
                 color: endColor,
-                isInactive: endIsInactive
+                isInactive: !endHasData
               });
             }
             
@@ -217,11 +217,11 @@ const ROASSparkline = React.memo(({
                       d={segment.path}
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth={segment.isInactive ? "1" : "1.5"}
-                      strokeDasharray={segment.isInactive ? "2,2" : "none"}
+                      strokeWidth="1.5"
+                      strokeDasharray="none"
                       className={segment.color}
                       style={{
-                        opacity: segment.isInactive ? 0.3 : 1
+                        opacity: 1
                       }}
                     />
                   ))}
@@ -265,8 +265,8 @@ const ROASSparkline = React.memo(({
                   >
                     {(() => {
                       const dayData = chartData[hoveredPoint];
-                      const spend = parseFloat(dayData.daily_spend) || 0;
-                      const revenue = parseFloat(dayData.daily_estimated_revenue) || 0;
+                      const spend = parseFloat(dayData.rolling_1d_spend) || 0;
+                      const revenue = parseFloat(dayData.rolling_1d_revenue) || 0;
                       const backendROAS = parseFloat(dayData.rolling_1d_roas) || 0;
                       
                       // Display backend-calculated rolling ROAS value directly

@@ -207,8 +207,8 @@ export const useConversionProbability = () => {
     setAnalysisResults(null); // Clear previous results
     
     try {
-      // NEW: Don't send any timeframe - let the backend use the default comprehensive range (2024-01-01 to today)
-      const requestBody = {}; // Empty - will use 2024-01-01 to today automatically
+      // NEW: Don't send any timeframe - let the backend use its dynamic date range logic
+      const requestBody = {}; // Empty - will use backend's available data range automatically
       
       const response = await fetch('/api/conversion-probability/run-new-hierarchical-analysis', {
         method: 'POST',
