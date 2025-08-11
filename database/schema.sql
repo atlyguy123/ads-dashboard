@@ -443,11 +443,11 @@ CREATE TABLE daily_mixpanel_metrics (
     
     -- Trial Metrics
     trial_users_count INTEGER NOT NULL DEFAULT 0,
-    trial_users_list TEXT,            -- JSON array of distinct_ids
+    trial_user_ids TEXT,              -- JSON array of distinct_ids (standardized naming)
     
     -- Purchase Metrics  
     purchase_users_count INTEGER NOT NULL DEFAULT 0,
-    purchase_users_list TEXT,         -- JSON array of distinct_ids
+    purchase_user_ids TEXT,           -- JSON array of distinct_ids (standardized naming)
     
     -- Revenue Metrics
     estimated_revenue_usd DECIMAL(10,2) NOT NULL DEFAULT 0.00,

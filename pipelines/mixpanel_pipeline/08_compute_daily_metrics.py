@@ -366,11 +366,11 @@ class DailyMetricsProcessor:
             
             bulk_insert_data.append(record)
         
-        # Bulk insert with comprehensive schema
+        # Bulk insert with comprehensive schema - using correct field names
         insert_query = """
         INSERT OR REPLACE INTO daily_mixpanel_metrics 
-        (date, entity_type, entity_id, trial_users_count, trial_users_list, 
-         purchase_users_count, purchase_users_list, estimated_revenue_usd,
+        (date, entity_type, entity_id, trial_users_count, trial_user_ids, 
+         purchase_users_count, purchase_user_ids, estimated_revenue_usd,
          meta_spend, meta_impressions, meta_clicks, meta_trial_count, meta_purchase_count,
          post_trial_user_ids, converted_user_ids, trial_refund_user_ids, purchase_refund_user_ids,
          trial_conversion_rate_estimated, trial_conversion_rate_actual, trial_refund_rate_estimated, 

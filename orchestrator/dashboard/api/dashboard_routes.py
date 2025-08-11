@@ -292,8 +292,8 @@ def get_analytics_data():
             include_mixpanel=include_mixpanel
         )
         
-        # Execute hierarchical analytics query with optimized data aggregation
-        result = analytics_service.execute_analytics_query(config)
+        # Execute OPTIMIZED analytics query (pre-computed data only) 
+        result = analytics_service.execute_analytics_query_optimized(config)
         
         # 🔍 CRITICAL DEBUG - Log the exact response being sent to frontend
         logger.info("🔍 ANALYTICS ENDPOINT - CRITICAL RESPONSE DEBUG:")

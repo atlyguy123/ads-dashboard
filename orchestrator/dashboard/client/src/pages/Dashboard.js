@@ -999,6 +999,7 @@ export const Dashboard = () => {
         ) : processedData.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <DashboardGrid 
+              key={`${breakdown}-${hierarchy}`}
               data={processedData}
               rowOrder={rowOrder}
               onRowOrderChange={setRowOrder}

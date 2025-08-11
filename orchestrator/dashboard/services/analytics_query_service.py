@@ -4040,12 +4040,12 @@ class AnalyticsQueryService:
                         d.actual_revenue_usd,
                         d.net_actual_revenue_usd,
                         d.profit_usd,
-                        d.trial_users_list,
+                        d.trial_user_ids,
                         d.converted_user_ids,
                         d.post_trial_user_ids,
                         d.trial_refund_user_ids,
                         d.purchase_refund_user_ids,
-                        d.purchase_users_list
+                        d.purchase_user_ids
                         
                     FROM daily_mixpanel_metrics d
                     LEFT JOIN id_name_mapping n ON d.entity_id = n.entity_id
@@ -4170,200 +4170,39 @@ class AnalyticsQueryService:
                         }
                     entity_data[composite_key]['daily_rows'].append(row)
                 
-                # Structure the data for frontend with HIERARCHICAL format
-                if config.breakdown != 'all':
-                    # For breakdowns, return flat list with breakdown data
-                    entities = []
-                    for composite_key, data in entity_data.items():
-                        daily_rows = data['daily_rows']
-                        entity_id = data['entity_id']
-                else:
-                    # For non-breakdown queries, use ORIGINAL hierarchy logic with optimized data
-                    logger.info("🎯 Using original hierarchy logic with optimized data aggregation")
-                    
-                    # Call the original hierarchy method to get proper structure
-                    # NOTE: The hierarchy method uses meta_db_path, but our data is in mixpanel_data.db
-                    # We need to temporarily switch to the correct database
-                    original_meta_path = self.meta_db_path
-                    self.meta_db_path = self.mixpanel_db_path  # Use mixpanel DB which has the table
-                    
-                    original_result = self._execute_hierarchical_query(config, 'daily_mixpanel_metrics')
-                    
-                    # Restore original path
-                    self.meta_db_path = original_meta_path
-                    if original_result.get('success'):
-                        # Replace the data in the hierarchical structure with our optimized aggregations
-                        hierarchical_data = original_result['data']
-                        self._replace_hierarchy_data_with_optimized(hierarchical_data, entity_data)
-                        
-                        return {
-                            'success': True,
-                            'data': hierarchical_data,
-                            'total_records': len(hierarchical_data),
-                            'breakdown': config.breakdown,
-                            'method': 'optimized_precomputed_hierarchical'
-                        }
-                    else:
-                        logger.error("Original hierarchy method failed, falling back to flat structure")
-                        entities = self._build_hierarchical_structure_optimized(entity_data, config)
-                        return {
-                            'success': True,
-                            'data': entities,
-                            'total_records': len(entities),
-                            'breakdown': config.breakdown,
-                            'method': 'optimized_precomputed_hierarchical_fallback'
-                        }
+                # Structure the data for frontend - SIMPLIFIED FLAT FORMAT
+                entities = []
                 
-                # Continue with flat breakdown processing
+                # Process all entities with optimized aggregation
                 for composite_key, data in entity_data.items():
                     daily_rows = data['daily_rows']
                     entity_id = data['entity_id']
+                    entity_type = data['entity_type']
+                    name = data['name']
+                    breakdown_key = data.get('breakdown_key')
                     
-                    # Aggregate unique users across all days
-                    all_trial_users = set()
-                    all_converted_users = set()
-                    all_purchase_users = set()
-                    all_post_trial_users = set()
-                    all_trial_refund_users = set()
-                    all_purchase_refund_users = set()
-                    total_meta_spend = 0
-                    total_meta_trials = 0
-                    total_meta_purchases = 0
-                    total_estimated_revenue = 0
-                    total_adjusted_revenue = 0
-                    total_actual_revenue = 0
-                    total_profit = 0
-                    estimated_rate_sum = 0
-                    valid_estimated_days = 0
-                    trial_refund_est_sum = 0
-                    purchase_refund_est_sum = 0
-                    trial_refund_est_days = 0
-                    purchase_refund_est_days = 0
-
-                    for row in daily_rows:
-                        # Aggregate unique users (support both overall and breakdown schemas)
-                        row_keys = set(row.keys())
-                        if 'trial_users_list' in row_keys and row['trial_users_list']:
-                            trial_users = parse_user_list(row['trial_users_list'])
-                            all_trial_users.update(trial_users)
-                        elif 'trial_user_ids' in row_keys and row['trial_user_ids']:
-                            trial_users = parse_user_list(row['trial_user_ids'])
-                            all_trial_users.update(trial_users)
-
-                        if 'converted_user_ids' in row_keys and row['converted_user_ids']:
-                            converted_users = parse_user_list(row['converted_user_ids'])
-                            all_converted_users.update(converted_users)
-
-                        if 'post_trial_user_ids' in row_keys and row['post_trial_user_ids']:
-                            post_trial_users = parse_user_list(row['post_trial_user_ids'])
-                            all_post_trial_users.update(post_trial_users)
-
-                        if 'purchase_users_list' in row_keys and row['purchase_users_list']:
-                            purchase_users = parse_user_list(row['purchase_users_list'])
-                            all_purchase_users.update(purchase_users)
-                        elif 'purchase_user_ids' in row_keys and row['purchase_user_ids']:
-                            purchase_users = parse_user_list(row['purchase_user_ids'])
-                            all_purchase_users.update(purchase_users)
-
-                        if 'trial_refund_user_ids' in row_keys and row['trial_refund_user_ids']:
-                            refund_users = parse_user_list(row['trial_refund_user_ids'])
-                            all_trial_refund_users.update(refund_users)
-
-                        if 'purchase_refund_user_ids' in row_keys and row['purchase_refund_user_ids']:
-                            purchase_refund_users = parse_user_list(row['purchase_refund_user_ids'])
-                            all_purchase_refund_users.update(purchase_refund_users)
-                        
-                        # Sum financial metrics
-                        total_meta_spend += float(row['meta_spend'] or 0)
-                        total_meta_trials += int(row['meta_trial_count'] or 0)
-                        total_meta_purchases += int(row['meta_purchase_count'] or 0)
-                        total_estimated_revenue += float(row['estimated_revenue_usd'] or 0)
-                        total_adjusted_revenue += float(row['adjusted_estimated_revenue_usd'] or 0)
-                        total_actual_revenue += float(row['actual_revenue_usd'] or 0)
-                        total_profit += float(row['profit_usd'] or 0)
-                        
-                        # Average estimated rates (conversion and refunds)
-                        if 'trial_conversion_rate_estimated' in row_keys and row['trial_conversion_rate_estimated'] is not None:
-                            estimated_rate_sum += float(row['trial_conversion_rate_estimated'])
-                            valid_estimated_days += 1
-
-                        if 'trial_refund_rate_estimated' in row_keys and row['trial_refund_rate_estimated'] is not None:
-                            trial_refund_est_sum += float(row['trial_refund_rate_estimated'])
-                            trial_refund_est_days += 1
-
-                        if 'purchase_refund_rate_estimated' in row_keys and row['purchase_refund_rate_estimated'] is not None:
-                            purchase_refund_est_sum += float(row['purchase_refund_rate_estimated'])
-                            purchase_refund_est_days += 1
+                    # Aggregate daily metrics using the same logic as the working optimized method
+                    aggregated_metrics = self._aggregate_daily_metrics_optimized(daily_rows)
                     
-                    # Calculate actual metrics from unique user aggregation
-                    unique_trial_count = len(all_trial_users)
-                    unique_converted_count = len(all_converted_users)
-                    unique_purchase_count = len(all_purchase_users)
-                    unique_post_trial_count = len(all_post_trial_users)
-                    # Use post-trial users as denominator (had opportunity to convert)
-                    trial_conversion_actual = (unique_converted_count / unique_post_trial_count) if unique_post_trial_count > 0 else 0.0
-                    trial_conversion_estimated = (estimated_rate_sum / valid_estimated_days) if valid_estimated_days > 0 else 0.0
-                    trial_accuracy_ratio = (unique_trial_count / total_meta_trials) if total_meta_trials > 0 else 0.0
-
-                    # Refund rates (actual from unique user lists; estimated from averages)
-                    trial_refund_rate_actual = (len(all_trial_refund_users) / unique_converted_count) if unique_converted_count > 0 else 0.0
-                    purchase_refund_rate_actual = (len(all_purchase_refund_users) / unique_purchase_count) if unique_purchase_count > 0 else 0.0
-                    trial_refund_rate_estimated = (trial_refund_est_sum / trial_refund_est_days) if trial_refund_est_days > 0 else 0.0
-                    purchase_refund_rate_estimated = (purchase_refund_est_sum / purchase_refund_est_days) if purchase_refund_est_days > 0 else 0.0
-                    
+                    # Build entity record with all frontend fields
                     entity = {
+                        'id': f"{entity_type}_{entity_id}",
                         'entity_id': entity_id,
-                        'name': data['name'],
-                        'entity_type': data['entity_type'],
+                        'entity_type': entity_type,
+                        'name': name,
+                        'children': self._get_entity_children_optimized(entity_type, entity_id, config),
                         
-                        # Trials & Purchases (using properly aggregated unique counts)
-                        'mixpanel_trials_started': unique_trial_count,
-                        'meta_trials_started': total_meta_trials,
-                        'mixpanel_purchases': unique_purchase_count, 
-                        'meta_purchases': total_meta_purchases,
-                        'trials_combined': f"{unique_trial_count} | {total_meta_trials}",
-                        'purchases_combined': f"{unique_purchase_count} | {total_meta_purchases}",
-                        'trial_accuracy_ratio': trial_accuracy_ratio,
-                        'purchase_accuracy_ratio': (unique_purchase_count / total_meta_purchases) if total_meta_purchases > 0 else 0.0,
+                        # Pre-computed metrics
+                        **aggregated_metrics,
                         
-                        # Conversion Rates (both now in consistent decimal format 0-1)
-                        'trial_conversion_rate': trial_conversion_actual,
-                        'trial_conversion_rate_estimated': trial_conversion_estimated,
-                        'avg_trial_refund_rate': trial_refund_rate_actual,
-                        'purchase_refund_rate': purchase_refund_rate_actual,
-                        'trial_refund_rate_estimated': trial_refund_rate_estimated,
-                        'purchase_refund_rate_estimated': purchase_refund_rate_estimated,
-                        
-                        # Financial (using aggregated totals)
-                        'spend': total_meta_spend,
-                        'estimated_revenue_usd': total_estimated_revenue,
-                        'estimated_revenue_adjusted': total_adjusted_revenue,
-                        'actual_revenue_usd': total_actual_revenue,
-                        'profit': total_profit,
-                        
-                        # ROAS (frontend expects this field)
-                        'estimated_roas': (total_adjusted_revenue / total_meta_spend) if total_meta_spend > 0 else 0.0,
-                        
-                        # User details for tooltips (using aggregated unique users)
-                        'trial_users_count': unique_trial_count,
-                        'post_trial_users_count': unique_post_trial_count,
-                        'converted_users_count': unique_converted_count,
-                        'purchase_users_count': unique_purchase_count,
-                        'user_details': {
-                            'trial_users': list(all_trial_users),
-                            'converted_users': list(all_converted_users),
-                            'trial_refund_user_ids': list(all_trial_refund_users),
-                            'purchase_refund_user_ids': list(all_purchase_refund_users)
-                        }
+                        # Sparkline data
+                        'sparkline_data': self._format_sparkline_data_optimized(entity_type, entity_id, config.start_date, config.end_date)
                     }
                     
-                    # Add breakdown key if this is a breakdown query
-                    if config.breakdown != 'all':
-                        entity['breakdown_key'] = data['breakdown_key']
-                        entity['breakdown_type'] = data['breakdown_type']
-                    
-                    # Add sparkline data (pre-computed ROAS by day)
-                    entity['sparkline_data'] = self._get_precomputed_sparkline_data(entity_id, config)
+                    # Add breakdown info if applicable
+                    if breakdown_key:
+                        entity['breakdown_key'] = breakdown_key
+                        entity['breakdown_type'] = config.breakdown
                     
                     entities.append(entity)
                 
@@ -4372,318 +4211,215 @@ class AnalyticsQueryService:
                     'data': entities,
                     'total_records': len(entities),
                     'breakdown': config.breakdown,
-                    'method': 'optimized_precomputed_only'
+                    'method': 'optimized_precomputed_flat'
                 }
-                
+        
         except Exception as e:
-            logger.error(f"Error in optimized analytics query: {e}")
+            logger.error(f"Error executing optimized analytics query: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
-                'method': 'optimized_precomputed_only'
+                'method': 'optimized_precomputed_error'
             }
-            
-    def _get_precomputed_sparkline_data(self, entity_id: str, config: QueryConfig) -> List[Dict]:
-        """Get pre-computed daily ROAS data for sparklines"""
+    
+
+
+    def _get_child_entity_ids(self, parent_id: str, parent_type: str, child_type: str) -> List[str]:
+        """Get IDs of child entities from hierarchy mapping"""
         try:
-            import sqlite3
-            from utils.database_utils import get_database_connection
-            
-            with get_database_connection('mixpanel_data') as conn:
+            with sqlite3.connect(self.mixpanel_db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                cursor.execute("""
-                    SELECT 
-                        date,
-                        meta_spend as daily_spend,
-                        adjusted_estimated_revenue_usd as daily_revenue,
-                        CASE WHEN meta_spend > 0 
-                             THEN adjusted_estimated_revenue_usd / meta_spend 
-                             ELSE 0 END as daily_roas
-                    FROM daily_mixpanel_metrics 
-                    WHERE entity_id = ? 
-                      AND date BETWEEN ? AND ?
-                    ORDER BY date
-                """, (entity_id, config.start_date, config.end_date))
-                
+                if parent_type == 'campaign' and child_type == 'adset':
+                    query = "SELECT DISTINCT adset_id as child_id FROM id_hierarchy_mapping WHERE campaign_id = ?"
+                elif parent_type == 'adset' and child_type == 'ad':
+                    query = "SELECT DISTINCT ad_id as child_id FROM id_hierarchy_mapping WHERE adset_id = ?"
+                else:
+                    return []
+                    
+                cursor.execute(query, (parent_id,))
                 rows = cursor.fetchall()
-                return [
-                    {
-                        'date': row['date'],
-                        'daily_spend': float(row['daily_spend'] or 0),
-                        'daily_revenue': float(row['daily_revenue'] or 0),
-                        'daily_roas': round(float(row['daily_roas'] or 0), 2),
-                        # Frontend expects these specific key names
-                        'rolling_1d_spend': float(row['daily_spend'] or 0),
-                        'rolling_1d_revenue': float(row['daily_revenue'] or 0),
-                        'rolling_1d_roas': round(float(row['daily_roas'] or 0), 2)
-                    }
-                    for row in rows
-                ]
+                return [str(row['child_id']) for row in rows]
                 
         except Exception as e:
-            logger.error(f"Error getting sparkline data: {e}")
+            logger.error(f"Error getting {child_type} children for {parent_type} {parent_id}: {e}")
             return []
-    
-    def _build_hierarchical_structure_optimized(self, entity_data: Dict, config: QueryConfig) -> List[Dict]:
-        """Build hierarchical structure (campaign -> adset -> ad) from flat entity data using optimized aggregation"""
+
+    def _group_and_aggregate_entities_optimized(self, rows: List[Dict], config: QueryConfig) -> List[Dict[str, Any]]:
+        """Extract and reuse the main entity aggregation logic"""
         import json
-        import sqlite3
         
-        def aggregate_entity_data(daily_rows):
-            """Aggregate daily rows into entity metrics using optimized JSON parsing"""
-            # Helper function to parse user lists (handles JSON arrays and comma-separated strings)
-            def parse_user_list(user_data):
-                if not user_data:
-                    return []
-                
-                # If it's a comma-separated string of JSON arrays, split and parse each
-                if ',' in user_data and user_data.strip().startswith('['):
-                    # Split by comma, but handle embedded commas in JSON
-                    parts = []
-                    current_part = ""
-                    bracket_count = 0
-                    in_quotes = False
-                    
-                    for char in user_data:
-                        if char == '"' and (not current_part or current_part[-1] != '\\'):
-                            in_quotes = not in_quotes
-                        elif char == '[' and not in_quotes:
-                            bracket_count += 1
-                        elif char == ']' and not in_quotes:
-                            bracket_count -= 1
-                        elif char == ',' and bracket_count == 0 and not in_quotes:
-                            if current_part.strip():
-                                parts.append(current_part.strip())
-                            current_part = ""
-                            continue
-                        
-                        current_part += char
-                    
-                    if current_part.strip():
-                        parts.append(current_part.strip())
-                    
-                    # Parse each JSON part
-                    all_users = []
-                    for part in parts:
-                        try:
-                            parsed = json.loads(part)
-                            if isinstance(parsed, list):
-                                all_users.extend(parsed)
-                            else:
-                                all_users.append(parsed)
-                        except:
-                            # Fallback to treating as string
-                            all_users.append(part.strip('"'))
-                    return all_users
-                
-                # Single JSON array
-                try:
-                    parsed = json.loads(user_data)
-                    return parsed if isinstance(parsed, list) else [parsed]
-                except:
-                    # Fallback to comma-separated string
-                    return [u.strip().strip('"') for u in user_data.split(',') if u.strip()]
+        # Group rows by entity_id + breakdown_key for proper user list aggregation
+        entity_data = {}
+        for row in rows:
+            entity_id = row['entity_id']
+            breakdown_key = row['breakdown_key'] if config.breakdown != 'all' and 'breakdown_key' in row.keys() else None
+            # Create composite key for breakdowns
+            composite_key = f"{entity_id}_{breakdown_key}" if breakdown_key else entity_id
             
-            # Aggregate unique users and financial metrics
-            all_trial_users = set()
-            all_converted_users = set()
-            all_purchase_users = set()
-            all_post_trial_users = set()
-            all_trial_refund_users = set()
-            all_purchase_refund_users = set()
-            total_meta_spend = 0
-            total_meta_trials = 0
-            total_meta_purchases = 0
-            total_estimated_revenue = 0
-            total_adjusted_revenue = 0
-            total_actual_revenue = 0
-            total_profit = 0
-            estimated_rate_sum = 0
-            valid_estimated_days = 0
-            trial_refund_est_sum = 0
-            purchase_refund_est_sum = 0
-            trial_refund_est_days = 0
-            purchase_refund_est_days = 0
-
-            for row in daily_rows:
-                row_keys = set(row.keys())
-                
-                # Parse user lists
-                if 'trial_users_list' in row_keys and row['trial_users_list']:
-                    trial_users = parse_user_list(row['trial_users_list'])
-                    all_trial_users.update(trial_users)
-                elif 'trial_user_ids' in row_keys and row['trial_user_ids']:
-                    trial_users = parse_user_list(row['trial_user_ids'])
-                    all_trial_users.update(trial_users)
-
-                if 'converted_user_ids' in row_keys and row['converted_user_ids']:
-                    converted_users = parse_user_list(row['converted_user_ids'])
-                    all_converted_users.update(converted_users)
-
-                if 'post_trial_user_ids' in row_keys and row['post_trial_user_ids']:
-                    post_trial_users = parse_user_list(row['post_trial_user_ids'])
-                    all_post_trial_users.update(post_trial_users)
-
-                if 'purchase_users_list' in row_keys and row['purchase_users_list']:
-                    purchase_users = parse_user_list(row['purchase_users_list'])
-                    all_purchase_users.update(purchase_users)
-                elif 'purchase_user_ids' in row_keys and row['purchase_user_ids']:
-                    purchase_users = parse_user_list(row['purchase_user_ids'])
-                    all_purchase_users.update(purchase_users)
-
-                if 'trial_refund_user_ids' in row_keys and row['trial_refund_user_ids']:
-                    refund_users = parse_user_list(row['trial_refund_user_ids'])
-                    all_trial_refund_users.update(refund_users)
-
-                if 'purchase_refund_user_ids' in row_keys and row['purchase_refund_user_ids']:
-                    purchase_refund_users = parse_user_list(row['purchase_refund_user_ids'])
-                    all_purchase_refund_users.update(purchase_refund_users)
-                
-                # Sum financial metrics
-                total_meta_spend += float(row['meta_spend'] or 0)
-                total_meta_trials += int(row['meta_trial_count'] or 0)
-                total_meta_purchases += int(row['meta_purchase_count'] or 0)
-                total_estimated_revenue += float(row['estimated_revenue_usd'] or 0)
-                total_adjusted_revenue += float(row['adjusted_estimated_revenue_usd'] or 0)
-                total_actual_revenue += float(row['actual_revenue_usd'] or 0)
-                total_profit += float(row['profit_usd'] or 0)
-                
-                # Average estimated rates
-                if 'trial_conversion_rate_estimated' in row_keys and row['trial_conversion_rate_estimated'] is not None:
-                    estimated_rate_sum += float(row['trial_conversion_rate_estimated'])
-                    valid_estimated_days += 1
-                if 'trial_refund_rate_estimated' in row_keys and row['trial_refund_rate_estimated'] is not None:
-                    trial_refund_est_sum += float(row['trial_refund_rate_estimated'])
-                    trial_refund_est_days += 1
-                if 'purchase_refund_rate_estimated' in row_keys and row['purchase_refund_rate_estimated'] is not None:
-                    purchase_refund_est_sum += float(row['purchase_refund_rate_estimated'])
-                    purchase_refund_est_days += 1
-            
-            # Calculate metrics
-            unique_trial_count = len(all_trial_users)
-            unique_converted_count = len(all_converted_users)
-            unique_purchase_count = len(all_purchase_users)
-            unique_post_trial_count = len(all_post_trial_users)
-            trial_conversion_actual = (unique_converted_count / unique_post_trial_count) if unique_post_trial_count > 0 else 0.0
-            trial_conversion_estimated = (estimated_rate_sum / valid_estimated_days) if valid_estimated_days > 0 else 0.0
-            trial_accuracy_ratio = (unique_trial_count / total_meta_trials) if total_meta_trials > 0 else 0.0
-            trial_refund_rate_actual = (len(all_trial_refund_users) / unique_converted_count) if unique_converted_count > 0 else 0.0
-            purchase_refund_rate_actual = (len(all_purchase_refund_users) / unique_purchase_count) if unique_purchase_count > 0 else 0.0
-            trial_refund_rate_estimated = (trial_refund_est_sum / trial_refund_est_days) if trial_refund_est_days > 0 else 0.0
-            purchase_refund_rate_estimated = (purchase_refund_est_sum / purchase_refund_est_days) if purchase_refund_est_days > 0 else 0.0
-            
-            return {
-                'mixpanel_trials_started': unique_trial_count,
-                'meta_trials_started': total_meta_trials,
-                'mixpanel_purchases': unique_purchase_count,
-                'meta_purchases': total_meta_purchases,
-                'trial_accuracy_ratio': trial_accuracy_ratio,
-                'purchase_accuracy_ratio': (unique_purchase_count / total_meta_purchases) if total_meta_purchases > 0 else 0.0,
-                'trial_conversion_rate': trial_conversion_actual,
-                'trial_conversion_rate_estimated': trial_conversion_estimated,
-                'avg_trial_refund_rate': trial_refund_rate_actual,
-                'purchase_refund_rate': purchase_refund_rate_actual,
-                'trial_refund_rate_estimated': trial_refund_rate_estimated,
-                'purchase_refund_rate_estimated': purchase_refund_rate_estimated,
-                'spend': total_meta_spend,
-                'estimated_revenue_usd': total_estimated_revenue,
-                'estimated_revenue_adjusted': total_adjusted_revenue,
-                'actual_revenue_usd': total_actual_revenue,
-                'profit': total_profit,
-                'estimated_roas': (total_adjusted_revenue / total_meta_spend) if total_meta_spend > 0 else 0.0,
-                'trial_users_count': unique_trial_count,
-                'post_trial_users_count': unique_post_trial_count,
-                'converted_users_count': unique_converted_count,
-                'purchase_users_count': unique_purchase_count,
-                'user_details': {
-                    'trial_users': list(all_trial_users),
-                    'converted_users': list(all_converted_users),
-                    'trial_refund_user_ids': list(all_trial_refund_users),
-                    'purchase_refund_user_ids': list(all_purchase_refund_users)
+            if composite_key not in entity_data:
+                entity_data[composite_key] = {
+                    'entity_id': entity_id,
+                    'name': row['name'] or f"Unknown {config.group_by}",
+                    'entity_type': row['entity_type'],
+                    'daily_rows': [],
+                    'breakdown_key': breakdown_key,
+                    'breakdown_type': config.breakdown if config.breakdown != 'all' else None
                 }
-            }
+            entity_data[composite_key]['daily_rows'].append(row)
         
-        # Build entity dictionaries with metrics
-        campaigns = {}
-        adsets = {}
-        ads = {}
+        # Structure the data for frontend - SIMPLIFIED FLAT FORMAT
+        entities = []
         
-        for composite_key, entity_info in entity_data.items():
-            entity_id = entity_info['entity_id']
-            daily_rows = entity_info['daily_rows']
-            entity_type = entity_info['entity_type']
-            name = entity_info['name']
+        # Process all entities with optimized aggregation
+        for composite_key, data in entity_data.items():
+            daily_rows = data['daily_rows']
+            entity_id = data['entity_id']
+            entity_type = data['entity_type']
+            name = data['name']
+            breakdown_key = data['breakdown_key']
             
-            # Get aggregated metrics
-            metrics = aggregate_entity_data(daily_rows)
+            # Aggregate daily metrics using optimized method
+            aggregated_metrics = self._aggregate_daily_metrics_optimized(daily_rows)
             
-            # Build base entity structure
+            # Build entity with complete metrics
             entity = {
-                'id': entity_id,
+                'id': f"{entity_type}_{entity_id}",
                 'entity_id': entity_id,
                 'entity_type': entity_type,
                 'name': name,
-                'children': [],
-                **metrics,
-                'sparkline_data': self._get_precomputed_sparkline_data(entity_id, config)
+                'children': self._get_entity_children_optimized(entity_type, entity_id, config),
+                
+                # Pre-computed metrics
+                **aggregated_metrics,
+                
+                # User data structure
+                'user_data': {
+                    'trial_user_ids': aggregated_metrics.get('trial_user_ids', []),
+                    'purchase_user_ids': aggregated_metrics.get('purchase_user_ids', []),
+                    'trial_users_count': aggregated_metrics.get('trial_users_count', 0),
+                    'purchase_users_count': aggregated_metrics.get('purchase_users_count', 0),
+                    'performance_impact_score': aggregated_metrics.get('performance_impact_score', 0.0)
+                },
+                
+                # Sparkline data
+                'sparkline_data': self._format_sparkline_data_optimized(entity_type, entity_id, config.start_date, config.end_date)
             }
             
-            if entity_type == 'campaign':
-                campaigns[entity_id] = entity
-            elif entity_type == 'adset':
-                adsets[entity_id] = entity
-            elif entity_type == 'ad':
-                ads[entity_id] = entity
+            # Add breakdown information if applicable
+            if breakdown_key:
+                entity['breakdown_key'] = breakdown_key
+                entity['breakdown_type'] = data['breakdown_type']
+                entity['id'] = f"{entity_type}_{entity_id}_{breakdown_key}"
+            
+            entities.append(entity)
         
-        # Build actual hierarchy using id_hierarchy_mapping
+        return entities
+
+    def _execute_optimized_query_for_entities(self, entity_ids: List[str], config: QueryConfig) -> Dict[str, Any]:
+        """Execute the main optimized query for specific entity IDs"""
         try:
-            from utils.database_utils import get_database_connection
-            with get_database_connection('mixpanel_data') as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            # Get daily metrics for these specific entities
+            daily_rows = self._get_precomputed_daily_metrics(entity_ids, config.group_by, config.start_date, config.end_date)
+            
+            if not daily_rows:
+                return {'success': True, 'data': [], 'method': 'optimized_precomputed_children'}
+            
+            # Use the same aggregation logic as main method
+            grouped_data = self._group_and_aggregate_entities_optimized(daily_rows, config)
+            
+            return {
+                'success': True,
+                'data': grouped_data,
+                'total_entities': len(grouped_data),
+                'method': 'optimized_precomputed_children'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing optimized query for children: {e}")
+            return {'success': False, 'data': [], 'error': str(e)}
+
+    def _get_entity_children_optimized(self, entity_type: str, entity_id: str, config: QueryConfig) -> List[Dict[str, Any]]:
+        """
+        Get children entities using the same optimized method recursively.
+        This ensures children have identical data structure and calculation logic.
+        """
+        try:
+            # Determine child entity type and get their IDs
+            if entity_type == 'campaign':
+                child_type = 'adset'
+                child_ids = self._get_child_entity_ids(entity_id, 'campaign', 'adset')
+            elif entity_type == 'adset':  
+                child_type = 'ad'
+                child_ids = self._get_child_entity_ids(entity_id, 'adset', 'ad')
+            else:
+                # Ads have no children
+                return []
+            
+            if not child_ids:
+                return []
                 
-                # Get hierarchy relationships
-                cursor.execute("""
-                    SELECT ad_id, adset_id, campaign_id 
-                    FROM id_hierarchy_mapping
-                """)
-                hierarchy_rows = cursor.fetchall()
-                
-                # Build ad → adset relationships
-                for row in hierarchy_rows:
-                    ad_id = row['ad_id']
-                    adset_id = row['adset_id'] 
-                    campaign_id = row['campaign_id']
-                    
-                    # Add ads to their parent adsets
-                    if ad_id in ads and adset_id in adsets:
-                        adsets[adset_id]['children'].append(ads[ad_id])
-                    
-                    # Add adsets to their parent campaigns
-                    if adset_id in adsets and campaign_id in campaigns:
-                        # Only add if not already added
-                        adset_already_added = any(child['entity_id'] == adset_id for child in campaigns[campaign_id]['children'])
-                        if not adset_already_added:
-                            campaigns[campaign_id]['children'].append(adsets[adset_id])
+            # Create new config for children with same parameters but different group_by
+            child_config = QueryConfig(
+                start_date=config.start_date,
+                end_date=config.end_date,
+                group_by=child_type,  # Key difference: group by child type
+                breakdown=config.breakdown,
+                hierarchy=config.hierarchy,
+                enable_breakdown_mapping=config.enable_breakdown_mapping
+            )
+            
+            # Use the SAME optimized method to get children data
+            # This ensures 100% identical logic and data structure
+            child_result = self._execute_optimized_query_for_entities(child_ids, child_config)
+            
+            return child_result.get('data', [])
                 
         except Exception as e:
-            logger.error(f"Error building hierarchy: {e}")
-        
-        # Return based on group_by level with proper hierarchy
-        if config.group_by == 'campaign':
-            return list(campaigns.values())
-        elif config.group_by == 'adset':
-            return list(adsets.values()) 
-        elif config.group_by == 'ad':
-            return list(ads.values())
-        else:
-            # Default: return campaigns with their full hierarchy
-            return list(campaigns.values())
-    
-    def _replace_hierarchy_data_with_optimized(self, hierarchical_data: List[Dict], entity_data: Dict):
-        """Replace data in hierarchical structure with optimized aggregated metrics"""
+            logger.error(f"Error getting children for {entity_type} {entity_id}: {e}")
+            return []
+
+
+
+    def _format_sparkline_data_optimized(self, entity_type: str, entity_id: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """
+        Format pre-computed sparkline data for frontend consumption within the optimized method.
+        Returns array of daily data points with rolling_1d_roas and other frontend-expected fields.
+        """
+        try:
+            # Get raw sparkline data from the pre-computed table
+            raw_data = self._get_precomputed_sparkline_data(entity_type, entity_id, start_date, end_date)
+            
+            # Format each day's data for frontend
+            formatted_data = []
+            for day_data in raw_data:
+                # Calculate ROAS from pre-computed values
+                spend = float(day_data.get('meta_spend', 0) or 0)
+                revenue = float(day_data.get('adjusted_estimated_revenue_usd', 0) or 0)
+                roas = (revenue / spend) if spend > 0 else 0.0
+                
+                # Format data point for frontend sparkline
+                formatted_point = {
+                    'date': day_data.get('date'),
+                    'rolling_1d_roas': round(roas, 2),
+                    'rolling_1d_spend': spend,
+                    'rolling_1d_revenue': revenue,
+                    'rolling_1d_conversions': int(day_data.get('purchase_users_count', 0) or 0),
+                    'rolling_1d_trials': int(day_data.get('trial_users_count', 0) or 0),
+                    'rolling_1d_meta_trials': int(day_data.get('meta_trial_count', 0) or 0),
+                    'rolling_window_days': 1
+                }
+                formatted_data.append(formatted_point)
+            
+            return formatted_data
+            
+        except Exception as e:
+            logger.error(f"Error formatting sparkline data for {entity_type} {entity_id}: {e}")
+            return []
+
+    def _aggregate_daily_metrics_optimized(self, daily_rows: List[Dict]) -> Dict[str, Any]:
+        """Aggregate daily metrics using optimized JSON parsing for user lists"""
         import json
         
         def parse_user_list(user_data):
@@ -4697,104 +4433,93 @@ class AnalyticsQueryService:
             except:
                 return [u.strip().strip('"') for u in user_data.split(',') if u.strip()]
         
-        def aggregate_entity_data(daily_rows):
-            """Aggregate daily rows into optimized metrics"""
-            all_trial_users = set()
-            all_converted_users = set()
-            all_purchase_users = set()
-            all_post_trial_users = set()
-            all_trial_refund_users = set()
-            all_purchase_refund_users = set()
-            total_meta_spend = 0
-            total_meta_trials = 0
-            total_meta_purchases = 0
-            total_estimated_revenue = 0
-            total_adjusted_revenue = 0
-            total_actual_revenue = 0
-            total_profit = 0
-            estimated_rate_sum = 0
-            valid_estimated_days = 0
+        # Aggregate unique users and financial metrics
+        all_trial_users = set()
+        all_converted_users = set()
+        all_purchase_users = set()
+        all_post_trial_users = set()
+        all_trial_refund_users = set()
+        all_purchase_refund_users = set()
+        total_meta_spend = 0
+        total_meta_trials = 0
+        total_meta_purchases = 0
+        total_estimated_revenue = 0
+        total_adjusted_revenue = 0
+        total_actual_revenue = 0
+        total_profit = 0
+        estimated_rate_sum = 0
+        valid_estimated_days = 0
 
-            for row in daily_rows:
-                # Parse user lists and aggregate unique users
-                if row.get('trial_users_list'):
-                    all_trial_users.update(parse_user_list(row['trial_users_list']))
-                if row.get('converted_user_ids'):
-                    all_converted_users.update(parse_user_list(row['converted_user_ids']))
-                if row.get('post_trial_user_ids'):
-                    all_post_trial_users.update(parse_user_list(row['post_trial_user_ids']))
-                if row.get('purchase_users_list'):
-                    all_purchase_users.update(parse_user_list(row['purchase_users_list']))
-                if row.get('trial_refund_user_ids'):
-                    all_trial_refund_users.update(parse_user_list(row['trial_refund_user_ids']))
-                if row.get('purchase_refund_user_ids'):
-                    all_purchase_refund_users.update(parse_user_list(row['purchase_refund_user_ids']))
+        for row in daily_rows:
+            # Parse user lists and aggregate unique users (sqlite3.Row access)
+            if 'trial_user_ids' in row.keys() and row['trial_user_ids']:
+                all_trial_users.update(parse_user_list(row['trial_user_ids']))
                 
-                # Sum financial metrics
-                total_meta_spend += float(row.get('meta_spend') or 0)
-                total_meta_trials += int(row.get('meta_trial_count') or 0)
-                total_meta_purchases += int(row.get('meta_purchase_count') or 0)
-                total_estimated_revenue += float(row.get('estimated_revenue_usd') or 0)
-                total_adjusted_revenue += float(row.get('adjusted_estimated_revenue_usd') or 0)
-                total_actual_revenue += float(row.get('actual_revenue_usd') or 0)
-                total_profit += float(row.get('profit_usd') or 0)
+            if 'converted_user_ids' in row.keys() and row['converted_user_ids']:
+                all_converted_users.update(parse_user_list(row['converted_user_ids']))
                 
-                if row.get('trial_conversion_rate_estimated') is not None:
-                    estimated_rate_sum += float(row['trial_conversion_rate_estimated'])
-                    valid_estimated_days += 1
+            if 'post_trial_user_ids' in row.keys() and row['post_trial_user_ids']:
+                all_post_trial_users.update(parse_user_list(row['post_trial_user_ids']))
+                
+            if 'purchase_user_ids' in row.keys() and row['purchase_user_ids']:
+                all_purchase_users.update(parse_user_list(row['purchase_user_ids']))
+                
+            if 'trial_refund_user_ids' in row.keys() and row['trial_refund_user_ids']:
+                all_trial_refund_users.update(parse_user_list(row['trial_refund_user_ids']))
+                
+            if 'purchase_refund_user_ids' in row.keys() and row['purchase_refund_user_ids']:
+                all_purchase_refund_users.update(parse_user_list(row['purchase_refund_user_ids']))
             
-            # Calculate final metrics
-            unique_trial_count = len(all_trial_users)
-            unique_converted_count = len(all_converted_users)
-            unique_purchase_count = len(all_purchase_users)
-            unique_post_trial_count = len(all_post_trial_users)
+            # Sum financial metrics
+            total_meta_spend += float(row['meta_spend'] or 0)
+            total_meta_trials += int(row['meta_trial_count'] or 0)
+            total_meta_purchases += int(row['meta_purchase_count'] or 0)
+            total_estimated_revenue += float(row['estimated_revenue_usd'] or 0)
+            total_adjusted_revenue += float(row['adjusted_estimated_revenue_usd'] or 0)
+            total_actual_revenue += float(row['actual_revenue_usd'] or 0)
+            total_profit += float(row['profit_usd'] or 0)
             
-            return {
-                'mixpanel_trials_started': unique_trial_count,
-                'meta_trials_started': total_meta_trials,
-                'mixpanel_purchases': unique_purchase_count,
-                'meta_purchases': total_meta_purchases,
-                'trial_accuracy_ratio': (unique_trial_count / total_meta_trials) if total_meta_trials > 0 else 0.0,
-                'purchase_accuracy_ratio': (unique_purchase_count / total_meta_purchases) if total_meta_purchases > 0 else 0.0,
-                'trial_conversion_rate': (unique_converted_count / unique_post_trial_count) if unique_post_trial_count > 0 else 0.0,
-                'trial_conversion_rate_estimated': (estimated_rate_sum / valid_estimated_days) if valid_estimated_days > 0 else 0.0,
-                'avg_trial_refund_rate': (len(all_trial_refund_users) / unique_converted_count) if unique_converted_count > 0 else 0.0,
-                'purchase_refund_rate': (len(all_purchase_refund_users) / unique_purchase_count) if unique_purchase_count > 0 else 0.0,
-                'spend': total_meta_spend,
-                'estimated_revenue_usd': total_estimated_revenue,
-                'estimated_revenue_adjusted': total_adjusted_revenue,
-                'actual_revenue_usd': total_actual_revenue,
-                'profit': total_profit,
-                'estimated_roas': (total_adjusted_revenue / total_meta_spend) if total_meta_spend > 0 else 0.0,
-                'trial_users_count': unique_trial_count,
-                'post_trial_users_count': unique_post_trial_count,
-                'converted_users_count': unique_converted_count,
-                'purchase_users_count': unique_purchase_count,
-                'user_details': {
-                    'trial_users': list(all_trial_users),
-                    'converted_users': list(all_converted_users),
-                    'trial_refund_user_ids': list(all_trial_refund_users),
-                    'purchase_refund_user_ids': list(all_purchase_refund_users)
-                }
+            if 'trial_conversion_rate_estimated' in row.keys() and row['trial_conversion_rate_estimated'] is not None:
+                estimated_rate_sum += float(row['trial_conversion_rate_estimated'])
+                valid_estimated_days += 1
+        
+        # Calculate final metrics
+        unique_trial_count = len(all_trial_users)
+        unique_converted_count = len(all_converted_users)
+        unique_purchase_count = len(all_purchase_users)
+        unique_post_trial_count = len(all_post_trial_users)
+        
+        return {
+            'mixpanel_trials_started': unique_trial_count,
+            'meta_trials_started': total_meta_trials,
+            'mixpanel_purchases': unique_purchase_count,
+            'meta_purchases': total_meta_purchases,
+            'trial_accuracy_ratio': (unique_trial_count / total_meta_trials) if total_meta_trials > 0 else 0.0,
+            'purchase_accuracy_ratio': (unique_purchase_count / total_meta_purchases) if total_meta_purchases > 0 else 0.0,
+            'trial_conversion_rate': (unique_converted_count / unique_post_trial_count) if unique_post_trial_count > 0 else 0.0,
+            'trial_conversion_rate_estimated': (estimated_rate_sum / valid_estimated_days) if valid_estimated_days > 0 else 0.0,
+            # ACTUAL rates: calculated from real user counts (actual performance)
+            'avg_trial_refund_rate': (len(all_trial_refund_users) / len(all_converted_users)) if len(all_converted_users) > 0 else 0.0,
+            'purchase_refund_rate': (len(all_purchase_refund_users) / len(all_purchase_users)) if len(all_purchase_users) > 0 else 0.0,
+            
+            # ESTIMATED rates: averaged from pre-computed predictions (user-level estimates)
+            'trial_refund_rate_estimated': sum(float(row['trial_refund_rate_estimated'] or 0) for row in daily_rows) / len(daily_rows) if daily_rows else 0.0,
+            'purchase_refund_rate_estimated': sum(float(row['purchase_refund_rate_estimated'] or 0) for row in daily_rows) / len(daily_rows) if daily_rows else 0.0,
+            'spend': total_meta_spend,
+            'estimated_revenue_usd': total_estimated_revenue,
+            'estimated_revenue_adjusted': total_adjusted_revenue,
+            'actual_revenue_usd': total_actual_revenue,
+            'profit': total_profit,
+            'estimated_roas': (total_adjusted_revenue / total_meta_spend) if total_meta_spend > 0 else 0.0,
+            'performance_impact_score': (total_adjusted_revenue / total_meta_spend) if total_meta_spend > 0 else 0.0,
+            'trial_users_count': unique_trial_count,
+            'post_trial_users_count': unique_post_trial_count,
+            'converted_users_count': unique_converted_count,
+            'purchase_users_count': unique_purchase_count,
+            'user_details': {
+                'trial_users': list(all_trial_users),
+                'converted_users': list(all_converted_users),
+                'trial_refund_user_ids': list(all_trial_refund_users),
+                'purchase_refund_user_ids': list(all_purchase_refund_users)
             }
-        
-        def replace_entity_data(entity):
-            """Replace data for a single entity and its children"""
-            entity_id = entity.get('entity_id') or entity.get('id')
-            
-            # Find matching optimized data
-            for composite_key, data in entity_data.items():
-                if data['entity_id'] == entity_id:
-                    # Replace with optimized aggregated data
-                    optimized_metrics = aggregate_entity_data(data['daily_rows'])
-                    entity.update(optimized_metrics)
-                    break
-            
-            # Recursively replace children
-            if 'children' in entity and entity['children']:
-                for child in entity['children']:
-                    replace_entity_data(child)
-        
-        # Replace data for all top-level entities
-        for entity in hierarchical_data:
-            replace_entity_data(entity)
+        }
