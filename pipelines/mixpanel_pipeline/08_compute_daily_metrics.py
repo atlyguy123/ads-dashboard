@@ -389,6 +389,7 @@ class DailyMetricsProcessor:
     def insert_breakdown_metrics(self, entity_type: str, date_obj: date, breakdown_type: str, meta_breakdown_data: Dict, mixpanel_breakdown_data: Dict):
         """
         Insert breakdown metrics for all entity-date-breakdown combinations according to specification
+        Only process entities that exist in the main daily_mixpanel_metrics table to avoid FK constraint failures
         """
         import json
         from datetime import datetime
@@ -399,8 +400,27 @@ class DailyMetricsProcessor:
         
         logger.info(f"🔍 Processing {breakdown_type} breakdown metrics for {entity_type} entities on {date_str}")
         
+        # Get entities that exist in main table for this date and entity type (to avoid FK constraint failures)
+        self.cursor.execute("""
+            SELECT DISTINCT entity_id 
+            FROM daily_mixpanel_metrics 
+            WHERE entity_type = ? AND date = ?
+        """, (entity_type, date_str))
+        valid_entities = set(row[0] for row in self.cursor.fetchall())
+        logger.info(f"Found {len(valid_entities)} {entity_type} entities in main table for {date_str}")
+        
         # Get all unique breakdown combinations from both Meta and Mixpanel data
         all_keys = set(meta_breakdown_data.keys()) | set(mixpanel_breakdown_data.keys())
+        
+        # Filter to only include entities that exist in the main table
+        filtered_keys = []
+        for key in all_keys:
+            breakdown_entity_type, entity_id, breakdown_date, breakdown_value = key
+            if breakdown_entity_type == entity_type and breakdown_date == date_str and entity_id in valid_entities:
+                filtered_keys.append(key)
+        
+        logger.info(f"Filtered to {len(filtered_keys)} valid breakdown combinations (from {len(all_keys)} total)")
+        all_keys = filtered_keys
         
         for key in all_keys:
             # Key format: (entity_type, entity_id, date_str, breakdown_value)
@@ -605,9 +625,13 @@ class DailyMetricsProcessor:
         logger.info("Computing daily metrics for all entity types...")
         
         # Clear existing metrics (fresh computation)
+        # Temporarily disable FK constraints during rebuild
+        self.cursor.execute("PRAGMA foreign_keys = OFF")
         self.cursor.execute("DELETE FROM daily_mixpanel_metrics")
         self.cursor.execute("DELETE FROM daily_mixpanel_metrics_breakdown")
         self.conn.commit()
+        # Re-enable FK constraints
+        self.cursor.execute("PRAGMA foreign_keys = ON")
         
         # Entity type configurations
         entity_configs = [
@@ -643,7 +667,7 @@ class DailyMetricsProcessor:
         breakdown_metrics = 0
         
         start_date, end_date = self.get_data_date_range()
-        breakdown_types = ['country', 'region']  # Specification: only country and region, no device
+        breakdown_types = ['country']  # Focus on country breakdown only
         
         from datetime import timedelta
         
@@ -957,20 +981,22 @@ class DailyMetricsProcessor:
         ]
         
         for entity_type, attribution_column in entity_configs:
-            # Query for trial events with breakdown
+            # Query for trial events with breakdown (JOIN with user table for country/region)
             trial_query = f"""
             SELECT 
-                {attribution_column} as entity_id,
-                DATE(event_time) as date,
-                {mixpanel_field} as breakdown_value,
-                COUNT(DISTINCT distinct_id) as trial_count,
-                GROUP_CONCAT(DISTINCT distinct_id) as trial_user_ids
-            FROM mixpanel_event
-            WHERE event_name = 'RC Trial started'
-              AND {attribution_column} IS NOT NULL
-              AND {mixpanel_field} IS NOT NULL
-              AND DATE(event_time) BETWEEN ? AND ?
-            GROUP BY {attribution_column}, DATE(event_time), {mixpanel_field}
+                u.{attribution_column} as entity_id,
+                DATE(e.event_time) as date,
+                u.{mixpanel_field} as breakdown_value,
+                COUNT(DISTINCT e.distinct_id) as trial_count,
+                GROUP_CONCAT(DISTINCT e.distinct_id) as trial_user_ids
+            FROM mixpanel_event e
+            JOIN mixpanel_user u ON e.distinct_id = u.distinct_id
+            WHERE e.event_name = 'RC Trial started'
+              AND u.{attribution_column} IS NOT NULL
+              AND u.{mixpanel_field} IS NOT NULL
+              AND u.has_abi_attribution = TRUE
+              AND DATE(e.event_time) BETWEEN ? AND ?
+            GROUP BY u.{attribution_column}, DATE(e.event_time), u.{mixpanel_field}
             """
             
             self.cursor.execute(trial_query, (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
@@ -985,29 +1011,32 @@ class DailyMetricsProcessor:
                 
                 if key not in breakdown_data:
                     breakdown_data[key] = {
-                        'mixpanel_trial_count': 0,
-                        'mixpanel_purchase_count': 0,
-                        'trial_user_ids': [],
-                        'purchase_user_ids': []
+                        'trial_users_count': 0,
+                        'purchase_users_count': 0,
+                        'trial_users_list': [],
+                        'purchase_users_list': [],
+                        'estimated_revenue_usd': 0.0
                     }
                 
-                breakdown_data[key]['mixpanel_trial_count'] = trial_count
-                breakdown_data[key]['trial_user_ids'] = trial_user_ids.split(',') if trial_user_ids else []
+                breakdown_data[key]['trial_users_count'] = trial_count
+                breakdown_data[key]['trial_users_list'] = trial_user_ids.split(',') if trial_user_ids else []
             
-            # Query for purchase events with breakdown
+            # Query for purchase events with breakdown (JOIN with user table for country/region)
             purchase_query = f"""
             SELECT 
-                {attribution_column} as entity_id,
-                DATE(event_time) as date,
-                {mixpanel_field} as breakdown_value,
-                COUNT(DISTINCT distinct_id) as purchase_count,
-                GROUP_CONCAT(DISTINCT distinct_id) as purchase_user_ids
-            FROM mixpanel_event
-            WHERE event_name IN ('RC Initial purchase', 'RC Trial converted')
-              AND {attribution_column} IS NOT NULL
-              AND {mixpanel_field} IS NOT NULL
-              AND DATE(event_time) BETWEEN ? AND ?
-            GROUP BY {attribution_column}, DATE(event_time), {mixpanel_field}
+                u.{attribution_column} as entity_id,
+                DATE(e.event_time) as date,
+                u.{mixpanel_field} as breakdown_value,
+                COUNT(DISTINCT e.distinct_id) as purchase_count,
+                GROUP_CONCAT(DISTINCT e.distinct_id) as purchase_user_ids
+            FROM mixpanel_event e
+            JOIN mixpanel_user u ON e.distinct_id = u.distinct_id
+            WHERE e.event_name IN ('RC Initial purchase', 'RC Trial converted')
+              AND u.{attribution_column} IS NOT NULL
+              AND u.{mixpanel_field} IS NOT NULL
+              AND u.has_abi_attribution = TRUE
+              AND DATE(e.event_time) BETWEEN ? AND ?
+            GROUP BY u.{attribution_column}, DATE(e.event_time), u.{mixpanel_field}
             """
             
             self.cursor.execute(purchase_query, (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
@@ -1022,14 +1051,22 @@ class DailyMetricsProcessor:
                 
                 if key not in breakdown_data:
                     breakdown_data[key] = {
-                        'mixpanel_trial_count': 0,
-                        'mixpanel_purchase_count': 0,
-                        'trial_user_ids': [],
-                        'purchase_user_ids': []
+                        'trial_users_count': 0,
+                        'purchase_users_count': 0,
+                        'trial_users_list': [],
+                        'purchase_users_list': [],
+                        'estimated_revenue_usd': 0.0
                     }
                 
-                breakdown_data[key]['mixpanel_purchase_count'] = purchase_count
-                breakdown_data[key]['purchase_user_ids'] = purchase_user_ids.split(',') if purchase_user_ids else []
+                breakdown_data[key]['purchase_users_count'] = purchase_count
+                breakdown_data[key]['purchase_users_list'] = purchase_user_ids.split(',') if purchase_user_ids else []
+        
+        # Calculate estimated revenue for each breakdown combination
+        for key, data in breakdown_data.items():
+            trial_users = data['trial_users_list']
+            if trial_users:
+                revenue = self.calculate_estimated_revenue(trial_users)
+                data['estimated_revenue_usd'] = revenue
         
         logger.info(f"Collected Mixpanel {breakdown_type} breakdown data for {len(breakdown_data)} entity-date-breakdown combinations")
         return breakdown_data
